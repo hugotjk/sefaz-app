@@ -1,0 +1,102 @@
+// Schema do banco (Postgres - Supabase)
+// Rode `npx prisma migrate dev` depois de configurar DATABASE_URL
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum CertificateStatus {
+  PENDING       // aguardando validação
+  ACTIVE        // certificado válido, em uso
+  PASSWORD_ERROR // senha informada não abriu o .pfx, precisa reenviar
+  EXPIRED       // certificado venceu
+}
+
+model Certificate {
+  id             String            @id @default(cuid())
+  cnpj           String            @unique
+  razaoSocial    String?
+  fileName       String
+  // Blob criptografado (AES-256-GCM) contendo JSON { pfxBase64, password }.
+  // A senha precisa ficar acessível ao sistema pois é usada a cada consulta horária (mTLS),
+  // por isso NUNCA fica em texto puro - só a chave mestra (ENCRYPTION_KEY, env var) consegue abrir.
+  encryptedBlob  String
+  iv             String
+  authTag        String
+  status         CertificateStatus @default(PENDING)
+  lastError      String?
+  // NSU: controle de paginação da distribuição de documentos da SEFAZ
+  ultNSU         String            @default("000000000000000")
+  maxNSU         String            @default("000000000000000")
+  // se true, ainda estamos na carga inicial (histórico completo)
+  backfillDone   Boolean           @default(false)
+  validUntil     DateTime?
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+
+  notes          Note[]
+}
+
+enum NoteStatus {
+  AUTORIZADA
+  CANCELADA
+  DENEGADA
+  DESCONHECIDA
+}
+
+model Note {
+  id            String       @id @default(cuid())
+  chaveAcesso   String       @unique // chave de 44 dígitos da NFe
+  cnpjDestino   String
+  certificateId String
+  certificate   Certificate  @relation(fields: [certificateId], references: [id])
+
+  numero        String?
+  serie         String?
+  emitenteCnpj  String?
+  emitenteNome  String?
+  valorTotal    Decimal?     @db.Decimal(14, 2)
+  dataEmissao   DateTime?
+  status        NoteStatus   @default(AUTORIZADA)
+
+  // XML completo da NFe (protocolo de autorização), como recebido da SEFAZ
+  xmlCompleto   String
+
+  nsu           String       // NSU em que este documento foi recebido
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  eventos       NoteEvent[]
+
+  @@index([cnpjDestino])
+  @@index([emitenteCnpj])
+}
+
+enum NoteEventType {
+  CARTA_CORRECAO
+  CANCELAMENTO
+  CIENCIA_OPERACAO
+  CONFIRMACAO_OPERACAO
+  DESCONHECIMENTO_OPERACAO
+  OPERACAO_NAO_REALIZADA
+  OUTRO
+}
+
+model NoteEvent {
+  id          String        @id @default(cuid())
+  noteId      String
+  note        Note          @relation(fields: [noteId], references: [id])
+  tipo        NoteEventType
+  descricao   String?
+  xmlEvento   String
+  nsu         String
+  dataEvento  DateTime?
+  createdAt   DateTime      @default(now())
+
+  @@index([noteId])
+}
