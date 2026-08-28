@@ -88,6 +88,7 @@ export default function CertificadosPage() {
 
   const comErro = resultados?.filter((r) => !r.ok) ?? [];
   const temAtivos = certificados.some((c) => c.status === "ACTIVE");
+  const vencidos = certificados.filter((c) => c.status === "EXPIRED");
 
   return (
     <div>
@@ -147,6 +148,36 @@ export default function CertificadosPage() {
           </p>
         )}
       </div>
+
+      {vencidos.length > 0 && (
+        <div className="card" style={{ marginBottom: 24, border: "1px solid var(--red)" }}>
+          <h2 style={{ marginTop: 0, color: "var(--red)" }}>⚠ Certificados vencidos ({vencidos.length})</h2>
+          <p style={{ color: "var(--text-dim)", fontSize: 13, marginBottom: 16 }}>
+            Esses CNPJs pararam de sincronizar. Envie o certificado renovado na área de upload acima —
+            ao subir um novo .pfx do mesmo CNPJ, ele substitui automaticamente este e volta a sincronizar sozinho.
+          </p>
+          <table className="notes-table">
+            <thead>
+              <tr>
+                <th>CNPJ</th>
+                <th>Razão social</th>
+                <th>Venceu em</th>
+                <th>Detalhe</th>
+              </tr>
+            </thead>
+            <tbody>
+              {vencidos.map((c) => (
+                <tr key={c.id}>
+                  <td>{c.cnpj}</td>
+                  <td>{c.razaoSocial || "-"}</td>
+                  <td>{c.validUntil ? new Date(c.validUntil).toLocaleDateString("pt-BR") : "-"}</td>
+                  <td style={{ fontSize: 12, color: "var(--text-dim)" }}>{c.lastError || "-"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
         <h2 style={{ margin: 0 }}>Certificados cadastrados</h2>

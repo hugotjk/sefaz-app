@@ -20,6 +20,15 @@ export const cronHorario = inngest.createFunction(
   { id: "cron-sincronizacao-horaria" },
   { cron: "0 * * * *" }, // todo início de hora
   async ({ step }) => {
+    // Marca como EXPIRED quem passou da validade — evita gastar uma chamada
+    // na SEFAZ pra um certificado que já sabemos que vai ser rejeitado.
+    await step.run("marcar-certificados-vencidos", async () => {
+      await prisma.certificate.updateMany({
+        where: { status: "ACTIVE", validUntil: { lt: new Date() } },
+        data: { status: "EXPIRED", lastError: "Certificado venceu (data de validade ultrapassada)." },
+      });
+    });
+
     const certificados = await step.run("buscar-certificados-ativos", async () => {
       return prisma.certificate.findMany({
         where: { status: "ACTIVE" },
@@ -66,6 +75,16 @@ export const sincronizarCertificado = inngest.createFunction(
       return { pulado: true, motivo: `status = ${certificado.status}` };
     }
 
+    if (certificado.validUntil && certificado.validUntil < new Date()) {
+      await step.run("marcar-vencido", async () => {
+        await prisma.certificate.update({
+          where: { id: certificateId },
+          data: { status: "EXPIRED", lastError: "Certificado venceu (data de validade ultrapassada)." },
+        });
+      });
+      return { pulado: true, motivo: "certificado vencido" };
+    }
+
     let ultNSU = certificado.ultNSU;
     let iteracoes = 0;
     let notasSalvas = 0;
@@ -92,6 +111,17 @@ export const sincronizarCertificado = inngest.createFunction(
             await prisma.certificate.update({
               where: { id: certificateId },
               data: { status: "PASSWORD_ERROR", lastError: "Falha ao abrir o certificado (TLS)." },
+            });
+          } else if (err?.message?.includes("HTTP 403")) {
+            // 403 nesse ponto normalmente significa que a SEFAZ rejeitou o
+            // certificado na conexão (vencido, não credenciado, ou revogado).
+            await prisma.certificate.update({
+              where: { id: certificateId },
+              data: {
+                status: "EXPIRED",
+                lastError:
+                  "SEFAZ recusou o certificado (HTTP 403). Verifique se está vencido, revogado, ou se o CNPJ está credenciado para distribuição de NFe.",
+              },
             });
           }
           throw err;
