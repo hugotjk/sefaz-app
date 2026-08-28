@@ -26,9 +26,15 @@ const ENDPOINT_PRODUCAO = "www1.nfe.fazenda.gov.br";
 const ENDPOINT_PATH = "/NFeDistribuicaoDFe/NFeDistribuicaoDFe.asmx";
 const ENDPOINT_HOMOLOGACAO_HOST = "hom1.nfe.fazenda.gov.br";
 
-// Código do "autor" do pedido = UF de vinculação do certificado do interessado.
-// 91 = Ambiente Nacional (usado por padrão para distribuição). Ajustável se necessário.
-const CUF_AUTOR = "91";
+// Código do "autor" do pedido = UF do interessado (quem está consultando).
+// IMPORTANTE: esse campo só aceita os códigos oficiais de UF do IBGE — "91" (o
+// valor que eu tinha colocado antes, achando que representava "Ambiente
+// Nacional") NÃO é um código válido e causa rejeição "Falha no esquema XML".
+// Configure a UF correta da sua empresa via variável de ambiente
+// SEFAZ_CUF_AUTOR no .env (padrão: 35 = São Paulo, se não configurado).
+// Tabela: AC12 AL27 AP16 AM13 BA29 CE23 DF53 ES32 GO52 MA21 MT51 MS50 MG31
+//         PA15 PB25 PR41 PE26 PI22 RJ33 RN24 RS43 RO11 RR14 SC42 SP35 SE28 TO17
+const CUF_AUTOR = process.env.SEFAZ_CUF_AUTOR || "35";
 
 // SOAPAction embutida no Content-Type — exigida por webservices ASMX/WCF
 // como este da SEFAZ. Sem isso, o servidor pode rejeitar a requisição antes
