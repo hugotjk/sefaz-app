@@ -69,6 +69,7 @@ model Note {
 
   numero        String?
   serie         String?
+  tipoOperacao  String?      // "Entrada" ou "Saída" (tpNF da nota)
   emitenteCnpj  String?
   emitenteNome  String?
   valorTotal    Decimal?     @db.Decimal(14, 2)
