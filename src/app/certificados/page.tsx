@@ -37,7 +37,7 @@ export default function CertificadosPage() {
   const [resultados, setResultados] = useState<Resultado[] | null>(null);
   const [certificados, setCertificados] = useState<CertificadoSalvo[]>([]);
   const [carregandoLista, setCarregandoLista] = useState(true);
-  const [sincronizando, setSincronizando] = useState<string | null>(null);
+  const [sincronizandoTudo, setSincronizandoTudo] = useState(false);
   const [avisoSync, setAvisoSync] = useState<string | null>(null);
 
   async function carregarCertificados() {
@@ -69,20 +69,25 @@ export default function CertificadosPage() {
     await carregarCertificados();
   }
 
-  async function sincronizarAgora(id: string) {
-    setSincronizando(id);
+  async function sincronizarTodos() {
+    setSincronizandoTudo(true);
     setAvisoSync(null);
-    const res = await fetch(`/api/certificados/${id}/sync`, { method: "POST" });
+    const res = await fetch("/api/certificados/sync-todas", { method: "POST" });
     const data = await res.json();
-    setSincronizando(null);
+    setSincronizandoTudo(false);
     if (!res.ok) {
       setAvisoSync(data.error ?? "Erro ao disparar sincronização.");
+    } else if (data.disparados === 0) {
+      setAvisoSync("Nenhum certificado ativo pra sincronizar.");
     } else {
-      setAvisoSync("Sincronização disparada — acompanhe o progresso no painel do Inngest.");
+      setAvisoSync(
+        `Sincronização disparada para ${data.disparados} certificado(s) — acompanhe o progresso no painel do Inngest.`
+      );
     }
   }
 
   const comErro = resultados?.filter((r) => !r.ok) ?? [];
+  const temAtivos = certificados.some((c) => c.status === "ACTIVE");
 
   return (
     <div>
@@ -143,9 +148,14 @@ export default function CertificadosPage() {
         )}
       </div>
 
-      <h2>Certificados cadastrados</h2>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+        <h2 style={{ margin: 0 }}>Certificados cadastrados</h2>
+        <button className="btn" disabled={sincronizandoTudo || !temAtivos} onClick={sincronizarTodos}>
+          {sincronizandoTudo ? "Disparando..." : "🔄 Sincronizar todos agora"}
+        </button>
+      </div>
       {avisoSync && (
-        <p style={{ color: "var(--text-dim)", fontSize: 13, marginTop: -8, marginBottom: 12 }}>{avisoSync}</p>
+        <p style={{ color: "var(--text-dim)", fontSize: 13, marginTop: -6, marginBottom: 12 }}>{avisoSync}</p>
       )}
       <div className="card">
         {carregandoLista ? (
@@ -161,7 +171,6 @@ export default function CertificadosPage() {
                 <th>Status</th>
                 <th>Notas salvas</th>
                 <th>Válido até</th>
-                <th>Ações</th>
               </tr>
             </thead>
             <tbody>
@@ -174,18 +183,6 @@ export default function CertificadosPage() {
                     <td><span className={s.classe}>{s.texto}</span></td>
                     <td>{c._count.notes}</td>
                     <td>{c.validUntil ? new Date(c.validUntil).toLocaleDateString("pt-BR") : "-"}</td>
-                    <td>
-                      {c.status === "ACTIVE" && (
-                        <button
-                          className="btn"
-                          style={{ padding: "6px 12px", fontSize: 12 }}
-                          disabled={sincronizando === c.id}
-                          onClick={() => sincronizarAgora(c.id)}
-                        >
-                          {sincronizando === c.id ? "Disparando..." : "Sincronizar agora"}
-                        </button>
-                      )}
-                    </td>
                   </tr>
                 );
               })}
