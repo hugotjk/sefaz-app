@@ -113,6 +113,7 @@ export const sincronizarCertificado = inngest.createFunction(
                 certificateId: certificado.id,
                 numero: item.numero,
                 serie: item.serie,
+                tipoOperacao: item.tipoOperacao,
                 emitenteCnpj: item.emitenteCnpj,
                 emitenteNome: item.emitenteNome,
                 valorTotal: item.valorTotal,

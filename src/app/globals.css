@@ -192,11 +192,36 @@ h2 { font-size: 16px; margin: 0 0 12px; }
   font-family: Arial, sans-serif;
 }
 .danfe table { width: 100%; border-collapse: collapse; }
-.danfe td, .danfe th { border: 1px solid #999; padding: 6px 8px; vertical-align: top; }
+.danfe td, .danfe th { border: 1px solid #999; padding: 4px 5px; vertical-align: top; font-size: 10px; text-align: center; }
+.danfe th { background: #f0f0f0; font-size: 9px; text-transform: uppercase; }
 .danfe .titulo { font-weight: 700; font-size: 14px; }
 .danfe .secao-titulo { font-size: 10px; text-transform: uppercase; color: #555; }
+
+.modal-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,.7);
+  display: flex; align-items: flex-start; justify-content: center;
+  padding: 30px 16px; z-index: 100; overflow-y: auto;
+}
+.modal-content {
+  background: var(--panel); border-radius: 10px; max-width: 1000px; width: 100%;
+  padding: 20px; position: relative;
+}
+.modal-close {
+  position: absolute; top: 14px; right: 14px; background: var(--panel-2);
+  border: 1px solid var(--border); color: var(--text); border-radius: 6px;
+  width: 32px; height: 32px; cursor: pointer; font-size: 16px;
+}
 
 @media print {
   .app-header, .no-print { display: none !important; }
   .app-main { padding: 0; max-width: none; }
+  .sidebar { display: none !important; }
+  .modal-overlay {
+    position: static !important;
+    background: none !important;
+    padding: 0 !important;
+    overflow: visible !important;
+    display: block !important;
+  }
+  .modal-content { max-width: none !important; box-shadow: none !important; }
 }

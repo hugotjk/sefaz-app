@@ -25,6 +25,7 @@ export interface ResumoNota {
   chaveAcesso: string;
   numero: string;
   serie: string;
+  tipoOperacao: string;
   emitenteCnpj: string;
   emitenteNome: string;
   valorTotal: string;
@@ -50,11 +51,13 @@ export function parseDocumento(doc: DocumentoDistribuicao): ResumoNota | ResumoE
     // cSitNFe: 1=Autorizada, 2=Cancelada, 3=Denegada
     const situacao = String(r.cSitNFe);
     const status = situacao === "2" ? "CANCELADA" : situacao === "3" ? "DENEGADA" : "AUTORIZADA";
+    const tpNF = String(r.tpNF ?? "");
     return {
       tipo: "nota",
       chaveAcesso: String(r.chNFe),
       numero: String(r.nNF ?? ""),
       serie: String(r.serie ?? ""),
+      tipoOperacao: tpNF === "0" ? "Entrada" : tpNF === "1" ? "Saída" : "",
       emitenteCnpj: String(r.CNPJ ?? r.CPF ?? ""),
       emitenteNome: String(r.xNome ?? ""),
       valorTotal: String(r.vNF ?? "0"),

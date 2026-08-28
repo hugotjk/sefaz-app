@@ -6,87 +6,229 @@ const parser = new XMLParser({
   parseTagValue: false, // evita corromper a chave de acesso (44 dígitos)
 });
 
+function arr<T>(v: T | T[] | undefined): T[] {
+  if (!v) return [];
+  return Array.isArray(v) ? v : [v];
+}
+
+export interface ItemNFe {
+  codigo: string;
+  descricao: string;
+  ncm: string;
+  cfop: string;
+  cst: string;
+  unidade: string;
+  quantidade: string;
+  valorUnitario: string;
+  valorTotal: string;
+  valorDesconto: string;
+  baseCalcIcms: string;
+  valorIcms: string;
+  valorIpi: string;
+  aliqIcms: string;
+  aliqIpi: string;
+}
+
+export interface DuplicataNFe {
+  numero: string;
+  vencimento: string;
+  valor: string;
+}
+
 export interface NFeParaExibir {
   chaveAcesso: string;
   numero: string;
   serie: string;
   natOp: string;
+  tipoOperacao: string; // "0 - Entrada" | "1 - Saída"
   dataEmissao: string;
   protocolo: string;
   dataAutorizacao: string;
-  emitente: { nome: string; cnpj: string; endereco: string };
-  destinatario: { nome: string; cnpjCpf: string; endereco: string };
-  itens: Array<{
-    codigo: string;
-    descricao: string;
-    ncm: string;
-    cfop: string;
-    unidade: string;
-    quantidade: string;
-    valorUnitario: string;
-    valorTotal: string;
-  }>;
+
+  emitente: {
+    nome: string;
+    cnpj: string;
+    ie: string;
+    endereco: string;
+    telefone: string;
+  };
+  destinatario: {
+    nome: string;
+    cnpjCpf: string;
+    ie: string;
+    endereco: string;
+    bairro: string;
+    cep: string;
+    municipio: string;
+    uf: string;
+    telefone: string;
+  };
+
+  transportador: {
+    nome: string;
+    cnpj: string;
+    enderco: string;
+    municipio: string;
+    uf: string;
+    ie: string;
+    modFrete: string;
+    volumes: string;
+    especie: string;
+    marca: string;
+    pesoBruto: string;
+    pesoLiquido: string;
+  };
+
+  duplicatas: DuplicataNFe[];
+
+  itens: ItemNFe[];
+
   totais: {
+    baseCalcIcms: string;
+    valorIcms: string;
+    baseCalcIcmsSt: string;
+    valorIcmsSt: string;
+    valorImportacao: string;
+    valorIpi: string;
+    valorPis: string;
+    valorCofins: string;
     valorProdutos: string;
     valorFrete: string;
+    valorSeguro: string;
     valorDesconto: string;
+    outrasDespesas: string;
     valorTotalNota: string;
   };
+
+  informacoesComplementares: string;
 }
 
 function enderecoTexto(end: any): string {
   if (!end) return "";
-  const partes = [end.xLgr, end.nro, end.xBairro, end.xMun, end.UF, end.CEP].filter(Boolean);
+  const partes = [end.xLgr, end.nro, end.xCpl].filter(Boolean);
   return partes.join(", ");
+}
+
+function n(v: any): string {
+  return v === undefined || v === null || v === "" ? "0" : String(v);
 }
 
 export function parseNFeXml(xml: string): NFeParaExibir {
   const parsed = parser.parse(xml);
-  const nfeProc = parsed.nfeProc ?? parsed; // pode vir com ou sem envelope nfeProc
+  const nfeProc = parsed.nfeProc ?? parsed;
   const infNFe = nfeProc.NFe?.infNFe ?? nfeProc.infNFe;
   const protNFe = nfeProc.protNFe?.infProt;
 
-  const ide = infNFe.ide;
-  const emit = infNFe.emit;
-  const dest = infNFe.dest;
-  const total = infNFe.total?.ICMSTot;
+  const ide = infNFe.ide ?? {};
+  const emit = infNFe.emit ?? {};
+  const dest = infNFe.dest ?? {};
+  const transp = infNFe.transp ?? {};
+  const transporta = transp.transporta ?? {};
+  const vol = arr(transp.vol)[0] ?? {};
+  const cobr = infNFe.cobr ?? {};
+  const total = infNFe.total?.ICMSTot ?? {};
+  const infAdic = infNFe.infAdic ?? {};
 
-  const detRaw = infNFe.det;
-  const detList = Array.isArray(detRaw) ? detRaw : [detRaw];
+  const detList = arr(infNFe.det);
+
+  const itens: ItemNFe[] = detList.map((det: any) => {
+    const prod = det.prod ?? {};
+    const icms = det.imposto?.ICMS ?? {};
+    // O grupo ICMS vem com um filho variável (ICMS00, ICMS20, ICMS60, ICMSSN102 etc)
+    const icmsGrupo: any = Object.values(icms)[0] ?? {};
+    const ipiGrupo: any = det.imposto?.IPI?.IPITrib ?? {};
+
+    return {
+      codigo: n(prod.cProd),
+      descricao: n(prod.xProd),
+      ncm: n(prod.NCM),
+      cfop: n(prod.CFOP),
+      cst: n(icmsGrupo.CST ?? icmsGrupo.CSOSN),
+      unidade: n(prod.uCom),
+      quantidade: n(prod.qCom),
+      valorUnitario: n(prod.vUnCom),
+      valorTotal: n(prod.vProd),
+      valorDesconto: n(prod.vDesc),
+      baseCalcIcms: n(icmsGrupo.vBC),
+      valorIcms: n(icmsGrupo.vICMS),
+      valorIpi: n(ipiGrupo.vIPI),
+      aliqIcms: n(icmsGrupo.pICMS),
+      aliqIpi: n(ipiGrupo.pIPI),
+    };
+  });
+
+  const duplicatas: DuplicataNFe[] = arr(cobr.dup).map((d: any) => ({
+    numero: n(d.nDup),
+    vencimento: n(d.dVenc),
+    valor: n(d.vDup),
+  }));
+
+  const tpNF = String(ide.tpNF ?? "");
 
   return {
-    chaveAcesso: infNFe["@_Id"]?.replace("NFe", "") ?? "",
-    numero: String(ide?.nNF ?? ""),
-    serie: String(ide?.serie ?? ""),
-    natOp: String(ide?.natOp ?? ""),
-    dataEmissao: String(ide?.dhEmi ?? ""),
-    protocolo: String(protNFe?.nProt ?? ""),
-    dataAutorizacao: String(protNFe?.dhRecbto ?? ""),
+    chaveAcesso: (infNFe["@_Id"] ?? "").replace("NFe", ""),
+    numero: n(ide.nNF),
+    serie: n(ide.serie),
+    natOp: n(ide.natOp),
+    tipoOperacao: tpNF === "0" ? "0 - Entrada" : tpNF === "1" ? "1 - Saída" : "",
+    dataEmissao: n(ide.dhEmi),
+    protocolo: n(protNFe?.nProt),
+    dataAutorizacao: n(protNFe?.dhRecbto),
+
     emitente: {
-      nome: String(emit?.xNome ?? ""),
-      cnpj: String(emit?.CNPJ ?? ""),
-      endereco: enderecoTexto(emit?.enderEmit),
+      nome: n(emit.xNome),
+      cnpj: n(emit.CNPJ),
+      ie: n(emit.IE),
+      endereco: enderecoTexto(emit.enderEmit),
+      telefone: n(emit.enderEmit?.fone),
     },
     destinatario: {
-      nome: String(dest?.xNome ?? ""),
-      cnpjCpf: String(dest?.CNPJ ?? dest?.CPF ?? ""),
-      endereco: enderecoTexto(dest?.enderDest),
+      nome: n(dest.xNome),
+      cnpjCpf: n(dest.CNPJ ?? dest.CPF),
+      ie: n(dest.IE),
+      endereco: enderecoTexto(dest.enderDest),
+      bairro: n(dest.enderDest?.xBairro),
+      cep: n(dest.enderDest?.CEP),
+      municipio: n(dest.enderDest?.xMun),
+      uf: n(dest.enderDest?.UF),
+      telefone: n(dest.enderDest?.fone),
     },
-    itens: detList.filter(Boolean).map((det: any) => ({
-      codigo: String(det.prod?.cProd ?? ""),
-      descricao: String(det.prod?.xProd ?? ""),
-      ncm: String(det.prod?.NCM ?? ""),
-      cfop: String(det.prod?.CFOP ?? ""),
-      unidade: String(det.prod?.uCom ?? ""),
-      quantidade: String(det.prod?.qCom ?? ""),
-      valorUnitario: String(det.prod?.vUnCom ?? ""),
-      valorTotal: String(det.prod?.vProd ?? ""),
-    })),
+
+    transportador: {
+      nome: n(transporta.xNome),
+      cnpj: n(transporta.CNPJ),
+      enderco: n(transporta.xEnder),
+      municipio: n(transporta.xMun),
+      uf: n(transporta.UF),
+      ie: n(transporta.IE),
+      modFrete: n(transp.modFrete),
+      volumes: n(vol.qVol),
+      especie: n(vol.esp),
+      marca: n(vol.marca),
+      pesoBruto: n(vol.pesoB),
+      pesoLiquido: n(vol.pesoL),
+    },
+
+    duplicatas,
+    itens,
+
     totais: {
-      valorProdutos: String(total?.vProd ?? "0"),
-      valorFrete: String(total?.vFrete ?? "0"),
-      valorDesconto: String(total?.vDesc ?? "0"),
-      valorTotalNota: String(total?.vNF ?? "0"),
+      baseCalcIcms: n(total.vBC),
+      valorIcms: n(total.vICMS),
+      baseCalcIcmsSt: n(total.vBCST),
+      valorIcmsSt: n(total.vST),
+      valorImportacao: n(total.vII),
+      valorIpi: n(total.vIPI),
+      valorPis: n(total.vPIS),
+      valorCofins: n(total.vCOFINS),
+      valorProdutos: n(total.vProd),
+      valorFrete: n(total.vFrete),
+      valorSeguro: n(total.vSeg),
+      valorDesconto: n(total.vDesc),
+      outrasDespesas: n(total.vOutro),
+      valorTotalNota: n(total.vNF),
     },
+
+    informacoesComplementares: n(infAdic.infCpl),
   };
 }

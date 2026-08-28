@@ -37,6 +37,8 @@ export default function CertificadosPage() {
   const [resultados, setResultados] = useState<Resultado[] | null>(null);
   const [certificados, setCertificados] = useState<CertificadoSalvo[]>([]);
   const [carregandoLista, setCarregandoLista] = useState(true);
+  const [sincronizando, setSincronizando] = useState<string | null>(null);
+  const [avisoSync, setAvisoSync] = useState<string | null>(null);
 
   async function carregarCertificados() {
     setCarregandoLista(true);
@@ -65,6 +67,19 @@ export default function CertificadosPage() {
     setEnviando(false);
     setArquivos([]);
     await carregarCertificados();
+  }
+
+  async function sincronizarAgora(id: string) {
+    setSincronizando(id);
+    setAvisoSync(null);
+    const res = await fetch(`/api/certificados/${id}/sync`, { method: "POST" });
+    const data = await res.json();
+    setSincronizando(null);
+    if (!res.ok) {
+      setAvisoSync(data.error ?? "Erro ao disparar sincronização.");
+    } else {
+      setAvisoSync("Sincronização disparada — acompanhe o progresso no painel do Inngest.");
+    }
   }
 
   const comErro = resultados?.filter((r) => !r.ok) ?? [];
@@ -129,6 +144,9 @@ export default function CertificadosPage() {
       </div>
 
       <h2>Certificados cadastrados</h2>
+      {avisoSync && (
+        <p style={{ color: "var(--text-dim)", fontSize: 13, marginTop: -8, marginBottom: 12 }}>{avisoSync}</p>
+      )}
       <div className="card">
         {carregandoLista ? (
           <p style={{ color: "var(--text-dim)" }}>Carregando...</p>
@@ -143,6 +161,7 @@ export default function CertificadosPage() {
                 <th>Status</th>
                 <th>Notas salvas</th>
                 <th>Válido até</th>
+                <th>Ações</th>
               </tr>
             </thead>
             <tbody>
@@ -155,6 +174,18 @@ export default function CertificadosPage() {
                     <td><span className={s.classe}>{s.texto}</span></td>
                     <td>{c._count.notes}</td>
                     <td>{c.validUntil ? new Date(c.validUntil).toLocaleDateString("pt-BR") : "-"}</td>
+                    <td>
+                      {c.status === "ACTIVE" && (
+                        <button
+                          className="btn"
+                          style={{ padding: "6px 12px", fontSize: 12 }}
+                          disabled={sincronizando === c.id}
+                          onClick={() => sincronizarAgora(c.id)}
+                        >
+                          {sincronizando === c.id ? "Disparando..." : "Sincronizar agora"}
+                        </button>
+                      )}
+                    </td>
                   </tr>
                 );
               })}
