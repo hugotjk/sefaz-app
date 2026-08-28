@@ -1,6 +1,10 @@
 import { XMLParser } from "fast-xml-parser";
 
-const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: "@_" });
+const parser = new XMLParser({
+  ignoreAttributes: false,
+  attributeNamePrefix: "@_",
+  parseTagValue: false, // evita corromper a chave de acesso (44 dígitos)
+});
 
 export interface NFeParaExibir {
   chaveAcesso: string;

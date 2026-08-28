@@ -1,7 +1,14 @@
 import { XMLParser } from "fast-xml-parser";
 import type { DocumentoDistribuicao } from "./sefaz";
 
-const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: "@_" });
+const parser = new XMLParser({
+  ignoreAttributes: false,
+  attributeNamePrefix: "@_",
+  // CRÍTICO: sem isso, o parser converte a chave de acesso (44 dígitos) em
+  // número JS, que perde precisão e vira notação científica — corrompendo
+  // a chave. Mantemos tudo como string e convertemos manualmente onde precisa.
+  parseTagValue: false,
+});
 
 // Tabela oficial de tpEvento -> tipo (as mais comuns para o caso de uso)
 const TIPO_EVENTO_MAP: Record<string, string> = {

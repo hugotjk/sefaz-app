@@ -272,7 +272,7 @@ export async function consultarPorChave(params: {
   pfxBuffer: Buffer;
   senha: string;
   ambiente?: "producao" | "homologacao";
-}): Promise<{ xmlCompleto: string } | null> {
+}): Promise<{ xmlCompleto: string } | { erro: string; statusCode: string }> {
   const { chaveAcesso, cnpj, pfxBuffer, senha, ambiente = "producao" } = params;
 
   const host = ambiente === "producao" ? ENDPOINT_PRODUCAO : ENDPOINT_HOMOLOGACAO_HOST;
@@ -282,8 +282,13 @@ export async function consultarPorChave(params: {
   checarStatusHttp(resultado);
 
   const retDistDFeInt = extrairRetDistDFeInt(resultado.body);
+  const cStat = String(retDistDFeInt?.cStat ?? "");
+  const motivo = String(retDistDFeInt?.xMotivo ?? "");
+
   const doc = retDistDFeInt?.loteDistDFeInt?.docZip;
-  if (!doc) return null;
+  if (!doc) {
+    return { erro: motivo || "SEFAZ não retornou o documento.", statusCode: cStat };
+  }
 
   const base64Content = typeof doc === "string" ? doc : doc["#text"];
   const xmlCompleto = zlib.gunzipSync(Buffer.from(base64Content, "base64")).toString("utf8");

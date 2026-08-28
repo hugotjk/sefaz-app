@@ -10,6 +10,17 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// Como a API do PDV não expõe "Gestor" (Contato) nem "Tipo Loja" no cadastro
+// de lojas, guardamos esse mapeamento aqui mesmo — você atribui uma vez por
+// loja (lojaId vem da API do PDV) e o relatório usa isso pra agrupar.
+model LojaConfig {
+  lojaId    Int      @id // mesmo Id retornado por GET /api/public/lojas
+  nome      String? // NomeFantasia, só pra facilitar exibição na tela de config
+  gestor    String?
+  tipoLoja  String?
+  updatedAt DateTime @updatedAt
+}
+
 enum CertificateStatus {
   PENDING       // aguardando validação
   ACTIVE        // certificado válido, em uso

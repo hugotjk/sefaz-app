@@ -22,6 +22,61 @@ body {
 
 .app-shell { min-height: 100vh; display: flex; flex-direction: column; }
 
+.app-shell-sidebar { min-height: 100vh; display: flex; }
+
+.sidebar {
+  width: 220px;
+  flex-shrink: 0;
+  background: var(--panel);
+  border-right: 1px solid var(--border);
+  padding: 20px 0;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+}
+
+.sidebar-logo { font-weight: 700; font-size: 16px; padding: 0 20px 20px; }
+
+.sidebar-nav { display: flex; flex-direction: column; }
+
+.sidebar-link {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 20px;
+  color: var(--text-dim);
+  text-decoration: none;
+  font-size: 14px;
+  border-left: 3px solid transparent;
+}
+.sidebar-link:hover { color: var(--text); background: var(--panel-2); }
+.sidebar-icon { font-size: 16px; }
+
+.app-content { flex: 1; min-width: 0; }
+
+.report-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 16px; }
+.report-card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 20px;
+  text-decoration: none;
+  color: var(--text);
+  display: block;
+}
+.report-card:hover { border-color: var(--accent); }
+.report-card h3 { margin: 0 0 8px; font-size: 15px; }
+.report-card p { margin: 0; font-size: 13px; color: var(--text-dim); }
+.report-card .tag {
+  display: inline-block;
+  margin-top: 10px;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(229,185,61,.15);
+  color: var(--yellow);
+}
+
 .app-header {
   display: flex;
   align-items: center;
