@@ -339,7 +339,7 @@ interface CursorProdutos {
  */
 export const syncProdutos = inngest.createFunction(
   { id: "pdv-sync-produtos", concurrency: { limit: 1 }, retries: 3 },
-  { cron: "30 4 * * *" },
+  { cron: "30 */2 * * *" },
   async ({ step }) => {
     const redes = await step.run("listar-redes-ativas", async () => {
       const todas = await listarRedes();
