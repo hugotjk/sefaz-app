@@ -36,6 +36,110 @@ model GrupoLoja {
   nome   String
 }
 
+// Dados de filial (Empresa/Grupo/Supervisor) sincronizados do PDV — evita a
+// rota /api/lojas fazer uma chamada obterFilial() por loja (~860) ao vivo.
+// Populado por syncFiliais (cursor em SyncState "filiais:cursor").
+model FilialSync {
+  lojaId     Int      @id
+  nome       String?
+  empresaId  Int?
+  grupoId    Int?
+  supervisor Int?
+  updatedAt  DateTime @updatedAt
+}
+
+// ---------------------------------------------------------------------------
+// Sincronização do catálogo / vendas / estoque da API do PDV (Fase 1 do
+// relatório de Movimentação Resumida). O relatório consulta SÓ estas tabelas,
+// nunca a API do PDV ao vivo (catálogo com ~130k produtos, estoque gigante).
+// ---------------------------------------------------------------------------
+
+model Produto {
+  id                   String   @id // Id do produto na API do PDV
+  redeId               Int
+  nome                 String?
+  referenciaFornecedor String?
+  fornecedorId         String?
+  fornecedorNome       String?
+  modeloId             String?
+  modeloNome           String?
+  colecaoId            Int?
+  colecaoNome          String?
+  grupoId              Int?
+  grupoNome            String?
+  compradorId          String?
+  compradorNome        String?
+  precoVarejoAtual     Decimal? @db.Decimal(14, 2)
+  updatedAt            DateTime @updatedAt
+  variacoes            VariacaoProduto[]
+
+  @@index([redeId])
+}
+
+model VariacaoProduto {
+  id        String   @id // Id da variação na API do PDV
+  produtoId String
+  produto   Produto  @relation(fields: [produtoId], references: [id])
+  redeId    Int
+  updatedAt DateTime @updatedAt
+
+  @@index([produtoId])
+}
+
+// Detalhe de vendas — SÓ os últimos ~12 meses. `consolidarVendasAntigas`
+// varre pra VendaResumoMensal e apaga daqui o que passa de 12 meses.
+model VendaItemSync {
+  id         String   @id // ${VendaId}-${SequencialItem} (determinístico, idempotente)
+  variacaoId String
+  lojaId     Int
+  dataHora   DateTime
+  quantidade Decimal  @db.Decimal(14, 3)
+  valor      Decimal  @db.Decimal(14, 2) // Preco * Quantidade (líquido, já com desconto se fizer sentido)
+  createdAt  DateTime @default(now())
+
+  @@index([variacaoId])
+  @@index([lojaId])
+  @@index([dataHora])
+}
+
+// Vendas com mais de 12 meses, agregadas por mês (variacao x loja x anoMes).
+model VendaResumoMensal {
+  variacaoId      String
+  lojaId          Int
+  anoMes          String // formato "2025-03"
+  quantidadeTotal Decimal  @db.Decimal(14, 3)
+  valorTotal      Decimal  @db.Decimal(14, 2)
+  updatedAt       DateTime @updatedAt
+
+  @@id([variacaoId, lojaId, anoMes])
+  @@index([anoMes])
+}
+
+model EstoqueVariacaoSync {
+  variacaoId String
+  lojaId     Int
+  quantidade Decimal  @db.Decimal(14, 3)
+  updatedAt  DateTime @updatedAt
+
+  @@id([variacaoId, lojaId])
+  @@index([lojaId])
+}
+
+// Preço de varejo (tabela "VAREJO") por variação. Atualizado por syncPrecos.
+model PrecoVariacao {
+  variacaoId String   @id
+  preco      Decimal  @db.Decimal(14, 2)
+  updatedAt  DateTime @updatedAt
+}
+
+// Controle de progresso da sincronização (paginação/incremental), parecido
+// com o ultNSU do Certificate, mas genérico pra qualquer fonte de sync.
+model SyncState {
+  chave     String   @id // ex: "produtos:redeId:1", "vendas", "estoque"
+  valor     String   // último cursor/data/página processado
+  updatedAt DateTime @updatedAt
+}
+
 enum CertificateStatus {
   PENDING       // aguardando validação
   ACTIVE        // certificado válido, em uso
