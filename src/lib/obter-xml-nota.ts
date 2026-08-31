@@ -27,10 +27,16 @@ export async function obterXmlNota(chave: string): Promise<ResultadoXmlNota> {
   if (!nota) return { erro: "Nota não encontrada.", status: 404 };
 
   // Cache: XML completo já salvo -> usa o do banco, sem nova consulta à SEFAZ.
-  // Se o que está em cache é só o RESUMO (resNFe) — salvo por engano antes de a
-  // SEFAZ liberar o documento completo — ignora o cache e tenta de novo agora.
   if (nota.xmlCompleto && !ehResumoNFe(nota.xmlCompleto)) {
     return { xml: nota.xmlCompleto };
+  }
+
+  // O que está em cache é só o RESUMO (resNFe), salvo por engano antes de a
+  // SEFAZ liberar o documento completo. Zera o campo pra o restante do sistema
+  // (lista de notas, job completarXmlNotas) enxergar a nota como pendente, e
+  // segue tentando buscar o completo agora.
+  if (nota.xmlCompleto) {
+    await prisma.note.update({ where: { id: nota.id }, data: { xmlCompleto: "" } });
   }
 
   try {

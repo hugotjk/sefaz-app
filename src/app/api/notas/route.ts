@@ -1,8 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+// Um procNFe (documento completo) tem vários KB; um resNFe (resumo) tem ~0,5 KB.
+// Usamos o tamanho pra decidir "tem XML completo" sem trazer a string na query.
+const TAMANHO_MINIMO_XML_COMPLETO = 2000;
 
 const POR_PAGINA_OPCOES = [25, 50, 100];
 
@@ -36,17 +41,21 @@ export async function GET(req: NextRequest) {
     }),
   ]);
 
-  // Quais das notas desta página já têm o XML completo (filtro roda no banco;
-  // só o `chaveAcesso` volta, nada do XML).
+  // Quais das notas desta página já têm o XML COMPLETO de verdade (não só o
+  // resumo). Filtro por tamanho roda no banco; só o `chaveAcesso` volta, nada
+  // do XML em si.
   const chaves = notas.map((n) => n.chaveAcesso);
-  const comXml = new Set(
-    (
-      await prisma.note.findMany({
-        where: { chaveAcesso: { in: chaves }, NOT: { xmlCompleto: "" } },
-        select: { chaveAcesso: true },
-      })
-    ).map((n) => n.chaveAcesso)
-  );
+  const comXml = chaves.length
+    ? new Set(
+        (
+          await prisma.$queryRaw<{ chaveAcesso: string }[]>(Prisma.sql`
+            SELECT "chaveAcesso" FROM "Note"
+            WHERE "chaveAcesso" IN (${Prisma.join(chaves)})
+              AND length("xmlCompleto") > ${TAMANHO_MINIMO_XML_COMPLETO}
+          `)
+        ).map((n) => n.chaveAcesso)
+      )
+    : new Set<string>();
 
   const linhas = notas.map((nota) => ({
     chaveAcesso: nota.chaveAcesso,
