@@ -1,28 +1,51 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { listarLojas } from "@/lib/pdvapi";
-import type { LojaConfig } from "@prisma/client";
+import { listarLojas, obterFilial } from "@/lib/pdvapi";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
-    const [lojasPdv, configs] = await Promise.all([
+    // Carrega as duas tabelas de tradução inteiras de uma vez (código -> nome),
+    // pra não fazer uma query por loja dentro do loop.
+    const [lojasPdv, empresas, grupos] = await Promise.all([
       listarLojas(),
-      prisma.lojaConfig.findMany(),
+      prisma.empresaLoja.findMany(),
+      prisma.grupoLoja.findMany(),
     ]);
 
-    const configPorId = new Map<number, LojaConfig>(configs.map((c: LojaConfig) => [c.lojaId, c]));
+    const nomeEmpresa = new Map(empresas.map((e) => [e.codigo, e.nome]));
+    const nomeGrupo = new Map(grupos.map((g) => [g.codigo, g.nome]));
 
-    const lojas = lojasPdv.map((l) => ({
-      id: l.Id,
-      nome: l.NomeFantasia,
-      razaoSocial: l.RazaoSocial,
-      cnpj: l.CNPJ,
-      inativa: l.Inativa,
-      gestor: configPorId.get(l.Id)?.gestor ?? "",
-      tipoLoja: configPorId.get(l.Id)?.tipoLoja ?? "",
-    }));
+    // A API do PDV não traz Empresa/Grupo na listagem de lojas — só na filial,
+    // e por código. Uma chamada HTTP por loja, disparadas em paralelo.
+    const lojas = await Promise.all(
+      lojasPdv.map(async (l) => {
+        let tipoLoja = "";
+        let grupoLoja = "";
+
+        try {
+          const filial = await obterFilial(l.Id);
+          const codEmpresa = filial.Empresa;
+          const codGrupo = filial.Grupo;
+          tipoLoja = nomeEmpresa.get(codEmpresa) ?? `Empresa ${codEmpresa}`;
+          grupoLoja = nomeGrupo.get(codGrupo) ?? `Grupo ${codGrupo}`;
+        } catch {
+          // Se a filial dessa loja não puder ser lida, segue sem os nomes em
+          // vez de derrubar a rota inteira.
+        }
+
+        return {
+          id: l.Id,
+          nome: l.NomeFantasia,
+          razaoSocial: l.RazaoSocial,
+          cnpj: l.CNPJ,
+          inativa: l.Inativa,
+          grupoLoja,
+          tipoLoja,
+        };
+      })
+    );
 
     return NextResponse.json({ lojas });
   } catch (err: any) {

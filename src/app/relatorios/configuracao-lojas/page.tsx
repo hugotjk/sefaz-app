@@ -65,6 +65,13 @@ export default function ConfiguracaoLojasPage() {
   return (
     <div>
       <h1>Configuração de Lojas</h1>
+      <div className="card" style={{ marginBottom: 16, borderColor: "var(--accent, #888)" }}>
+        <p style={{ margin: 0, fontSize: 14 }}>
+          <strong>Esta tela não é mais necessária</strong> — Tipo Loja e Grupo Loja agora vêm
+          automaticamente da API do PDV (campos Empresa e Grupo da filial). O que for
+          preenchido aqui não é mais usado nos relatórios.
+        </p>
+      </div>
       <p style={{ color: "var(--text-dim)", marginTop: -10, marginBottom: 20, fontSize: 14 }}>
         A API do PDV não informa Gestor nem Tipo Loja — atribua aqui uma vez pra cada loja.
         Salva automaticamente ao trocar o valor.

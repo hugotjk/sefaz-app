@@ -13,12 +13,27 @@ datasource db {
 // Como a API do PDV não expõe "Gestor" (Contato) nem "Tipo Loja" no cadastro
 // de lojas, guardamos esse mapeamento aqui mesmo — você atribui uma vez por
 // loja (lojaId vem da API do PDV) e o relatório usa isso pra agrupar.
+// OBS: substituído pelo mapeamento automático via EmpresaLoja/GrupoLoja
+// (a rota /api/lojas agora resolve Tipo Loja e Grupo Loja pela filial da API do PDV).
 model LojaConfig {
   lojaId    Int      @id // mesmo Id retornado por GET /api/public/lojas
   nome      String? // NomeFantasia, só pra facilitar exibição na tela de config
   gestor    String?
   tipoLoja  String?
   updatedAt DateTime @updatedAt
+}
+
+// A API do PDV só retorna o código numérico de "Empresa" (que usamos como
+// Tipo Loja) e "Grupo" (que usamos como Grupo Loja) na filial. Estas duas
+// tabelas traduzem código -> nome. Populadas por scripts/seed-empresa-grupo.ts.
+model EmpresaLoja {
+  codigo Int    @id
+  nome   String
+}
+
+model GrupoLoja {
+  codigo Int    @id
+  nome   String
 }
 
 enum CertificateStatus {
