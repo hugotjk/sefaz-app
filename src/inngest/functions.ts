@@ -202,7 +202,8 @@ export const sincronizarCertificado = inngest.createFunction(
         });
       });
 
-      const chegouNoFim = ultNSU >= resultado.maxNSU || resultado.semDocumentosNovos;
+      const chegouNoFim =
+        BigInt(ultNSU || "0") >= BigInt(resultado.maxNSU || "0") || resultado.semDocumentosNovos;
       if (chegouNoFim) {
         if (!certificado.backfillDone) {
           await step.run("marcar-backfill-concluido", async () => {
