@@ -22,7 +22,7 @@ export interface FiltrosRelatorio {
   verPor: VerPor;
   dataInicial: string; // YYYY-MM-DD
   dataFinal: string; // YYYY-MM-DD
-  redeIds: number[];
+  redeId: number | null;
   tipoLojaId: number | null; // EmpresaLoja.codigo -> FilialSync.empresaId
   grupoLojaId: number | null; // GrupoLoja.codigo   -> FilialSync.grupoId
   campoProduto: CampoProduto;
@@ -143,7 +143,7 @@ async function queryComTimeout<T>(sql: Prisma.Sql): Promise<T> {
 
 function whereProduto(f: FiltrosRelatorio): Prisma.Sql {
   const conds: Prisma.Sql[] = [Prisma.sql`TRUE`];
-  if (f.redeIds.length) conds.push(Prisma.sql`p."redeId" IN (${Prisma.join(f.redeIds)})`);
+  if (f.redeId != null) conds.push(Prisma.sql`p."redeId" = ${f.redeId}`);
   if (f.colecao) conds.push(Prisma.sql`p."colecaoNome" = ${f.colecao}`);
   if (f.grupoProduto) conds.push(Prisma.sql`p."grupoNome" = ${f.grupoProduto}`);
   if (f.subGrupo) conds.push(Prisma.sql`p."compradorNome" = ${f.subGrupo}`);
@@ -515,11 +515,6 @@ export function parseFiltros(sp: URLSearchParams): FiltrosRelatorio {
       return d.toISOString().slice(0, 10);
     })();
 
-  const redeIds = (s("redeIds") ?? "")
-    .split(",")
-    .map((x) => parseInt(x, 10))
-    .filter((n) => Number.isFinite(n));
-
   const tamanhoPagina = Math.min(200, Math.max(10, parseInt(sp.get("tamanhoPagina") ?? "50", 10) || 50));
   const pagina = Math.max(1, parseInt(sp.get("pagina") ?? "1", 10) || 1);
 
@@ -528,7 +523,7 @@ export function parseFiltros(sp: URLSearchParams): FiltrosRelatorio {
     verPor: s("verPor") === "grupoLoja" ? "grupoLoja" : "loja",
     dataInicial,
     dataFinal,
-    redeIds,
+    redeId: s("redeId") ? Number(s("redeId")) : null,
     tipoLojaId: s("tipoLojaId") ? Number(s("tipoLojaId")) : null,
     grupoLojaId: s("grupoLojaId") ? Number(s("grupoLojaId")) : null,
     campoProduto: s("campoProduto") === "modelo" ? "modelo" : "fornecedor",

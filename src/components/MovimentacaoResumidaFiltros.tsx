@@ -7,7 +7,7 @@ export interface FiltrosForm {
   verPor: "loja" | "grupoLoja";
   dataInicial: string;
   dataFinal: string;
-  redeIds: number[];
+  redeId: number | null;
   tipoLojaId: number | null;
   grupoLojaId: number | null;
   campoProduto: "fornecedor" | "modelo";
@@ -104,16 +104,12 @@ export function MovimentacaoResumidaFiltros({
         </div>
 
         <div className="field">
-          <label>Rede (múltipla)</label>
+          <label>Rede</label>
           <select
-            multiple
-            value={filtros.redeIds.map(String)}
-            onChange={(e) =>
-              onChange({
-                redeIds: Array.from(e.target.selectedOptions, (o) => Number(o.value)),
-              })
-            }
+            value={filtros.redeId == null ? "" : String(filtros.redeId)}
+            onChange={(e) => onChange({ redeId: e.target.value === "" ? null : Number(e.target.value) })}
           >
+            <option value="">Todas</option>
             {(opcoes?.redes ?? []).map((r) => (
               <option key={r.valor} value={r.valor}>
                 {r.label}
