@@ -116,6 +116,7 @@ h2 { font-size: 16px; margin: 0 0 12px; }
   color: var(--text-dim);
   padding: 10px 12px;
   border-bottom: 1px solid var(--border);
+  white-space: nowrap;
 }
 .notes-table td {
   padding: 12px;
@@ -123,6 +124,83 @@ h2 { font-size: 16px; margin: 0 0 12px; }
   font-size: 14px;
 }
 .notes-table tr:hover td { background: var(--panel-2); cursor: pointer; }
+
+/* Notas fiscais: tabela redesenhada */
+.notes-table-wrap { overflow-x: auto; }
+.notes-table tbody tr.nota-row:nth-child(odd) td { background: transparent; }
+.notes-table tbody tr.nota-row:nth-child(even) td { background: rgba(255, 255, 255, 0.02); }
+.notes-table tbody tr.nota-row:hover td { background: var(--panel-2); }
+
+.notes-sort {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font: inherit;
+  text-transform: uppercase;
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.notes-sort:hover { color: var(--text); }
+.notes-sort span { color: var(--accent); font-size: 13px; }
+
+.nota-link {
+  background: none;
+  border: none;
+  color: var(--accent);
+  cursor: pointer;
+  font: inherit;
+  padding: 0;
+}
+.nota-link:hover { text-decoration: underline; }
+
+.nota-acoes { display: inline-flex; gap: 6px; }
+.nota-acoes button {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  border-radius: 6px;
+  padding: 3px 8px;
+  font-size: 11px;
+  cursor: pointer;
+  line-height: 1.4;
+}
+.nota-acoes button:hover:not(:disabled) { color: var(--text); border-color: var(--accent); }
+.nota-acoes button:disabled { opacity: 0.5; cursor: default; }
+
+.notes-pag {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 14px;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+.notes-pag-controles { display: flex; align-items: center; gap: 10px; }
+.notes-pag select {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 13px;
+}
+.notes-pag button {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.notes-pag button:disabled { opacity: 0.4; cursor: not-allowed; }
 
 .badge {
   display: inline-block;

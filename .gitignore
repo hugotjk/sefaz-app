@@ -5,3 +5,4 @@ node_modules
 *.pfx
 *.p12
 .DS_Store
+*.tsbuildinfo

@@ -4,7 +4,48 @@ const parser = new XMLParser({
   ignoreAttributes: false,
   attributeNamePrefix: "@_",
   parseTagValue: false, // evita corromper a chave de acesso (44 dígitos)
+  removeNSPrefix: true, // tolera XML com prefixo de namespace (ns2:NFe etc.)
+  ignoreDeclaration: true,
 });
+
+/** Erro "esperado": XML da nota em formato que não sabemos ler. */
+export class XmlNotaInvalidoError extends Error {
+  constructor(detalhe?: string) {
+    super(
+      detalhe
+        ? `Não foi possível interpretar o XML desta nota (${detalhe}).`
+        : "Não foi possível interpretar o XML desta nota (formato inesperado)."
+    );
+    this.name = "XmlNotaInvalidoError";
+  }
+}
+
+/**
+ * Acha o nó `infNFe` (e o protocolo) em várias estruturas possíveis de XML da
+ * SEFAZ: `nfeProc > NFe > infNFe`, `nfeProc > infNFe`, `NFe > infNFe` solto,
+ * `infNFe` na raiz, lote com array, etc.
+ */
+function localizarNFe(parsed: any): { infNFe: any; protNFe: any } {
+  const raiz = arr(parsed?.nfeProc)[0] ?? parsed?.nfeProc ?? parsed ?? {};
+  const candidatos = [
+    raiz?.NFe?.infNFe,
+    raiz?.infNFe,
+    arr(raiz?.NFe)[0]?.infNFe,
+    parsed?.NFe?.infNFe,
+    parsed?.infNFe,
+    arr(parsed?.NFe)[0]?.infNFe,
+  ];
+  let infNFe = candidatos.find((c) => c && typeof c === "object");
+  if (Array.isArray(infNFe)) infNFe = infNFe[0];
+
+  const protNFe =
+    raiz?.protNFe?.infProt ??
+    arr(raiz?.protNFe)[0]?.infProt ??
+    parsed?.protNFe?.infProt ??
+    undefined;
+
+  return { infNFe, protNFe };
+}
 
 function arr<T>(v: T | T[] | undefined): T[] {
   if (!v) return [];
@@ -114,11 +155,26 @@ function n(v: any): string {
 }
 
 export function parseNFeXml(xml: string): NFeParaExibir {
-  const parsed = parser.parse(xml);
-  const nfeProc = parsed.nfeProc ?? parsed;
-  const infNFe = nfeProc.NFe?.infNFe ?? nfeProc.infNFe;
-  const protNFe = nfeProc.protNFe?.infProt;
+  let parsed: any;
+  try {
+    parsed = parser.parse(xml ?? "");
+  } catch {
+    throw new XmlNotaInvalidoError("XML inválido");
+  }
 
+  const { infNFe, protNFe } = localizarNFe(parsed);
+  if (!infNFe || typeof infNFe !== "object") {
+    throw new XmlNotaInvalidoError();
+  }
+
+  try {
+    return extrairCampos(infNFe, protNFe);
+  } catch {
+    throw new XmlNotaInvalidoError();
+  }
+}
+
+function extrairCampos(infNFe: any, protNFe: any): NFeParaExibir {
   const ide = infNFe.ide ?? {};
   const emit = infNFe.emit ?? {};
   const dest = infNFe.dest ?? {};
