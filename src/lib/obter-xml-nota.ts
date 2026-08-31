@@ -1,7 +1,10 @@
 import { prisma } from "@/lib/db";
 import { decryptCertificate } from "@/lib/crypto";
 import { consultarPorChave } from "@/lib/sefaz";
-import { parseNFeXml } from "@/lib/parse-nfe-xml";
+import { parseNFeXml, ehResumoNFe } from "@/lib/parse-nfe-xml";
+
+const ERRO_RESUMO =
+  "A SEFAZ ainda não liberou o XML completo desta nota (só o resumo está disponível). Isso é normal em notas recém-emitidas — tente novamente mais tarde.";
 
 export type ResultadoXmlNota = { xml: string } | { erro: string; status: number };
 
@@ -23,8 +26,12 @@ export async function obterXmlNota(chave: string): Promise<ResultadoXmlNota> {
 
   if (!nota) return { erro: "Nota não encontrada.", status: 404 };
 
-  // Cache: XML já salvo -> usa o do banco, sem nova consulta à SEFAZ.
-  if (nota.xmlCompleto) return { xml: nota.xmlCompleto };
+  // Cache: XML completo já salvo -> usa o do banco, sem nova consulta à SEFAZ.
+  // Se o que está em cache é só o RESUMO (resNFe) — salvo por engano antes de a
+  // SEFAZ liberar o documento completo — ignora o cache e tenta de novo agora.
+  if (nota.xmlCompleto && !ehResumoNFe(nota.xmlCompleto)) {
+    return { xml: nota.xmlCompleto };
+  }
 
   try {
     const { pfxBase64, password } = decryptCertificate(nota.certificate);
@@ -42,6 +49,13 @@ export async function obterXmlNota(chave: string): Promise<ResultadoXmlNota> {
         erro: `SEFAZ não retornou o XML completo desta nota. Motivo (cStat ${resultado.statusCode}): ${resultado.erro}`,
         status: 502,
       };
+    }
+
+    // A SEFAZ pode devolver só o RESUMO (resNFe) se o documento completo ainda
+    // não estiver liberado para distribuição. Não salva isso como xmlCompleto —
+    // deixa em branco pra tentar de novo na próxima abertura.
+    if (ehResumoNFe(resultado.xmlCompleto)) {
+      return { erro: ERRO_RESUMO, status: 409 };
     }
 
     // Completa número/série (a consulta resumida não trazia). Best-effort:

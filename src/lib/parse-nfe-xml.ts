@@ -21,6 +21,17 @@ export class XmlNotaInvalidoError extends Error {
 }
 
 /**
+ * `true` quando o XML é só o RESUMO da nota (schema `resNFe`), não o documento
+ * completo (`procNFe`/`NFe` com `infNFe`). A SEFAZ devolve `resNFe` na consulta
+ * por chave enquanto o XML completo ainda não foi liberado para distribuição
+ * (comum em notas recém-emitidas). Não dá pra montar DANFE a partir disso.
+ */
+export function ehResumoNFe(xml: string): boolean {
+  if (!xml) return false;
+  return /<(?:\w+:)?resNFe[\s>]/.test(xml) && !/<(?:\w+:)?infNFe[\s>]/.test(xml);
+}
+
+/**
  * Acha o nó `infNFe` (e o protocolo) em várias estruturas possíveis de XML da
  * SEFAZ: `nfeProc > NFe > infNFe`, `nfeProc > infNFe`, `NFe > infNFe` solto,
  * `infNFe` na raiz, lote com array, etc.
@@ -164,6 +175,12 @@ export function parseNFeXml(xml: string): NFeParaExibir {
 
   const { infNFe, protNFe } = localizarNFe(parsed);
   if (!infNFe || typeof infNFe !== "object") {
+    const raiz = arr(parsed?.nfeProc)[0] ?? parsed?.nfeProc ?? parsed ?? {};
+    if (parsed?.resNFe || raiz?.resNFe || ehResumoNFe(xml)) {
+      throw new XmlNotaInvalidoError(
+        "a SEFAZ ainda só disponibilizou o resumo desta nota, não o XML completo — tente novamente mais tarde"
+      );
+    }
     throw new XmlNotaInvalidoError();
   }
 
