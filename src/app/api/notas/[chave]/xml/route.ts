@@ -5,6 +5,7 @@ import { consultarPorChave } from "@/lib/sefaz";
 import { parseNFeXml } from "@/lib/parse-nfe-xml";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 export async function GET(_req: NextRequest, { params }: { params: { chave: string } }) {
   const nota = await prisma.note.findUnique({

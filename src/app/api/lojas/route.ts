@@ -3,6 +3,8 @@ import { prisma } from "@/lib/db";
 import { listarLojas } from "@/lib/pdvapi";
 import type { LojaConfig } from "@prisma/client";
 
+export const dynamic = "force-dynamic";
+
 export async function GET() {
   try {
     const [lojasPdv, configs] = await Promise.all([
