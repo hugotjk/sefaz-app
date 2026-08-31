@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { listarLojas } from "@/lib/pdvapi";
+import type { LojaConfig } from "@prisma/client";
 
 export async function GET() {
   try {
@@ -9,7 +10,7 @@ export async function GET() {
       prisma.lojaConfig.findMany(),
     ]);
 
-    const configPorId = new Map(configs.map((c) => [c.lojaId, c]));
+    const configPorId = new Map<number, LojaConfig>(configs.map((c: LojaConfig) => [c.lojaId, c]));
 
     const lojas = lojasPdv.map((l) => ({
       id: l.Id,

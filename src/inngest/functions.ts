@@ -40,7 +40,7 @@ export const cronHorario = inngest.createFunction(
 
     await step.sendEvent(
       "disparar-sync-por-certificado",
-      certificados.map((c) => ({
+      certificados.map((c: { id: string }) => ({
         name: "sefaz/certificate.sync" as const,
         data: { certificateId: c.id },
       }))
@@ -75,7 +75,7 @@ export const sincronizarCertificado = inngest.createFunction(
       return { pulado: true, motivo: `status = ${certificado.status}` };
     }
 
-    if (certificado.validUntil && certificado.validUntil < new Date()) {
+    if (certificado.validUntil && new Date(certificado.validUntil) < new Date()) {
       await step.run("marcar-vencido", async () => {
         await prisma.certificate.update({
           where: { id: certificateId },

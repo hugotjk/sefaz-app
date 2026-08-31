@@ -1,5 +1,13 @@
 import { prisma } from "@/lib/db";
 import { NotasTable } from "@/components/NotasTable";
+import type { Prisma } from "@prisma/client";
+
+type NotaComRelacoes = Prisma.NoteGetPayload<{
+  include: {
+    _count: { select: { eventos: true } };
+    certificate: { select: { razaoSocial: true; cnpj: true } };
+  };
+}>;
 
 export default async function NotasPage() {
   const notas = await prisma.note.findMany({
@@ -11,7 +19,7 @@ export default async function NotasPage() {
     },
   });
 
-  const linhas = notas.map((nota) => ({
+  const linhas = notas.map((nota: NotaComRelacoes) => ({
     chaveAcesso: nota.chaveAcesso,
     numero: nota.numero,
     dataEmissao: nota.dataEmissao ? nota.dataEmissao.toISOString() : null,

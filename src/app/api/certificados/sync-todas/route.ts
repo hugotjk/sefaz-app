@@ -13,7 +13,7 @@ export async function POST() {
   }
 
   await inngest.send(
-    certificados.map((c) => ({
+    certificados.map((c: { id: string }) => ({
       name: "sefaz/certificate.sync" as const,
       data: { certificateId: c.id },
     }))
