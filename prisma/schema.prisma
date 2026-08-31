@@ -6,8 +6,13 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  // Runtime: Transaction Pooler do Supabase (porta 6543) — aguenta muitas
+  // conexões concorrentes (syncs + 95 certificados).
+  url       = env("DATABASE_URL")
+  // Migrations e outras operações que exigem conexão de sessão: Session
+  // Pooler / conexão direta (porta 5432).
+  directUrl = env("DIRECT_URL")
 }
 
 // Como a API do PDV não expõe "Gestor" (Contato) nem "Tipo Loja" no cadastro

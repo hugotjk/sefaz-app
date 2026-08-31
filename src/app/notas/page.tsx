@@ -2,6 +2,9 @@ import { prisma } from "@/lib/db";
 import { NotasTable } from "@/components/NotasTable";
 import type { Prisma } from "@prisma/client";
 
+// Não pré-renderizar no build: essa página consulta o banco a cada request.
+export const dynamic = "force-dynamic";
+
 type NotaComRelacoes = Prisma.NoteGetPayload<{
   include: {
     _count: { select: { eventos: true } };

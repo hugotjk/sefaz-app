@@ -1,3 +1,4 @@
+import { PrismaClient } from "@prisma/client";
 import { inngest } from "@/lib/inngest";
 import { prisma } from "@/lib/db";
 import { decryptCertificate } from "@/lib/crypto";
@@ -903,6 +904,11 @@ export const syncPrecos = inngest.createFunction(
 // meses de VendaItemSync para VendaResumoMensal (soma por variacao x loja x mês)
 // e apaga o detalhe. Feito em lotes numa transação (ler -> somar -> incrementar
 // -> apagar as MESMAS linhas), então reexecução não duplica.
+//
+// Transação INTERATIVA do Prisma exige conexão em modo SESSÃO — o
+// DATABASE_URL padrão aponta pro Transaction Pooler (6543), que não suporta.
+// Por isso esta função usa um PrismaClient próprio apontado pro DIRECT_URL
+// (Session Pooler / conexão direta, 5432) e o fecha no final.
 // ---------------------------------------------------------------------------
 
 const CONSOLIDAR_LINHAS_POR_STEP = 2000;
@@ -914,64 +920,70 @@ export const consolidarVendasAntigas = inngest.createFunction(
     const corte = anoMesCorteDetalhe(); // meses < corte viram resumo
     const limiteData = primeiroInstanteDoMes(corte);
 
+    const dbSessao = new PrismaClient({ datasourceUrl: process.env.DIRECT_URL });
+
     let totalLinhas = 0;
     let totalGrupos = 0;
     let lotes = 0;
 
-    // Cada iteração processa um lote de linhas antigas; para quando não há mais.
-    for (let guarda = 0; guarda < 500; guarda++) {
-      const resultado = await step.run(`consolidar-lote-${guarda}`, async () => {
-        return prisma.$transaction(
-          async (tx) => {
-            const linhas = await tx.vendaItemSync.findMany({
-              where: { dataHora: { lt: limiteData } },
-              orderBy: { id: "asc" },
-              take: CONSOLIDAR_LINHAS_POR_STEP,
-            });
-            if (linhas.length === 0) return { linhas: 0, grupos: 0 };
-
-            // Agrega em memória por (variacaoId, lojaId, anoMes).
-            const agg = new Map<string, { v: string; l: number; m: string; q: number; val: number }>();
-            for (const r of linhas) {
-              const m = anoMesDe(new Date(r.dataHora));
-              const k = `${r.variacaoId}|${r.lojaId}|${m}`;
-              const cur = agg.get(k) ?? { v: r.variacaoId, l: r.lojaId, m, q: 0, val: 0 };
-              cur.q += Number(r.quantidade);
-              cur.val += Number(r.valor);
-              agg.set(k, cur);
-            }
-
-            for (const g of agg.values()) {
-              await tx.vendaResumoMensal.upsert({
-                where: {
-                  variacaoId_lojaId_anoMes: { variacaoId: g.v, lojaId: g.l, anoMes: g.m },
-                },
-                create: {
-                  variacaoId: g.v,
-                  lojaId: g.l,
-                  anoMes: g.m,
-                  quantidadeTotal: g.q,
-                  valorTotal: g.val,
-                },
-                update: {
-                  quantidadeTotal: { increment: g.q },
-                  valorTotal: { increment: g.val },
-                },
+    try {
+      // Cada iteração processa um lote de linhas antigas; para quando não há mais.
+      for (let guarda = 0; guarda < 500; guarda++) {
+        const resultado = await step.run(`consolidar-lote-${guarda}`, async () => {
+          return dbSessao.$transaction(
+            async (tx) => {
+              const linhas = await tx.vendaItemSync.findMany({
+                where: { dataHora: { lt: limiteData } },
+                orderBy: { id: "asc" },
+                take: CONSOLIDAR_LINHAS_POR_STEP,
               });
-            }
+              if (linhas.length === 0) return { linhas: 0, grupos: 0 };
 
-            await tx.vendaItemSync.deleteMany({ where: { id: { in: linhas.map((r) => r.id) } } });
-            return { linhas: linhas.length, grupos: agg.size };
-          },
-          { timeout: 120_000 }
-        );
-      });
+              // Agrega em memória por (variacaoId, lojaId, anoMes).
+              const agg = new Map<string, { v: string; l: number; m: string; q: number; val: number }>();
+              for (const r of linhas) {
+                const m = anoMesDe(new Date(r.dataHora));
+                const k = `${r.variacaoId}|${r.lojaId}|${m}`;
+                const cur = agg.get(k) ?? { v: r.variacaoId, l: r.lojaId, m, q: 0, val: 0 };
+                cur.q += Number(r.quantidade);
+                cur.val += Number(r.valor);
+                agg.set(k, cur);
+              }
 
-      totalLinhas += resultado.linhas;
-      totalGrupos += resultado.grupos;
-      if (resultado.linhas === 0) break;
-      lotes++;
-      await step.sleep(`pausa-consolidar-${guarda}`, PDV_PAUSA_ENTRE_LOTES_MS);
+              for (const g of agg.values()) {
+                await tx.vendaResumoMensal.upsert({
+                  where: {
+                    variacaoId_lojaId_anoMes: { variacaoId: g.v, lojaId: g.l, anoMes: g.m },
+                  },
+                  create: {
+                    variacaoId: g.v,
+                    lojaId: g.l,
+                    anoMes: g.m,
+                    quantidadeTotal: g.q,
+                    valorTotal: g.val,
+                  },
+                  update: {
+                    quantidadeTotal: { increment: g.q },
+                    valorTotal: { increment: g.val },
+                  },
+                });
+              }
+
+              await tx.vendaItemSync.deleteMany({ where: { id: { in: linhas.map((r) => r.id) } } });
+              return { linhas: linhas.length, grupos: agg.size };
+            },
+            { timeout: 120_000 }
+          );
+        });
+
+        totalLinhas += resultado.linhas;
+        totalGrupos += resultado.grupos;
+        if (resultado.linhas === 0) break;
+        lotes++;
+        await step.sleep(`pausa-consolidar-${guarda}`, PDV_PAUSA_ENTRE_LOTES_MS);
+      }
+    } finally {
+      await dbSessao.$disconnect();
     }
 
     return { corte, lotes, linhasConsolidadas: totalLinhas, gruposAfetados: totalGrupos };
