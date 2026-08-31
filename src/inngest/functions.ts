@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db";
 import { decryptCertificate } from "@/lib/crypto";
 import { consultarDistribuicaoDFe } from "@/lib/sefaz";
 import { parseDocumento } from "@/lib/parse-documento";
+import { obterXmlNota } from "@/lib/obter-xml-nota";
 import {
   listarRedes,
   listarLojas,
@@ -1159,5 +1160,92 @@ export const backfillVendasHistorico = inngest.createFunction(
     }
 
     return { proximoMes: mesAlvo, mesesProcessados };
+  }
+);
+
+// ---------------------------------------------------------------------------
+// completarXmlNotas — a cada 30 min. Tenta preencher o XML completo (procNFe)
+// das notas que ainda só têm o resumo (`xmlCompleto = ""`), usando a mesma
+// lógica de `obterXmlNota` que a abertura manual da nota usa. Ao conseguir,
+// número/série também são atualizados (dentro de obterXmlNota).
+//
+// - No máximo MAX_NOTAS_COMPLETAR_XML notas por execução, mais antigas /
+//   sem tentativa recente primeiro (campo `ultimaTentativaXml`).
+// - Só re-tenta uma nota se já faz >= COMPLETAR_XML_REPETIR_APOS_H horas.
+// - Rate limit da SEFAZ (cStat 656 / "consumo indevido") costuma valer pro
+//   certificado inteiro: nesse caso para a execução toda.
+// ---------------------------------------------------------------------------
+
+const MAX_NOTAS_COMPLETAR_XML = 10;
+const COMPLETAR_XML_REPETIR_APOS_H = 6;
+const INTERVALO_COMPLETAR_XML_MS = 22_000;
+
+export const completarXmlNotas = inngest.createFunction(
+  { id: "completar-xml-notas", concurrency: { limit: 1 }, retries: 2 },
+  { cron: "*/30 * * * *" },
+  async ({ step }) => {
+    const limite = new Date(Date.now() - COMPLETAR_XML_REPETIR_APOS_H * 3_600_000);
+
+    const notas = await step.run("buscar-notas-pendentes", () =>
+      prisma.note.findMany({
+        where: {
+          xmlCompleto: "",
+          OR: [{ ultimaTentativaXml: null }, { ultimaTentativaXml: { lt: limite } }],
+        },
+        orderBy: [
+          { ultimaTentativaXml: { sort: "asc", nulls: "first" } },
+          { createdAt: "asc" },
+        ],
+        take: MAX_NOTAS_COMPLETAR_XML,
+        select: { chaveAcesso: true },
+      })
+    );
+
+    if (notas.length === 0) return { pendentes: 0 };
+
+    let completadas = 0;
+    let aindaResumo = 0;
+    let erros = 0;
+
+    for (let i = 0; i < notas.length; i++) {
+      const chave = notas[i].chaveAcesso;
+
+      const r = await step.run(`completar-${chave}`, async () => {
+        const res = await obterXmlNota(chave);
+        await prisma.note.update({
+          where: { chaveAcesso: chave },
+          data: { ultimaTentativaXml: new Date() },
+        });
+
+        if (!("erro" in res)) return { estado: "ok" as const };
+        if (/cstat\s*656|consumo\s+indevido/i.test(res.erro)) {
+          return { estado: "ratelimit" as const, erro: res.erro };
+        }
+        if (res.status === 409) return { estado: "resumo" as const };
+        return { estado: "erro" as const, erro: res.erro };
+      });
+
+      if (r.estado === "ok") {
+        completadas++;
+      } else if (r.estado === "resumo") {
+        aindaResumo++;
+      } else if (r.estado === "ratelimit") {
+        return {
+          parou: "rate limit da SEFAZ (656)",
+          processadas: i + 1,
+          completadas,
+          aindaResumo,
+          erros,
+        };
+      } else {
+        erros++;
+      }
+
+      if (i < notas.length - 1) {
+        await step.sleep(`aguardar-${chave}`, INTERVALO_COMPLETAR_XML_MS);
+      }
+    }
+
+    return { processadas: notas.length, completadas, aindaResumo, erros };
   }
 );

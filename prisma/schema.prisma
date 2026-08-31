@@ -219,8 +219,12 @@ model Note {
   dataEmissao   DateTime?
   status        NoteStatus   @default(AUTORIZADA)
 
-  // XML completo da NFe (protocolo de autorização), como recebido da SEFAZ
+  // XML completo da NFe (protocolo de autorização), como recebido da SEFAZ.
+  // "" enquanto a SEFAZ ainda não liberou o procNFe (só o resumo está
+  // disponível). O job completarXmlNotas tenta preencher isso em segundo plano.
   xmlCompleto   String
+  // Última vez que o job tentou buscar o XML completo (pra não insistir toda hora).
+  ultimaTentativaXml DateTime?
 
   nsu           String       // NSU em que este documento foi recebido
   createdAt     DateTime     @default(now())
@@ -230,6 +234,7 @@ model Note {
 
   @@index([cnpjDestino])
   @@index([emitenteCnpj])
+  @@index([ultimaTentativaXml])
 }
 
 enum NoteEventType {

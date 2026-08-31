@@ -172,6 +172,17 @@ h2 { font-size: 16px; margin: 0 0 12px; }
 .nota-acoes button:hover:not(:disabled) { color: var(--text); border-color: var(--accent); }
 .nota-acoes button:disabled { opacity: 0.5; cursor: default; }
 
+/* Nota sem XML completo ainda (só resumo na SEFAZ) */
+.nota-acoes.aguardando button {
+  color: var(--yellow);
+  border-color: rgba(229, 185, 61, 0.4);
+}
+.nota-acoes.aguardando button:hover:not(:disabled) {
+  color: var(--yellow);
+  border-color: var(--yellow);
+}
+.nota-link.aguardando { color: var(--yellow); }
+
 .notes-pag {
   display: flex;
   flex-wrap: wrap;

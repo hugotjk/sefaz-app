@@ -14,7 +14,10 @@ interface NotaLinha {
   destinatarioNome: string;
   status: string;
   qtdEventos: number;
+  temXmlCompleto: boolean;
 }
+
+const TITULO_PENDENTE = "Aguardando XML completo da SEFAZ";
 
 interface Resposta {
   notas: NotaLinha[];
@@ -160,15 +163,23 @@ export function NotasTable() {
             </tr>
           </thead>
           <tbody>
-            {(dados?.notas ?? []).map((nota) => (
+            {(dados?.notas ?? []).map((nota) => {
+              const pendente = !nota.temXmlCompleto;
+              const tituloPendente = pendente ? TITULO_PENDENTE : undefined;
+              return (
               <tr key={nota.chaveAcesso} className="nota-row">
                 <td>
-                  <span className="nota-acoes">
-                    <button type="button" onClick={() => setChaveAberta(nota.chaveAcesso)}>
+                  <span className={`nota-acoes${pendente ? " aguardando" : ""}`}>
+                    <button
+                      type="button"
+                      title={tituloPendente}
+                      onClick={() => setChaveAberta(nota.chaveAcesso)}
+                    >
                       Ver
                     </button>
                     <button
                       type="button"
+                      title={tituloPendente}
                       disabled={baixando === `${nota.chaveAcesso}:xml`}
                       onClick={() => baixar(nota.chaveAcesso, "xml")}
                     >
@@ -176,6 +187,7 @@ export function NotasTable() {
                     </button>
                     <button
                       type="button"
+                      title={tituloPendente}
                       disabled={baixando === `${nota.chaveAcesso}:pdf`}
                       onClick={() => baixar(nota.chaveAcesso, "pdf")}
                     >
@@ -186,7 +198,8 @@ export function NotasTable() {
                 <td>
                   <button
                     type="button"
-                    className="nota-link"
+                    className={`nota-link${pendente ? " aguardando" : ""}`}
+                    title={tituloPendente}
                     onClick={() => setChaveAberta(nota.chaveAcesso)}
                   >
                     {nota.numero || "-"}
@@ -202,7 +215,8 @@ export function NotasTable() {
                 </td>
                 <td>{nota.qtdEventos > 0 ? `${nota.qtdEventos} evento(s)` : "-"}</td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
       </div>
