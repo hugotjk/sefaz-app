@@ -46,6 +46,15 @@ model FilialSync {
   grupoId    Int?
   supervisor Int?
   updatedAt  DateTime @updatedAt
+
+  @@index([empresaId])
+  @@index([grupoId])
+}
+
+// Nome das redes (Produto.redeId -> nome). Populado por syncRedes.
+model RedeSync {
+  id   Int    @id
+  nome String
 }
 
 // ---------------------------------------------------------------------------
@@ -74,6 +83,12 @@ model Produto {
   variacoes            VariacaoProduto[]
 
   @@index([redeId])
+  // Filtros do relatório de Movimentação Resumida (equality + SELECT DISTINCT).
+  @@index([grupoNome])
+  @@index([colecaoNome])
+  @@index([compradorNome])
+  @@index([fornecedorNome])
+  @@index([modeloNome])
 }
 
 model VariacaoProduto {
@@ -100,6 +115,8 @@ model VendaItemSync {
   @@index([variacaoId])
   @@index([lojaId])
   @@index([dataHora])
+  // Relatório: varredura por período + join na variação.
+  @@index([dataHora, variacaoId])
 }
 
 // Vendas com mais de 12 meses, agregadas por mês (variacao x loja x anoMes).
@@ -113,6 +130,8 @@ model VendaResumoMensal {
 
   @@id([variacaoId, lojaId, anoMes])
   @@index([anoMes])
+  // Relatório: filtro por faixa de anoMes + join na variação.
+  @@index([anoMes, variacaoId])
 }
 
 model EstoqueVariacaoSync {

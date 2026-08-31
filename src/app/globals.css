@@ -212,6 +212,95 @@ h2 { font-size: 16px; margin: 0 0 12px; }
   width: 32px; height: 32px; cursor: pointer; font-size: 16px;
 }
 
+/* Relatório: Movimentação Resumida */
+.mov-filtros {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 14px 16px;
+  align-items: end;
+}
+.mov-filtros .field { margin-bottom: 0; }
+.mov-filtros select,
+.mov-filtros input[type="date"] {
+  width: 100%;
+  padding: 9px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+  color: var(--text);
+  font-size: 13px;
+}
+.mov-filtros select[multiple] { min-height: 84px; }
+.mov-acoes { display: flex; gap: 10px; margin-top: 16px; }
+
+.mov-seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.mov-seg button {
+  background: var(--panel-2);
+  color: var(--text-dim);
+  border: none;
+  padding: 8px 14px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.mov-seg button + button { border-left: 1px solid var(--border); }
+.mov-seg button.ativo { background: var(--accent); color: #fff; }
+
+.mov-count { font-size: 13px; color: var(--text-dim); margin-bottom: 10px; }
+
+.mov-tabela-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.mov-tabela { border-collapse: separate; border-spacing: 0; font-size: 13px; width: max-content; min-width: 100%; }
+.mov-tabela th,
+.mov-tabela td {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  border-right: 1px solid var(--border);
+  white-space: nowrap;
+  text-align: right;
+}
+.mov-tabela thead th {
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  background: var(--panel);
+  color: var(--text-dim);
+  font-size: 11px;
+  text-transform: uppercase;
+}
+.mov-tabela .mov-esq { text-align: left; }
+.mov-tabela tbody tr.impar td { background: var(--panel); }
+.mov-tabela tbody tr.par td { background: var(--panel-2); }
+.mov-tabela td.mov-fix,
+.mov-tabela th.mov-fix { position: sticky; z-index: 3; }
+.mov-tabela thead th.mov-fix { z-index: 6; background: var(--panel); }
+.mov-tabela tbody tr.impar td.mov-fix { background: var(--panel); }
+.mov-tabela tbody tr.par td.mov-fix { background: var(--panel-2); }
+.mov-grp-hdr { text-align: center !important; color: var(--text) !important; border-left: 2px solid var(--accent); }
+.mov-num-forte { color: var(--text); font-weight: 600; }
+
+.mov-paginacao {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: center;
+  margin-top: 16px;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+.mov-paginacao button {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 6px 14px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.mov-paginacao button:disabled { opacity: 0.4; cursor: not-allowed; }
+
 @media print {
   .app-header, .no-print { display: none !important; }
   .app-main { padding: 0; max-width: none; }

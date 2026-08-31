@@ -705,6 +705,33 @@ export const syncEstoque = inngest.createFunction(
 );
 
 // ---------------------------------------------------------------------------
+// syncRedes — 1x por dia. Só ~17 redes; guarda id -> nome pra o relatório
+// mostrar o nome da rede em vez de "Rede {id}".
+// ---------------------------------------------------------------------------
+
+export const syncRedes = inngest.createFunction(
+  { id: "pdv-sync-redes", concurrency: { limit: 1 }, retries: 3 },
+  { cron: "0 4 * * *" },
+  async ({ step }) => {
+    const salvas = await step.run("sync-redes", async () => {
+      const redes = await listarRedes();
+      let n = 0;
+      for (const r of redes) {
+        if (r.Id == null) continue;
+        await prisma.redeSync.upsert({
+          where: { id: r.Id },
+          create: { id: r.Id, nome: r.Nome ?? `Rede ${r.Id}` },
+          update: { nome: r.Nome ?? `Rede ${r.Id}` },
+        });
+        n++;
+      }
+      return n;
+    });
+    return { redesSalvas: salvas };
+  }
+);
+
+// ---------------------------------------------------------------------------
 // syncFiliais — 1x por dia (junto com syncProdutos). Sincroniza Empresa/Grupo/
 // Supervisor de cada loja pro nosso banco, pra rota /api/lojas não precisar
 // chamar obterFilial() ~860 vezes ao vivo. Percorre em lotes com cursor
