@@ -423,8 +423,10 @@ async function montarOpcoes(
 ): Promise<OpcoesRelatorio> {
   // Uma query só: para cada campo de produto, quais valores aparecem entre
   // produtos VENDIDOS no período ('v') e entre produtos com ESTOQUE ('e').
+  // Rede/Tipo Loja/Grupo Loja NÃO entram aqui — vêm de tabelas próprias e
+  // completas (ver `return` abaixo).
   const camposProduto = Prisma.sql`
-    ('rede', p."redeId"::text), ('colecao', p."colecaoNome"), ('grupo', p."grupoNome"),
+    ('colecao', p."colecaoNome"), ('grupo', p."grupoNome"),
     ('subgrupo', p."compradorNome"), ('modelo', p."modeloNome"), ('fornecedor', p."fornecedorNome")
   `;
 
@@ -478,56 +480,18 @@ async function montarOpcoes(
   };
   const doCampo = (nome: string) => prioriza(rows.filter((r) => r.campo === nome));
 
-  const redesRaw = doCampo("rede");
-  const redes = redesRaw.map((v) => ({
-    valor: v,
-    label: nomeRede.get(Number(v)) ?? `Rede ${v}`,
-  }));
-
-  // Tipo Loja / Grupo Loja: prioridade pelos códigos vistos em venda/estoque,
-  // mas mantendo todas as opções das tabelas de tradução.
-  let lojaRows: { campo: string; cod: number; tv: boolean; te: boolean }[] = [];
-  try {
-    lojaRows = await queryComTimeout<{ campo: string; cod: number; tv: boolean; te: boolean }[]>(Prisma.sql`
-      SELECT s.campo, s.cod, bool_or(s.origem = 'v') AS tv, bool_or(s.origem = 'e') AS te
-      FROM (
-        SELECT c.campo, c.cod, 'v'::text AS origem
-        FROM "VendaItemSync" vi
-        JOIN "FilialSync" fs ON fs."lojaId" = vi."lojaId"
-        CROSS JOIN LATERAL (VALUES ('tipo', fs."empresaId"), ('grupo', fs."grupoId")) c(campo, cod)
-        WHERE vi."dataHora" >= ${d.ini} AND vi."dataHora" < ${d.fimExcl} AND c.cod IS NOT NULL
-        UNION ALL
-        SELECT c.campo, c.cod, 'e'
-        FROM "EstoqueVariacaoSync" e
-        JOIN "FilialSync" fs ON fs."lojaId" = e."lojaId"
-        CROSS JOIN LATERAL (VALUES ('tipo', fs."empresaId"), ('grupo', fs."grupoId")) c(campo, cod)
-        WHERE e.quantidade <> 0 AND c.cod IS NOT NULL
-      ) s
-      GROUP BY s.campo, s.cod
-    `);
-  } catch {
-    lojaRows = [];
-  }
-
-  const ordenaCodigos = (
-    campo: string,
-    todos: Map<number, string>
-  ): { valor: string; label: string }[] => {
-    const sub = lojaRows.filter((r) => r.campo === campo);
-    const primeiro = f.ordenacao === "venda" ? (r: (typeof sub)[0]) => r.tv : (r: (typeof sub)[0]) => r.te;
-    const topo = sub.filter(primeiro).map((r) => r.cod);
-    const meio = sub.filter((r) => !primeiro(r)).map((r) => r.cod);
-    const ordenados = [...new Set([...topo, ...meio])];
-    const resto = [...todos.keys()].filter((c) => !ordenados.includes(c));
-    return [...ordenados, ...resto]
-      .filter((c) => todos.has(c))
-      .map((c) => ({ valor: String(c), label: todos.get(c)! }));
-  };
+  // Rede / Tipo Loja / Grupo Loja: vêm INTEIRAS das tabelas RedeSync /
+  // EmpresaLoja / GrupoLoja — não dependem do catálogo de produtos já
+  // sincronizado. Só ordenamos por nome.
+  const listaTabela = (m: Map<number, string>) =>
+    [...m.entries()]
+      .map(([codigo, nome]) => ({ valor: String(codigo), label: nome }))
+      .sort((a, b) => a.label.localeCompare(b.label, "pt-BR"));
 
   return {
-    redes,
-    tiposLoja: ordenaCodigos("tipo", nomeEmpresa),
-    gruposLoja: ordenaCodigos("grupo", nomeGrupoLoja),
+    redes: listaTabela(nomeRede),
+    tiposLoja: listaTabela(nomeEmpresa),
+    gruposLoja: listaTabela(nomeGrupoLoja),
     modelos: doCampo("modelo"),
     fornecedores: doCampo("fornecedor"),
     subGrupos: doCampo("subgrupo"),
