@@ -16,7 +16,8 @@ import {
 } from "@/inngest/functions";
 
 // Vercel: dá mais folga pras funções serverless que servem os steps do Inngest.
-export const maxDuration = 60;
+// O plano Hobby suporta até 300s com Fluid Compute.
+export const maxDuration = 300;
 
 export const { GET, POST, PUT } = serve({
   client: inngest,
