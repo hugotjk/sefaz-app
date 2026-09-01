@@ -63,9 +63,16 @@ function arr<T>(v: T | T[] | undefined): T[] {
   return Array.isArray(v) ? v : [v];
 }
 
+/** EAN "válido": não vazio e diferente de "SEM GTIN". */
+function eanValido(v: any): string {
+  const s = String(v ?? "").trim();
+  return s && s.toUpperCase() !== "SEM GTIN" ? s : "";
+}
+
 export interface ItemNFe {
   codigo: string;
   descricao: string;
+  ean: string; // GTIN/EAN do item (cEAN, ou cEANTrib se cEAN vier vazio/"SEM GTIN")
   ncm: string;
   cfop: string;
   cst: string;
@@ -214,6 +221,7 @@ function extrairCampos(infNFe: any, protNFe: any): NFeParaExibir {
     return {
       codigo: n(prod.cProd),
       descricao: n(prod.xProd),
+      ean: eanValido(prod.cEAN) || eanValido(prod.cEANTrib),
       ncm: n(prod.NCM),
       cfop: n(prod.CFOP),
       cst: n(icmsGrupo.CST ?? icmsGrupo.CSOSN),

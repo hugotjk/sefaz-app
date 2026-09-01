@@ -13,6 +13,7 @@ import {
   syncPrecos,
   consolidarVendasAntigas,
   backfillVendasHistorico,
+  enriquecerVariacoes,
 } from "@/inngest/functions";
 
 // Vercel: dá mais folga pras funções serverless que servem os steps do Inngest.
@@ -34,5 +35,6 @@ export const { GET, POST, PUT } = serve({
     syncPrecos,
     consolidarVendasAntigas,
     backfillVendasHistorico,
+    enriquecerVariacoes,
   ],
 });

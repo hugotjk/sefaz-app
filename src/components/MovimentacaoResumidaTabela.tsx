@@ -84,15 +84,26 @@ export function MovimentacaoResumidaTabela({
                 </td>
                 <td {...fixProps(2)}>{p.precoVarejo == null ? "—" : brl.format(p.precoVarejo)}</td>
                 <td {...fixProps(3)}>
-                  <div className="mov-num-forte">{brl.format(p.vendaValor)}</div>
-                  <div style={{ fontSize: 11, color: "var(--text-dim)" }}>
-                    {qtd.format(p.vendaQtd)} un
+                  <div className="mov-num-forte">{qtd.format(p.vendaQtd)} un</div>
+                  <div style={{ fontSize: 10, color: "var(--text-dim)" }}>
+                    {brl.format(p.vendaValor)}
                   </div>
                 </td>
                 <td {...fixProps(4)}>{qtd.format(p.estoque)}</td>
                 {p.colunas.map((c, ci) => (
                   <Fragment key={colunas[ci].key}>
-                    <td>{c.venda ? brl.format(c.venda) : "—"}</td>
+                    <td>
+                      {c.venda || c.vendaValor ? (
+                        <>
+                          <div className="mov-num-forte">{qtd.format(c.venda)}</div>
+                          <div style={{ fontSize: 10, color: "var(--text-dim)" }}>
+                            {brl.format(c.vendaValor)}
+                          </div>
+                        </>
+                      ) : (
+                        "—"
+                      )}
+                    </td>
                     <td>{c.estoque ? qtd.format(c.estoque) : "—"}</td>
                   </Fragment>
                 ))}

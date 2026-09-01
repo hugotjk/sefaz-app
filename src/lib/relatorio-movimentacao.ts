@@ -56,7 +56,9 @@ export interface ProdutoRelatorio {
   vendaValor: number;
   vendaQtd: number;
   estoque: number;
-  colunas: { venda: number; estoque: number }[]; // alinhado a `colunas` do resultado
+  // alinhado a `colunas` do resultado. `venda` = quantidade (peças);
+  // `vendaValor` = R$; `estoque` = quantidade.
+  colunas: { venda: number; vendaValor: number; estoque: number }[];
 }
 
 export interface OpcoesRelatorio {
@@ -338,24 +340,34 @@ export async function montarRelatorio(f: FiltrosRelatorio): Promise<RelatorioRes
   }
 
   const colunasMap = new Map<string, string>(); // key -> nome
-  // pid -> colKey -> { venda, estoque }
-  const celulas = new Map<string, Map<string, { venda: number; estoque: number }>>();
-  const bump = (pid: string, col: { key: string; nome: string }, venda: number, estoque: number) => {
+  // pid -> colKey -> { venda (qtd), vendaValor (R$), estoque (qtd) }
+  const celulas = new Map<
+    string,
+    Map<string, { venda: number; vendaValor: number; estoque: number }>
+  >();
+  const bump = (
+    pid: string,
+    col: { key: string; nome: string },
+    vendaQtd: number,
+    vendaValor: number,
+    estoque: number
+  ) => {
     colunasMap.set(col.key, col.nome);
     let m = celulas.get(pid);
     if (!m) celulas.set(pid, (m = new Map()));
-    const c = m.get(col.key) ?? { venda: 0, estoque: 0 };
-    c.venda += venda;
+    const c = m.get(col.key) ?? { venda: 0, vendaValor: 0, estoque: 0 };
+    c.venda += vendaQtd;
+    c.vendaValor += vendaValor;
     c.estoque += estoque;
     m.set(col.key, c);
   };
   for (const r of vendasPorLoja) {
     const col = colunaDe(r.loja);
-    if (col) bump(r.pid, col, num(r.val), 0);
+    if (col) bump(r.pid, col, num(r.qtd), num(r.val), 0);
   }
   for (const r of estoquePorLoja) {
     const col = colunaDe(r.loja);
-    if (col) bump(r.pid, col, 0, num(r.qtd));
+    if (col) bump(r.pid, col, 0, 0, num(r.qtd));
   }
 
   // Só colunas com algum valor; ordenadas por nome.
@@ -380,7 +392,7 @@ export async function montarRelatorio(f: FiltrosRelatorio): Promise<RelatorioRes
       vendaValor: num(l.venda_val),
       vendaQtd: num(l.venda_qtd),
       estoque: num(l.estoque_qtd),
-      colunas: colunas.map((c) => m?.get(c.key) ?? { venda: 0, estoque: 0 }),
+      colunas: colunas.map((c) => m?.get(c.key) ?? { venda: 0, vendaValor: 0, estoque: 0 }),
     };
   });
 

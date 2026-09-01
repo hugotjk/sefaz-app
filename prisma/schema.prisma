@@ -105,9 +105,14 @@ model VariacaoProduto {
   produtoId String
   produto   Produto  @relation(fields: [produtoId], references: [id])
   redeId    Int
+  // Enriquecidos aos poucos por `enriquecerVariacoes` (listarVariacoesProduto).
+  ean       String?
+  cor       String?
+  tamanho   String?
   updatedAt DateTime @updatedAt
 
   @@index([produtoId])
+  @@index([ean])
 }
 
 // Detalhe de vendas — SÓ os últimos ~12 meses. `consolidarVendasAntigas`
@@ -238,10 +243,40 @@ model Note {
   updatedAt     DateTime     @updatedAt
 
   eventos       NoteEvent[]
+  itens         NotaItem[]
 
   @@index([cnpjDestino])
   @@index([emitenteCnpj])
   @@index([ultimaTentativaXml])
+}
+
+// Itens (linhas) de cada nota fiscal recebida, persistidos a partir do XML
+// completo. Base do relatório "Conferência de Produtos Sem Cadastro".
+model NotaItem {
+  id            String  @id @default(cuid())
+  noteId        String
+  note          Note    @relation(fields: [noteId], references: [id])
+  codigoProduto String // cProd da nota
+  descricao     String // xProd da nota
+  ean           String?
+  ncm           String?
+  cfop          String?
+  quantidade    Decimal @db.Decimal(14, 3)
+  valorUnitario Decimal @db.Decimal(14, 2)
+  valorTotal    Decimal @db.Decimal(14, 2)
+
+  modeloIdentificado               String? // resultado da regra 1 (identificarModelo)
+  referenciaFornecedorIdentificada String? // resultado da regra 2/3
+  referenciaComRegraEspecifica     Boolean @default(false) // false = fallback (código puro)
+
+  temCadastro Boolean  @default(false) // true se achou EAN correspondente no catálogo
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([noteId])
+  @@index([ean])
+  @@index([temCadastro])
+  @@index([referenciaComRegraEspecifica])
 }
 
 enum NoteEventType {

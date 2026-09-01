@@ -7,6 +7,7 @@ import { parseDocumento } from "@/lib/parse-documento";
 import { obterXmlNota } from "@/lib/obter-xml-nota";
 import { LIMITE_TENTATIVAS_XML, DIAS_NOTA_RECENTE } from "@/lib/nota-xml-status";
 import { classificarTipoLoja } from "@/lib/classificar-tipo-loja";
+import { popularNotaItens } from "@/lib/popular-nota-itens";
 import {
   listarRedes,
   listarLojas,
@@ -1238,7 +1239,7 @@ export const completarXmlNotas = inngest.createFunction(
         else if (res.status === 409) estado = "resumo";
         else estado = "erro";
 
-        await prisma.note.update({
+        const nota = await prisma.note.update({
           where: { chaveAcesso: chave },
           data: {
             ultimaTentativaXml: new Date(),
@@ -1246,9 +1247,16 @@ export const completarXmlNotas = inngest.createFunction(
             // o resumo (não em rate limit nem erro passageiro).
             ...(estado === "resumo" ? { tentativasXml: { increment: 1 } } : {}),
           },
+          select: { id: true },
         });
 
-        return { estado, erro: "erro" in res ? res.erro : undefined };
+        // XML completo obtido -> (re)popula os itens da nota (NotaItem).
+        let itensGravados = 0;
+        if (estado === "ok" && !("erro" in res)) {
+          itensGravados = await popularNotaItens(nota.id, res.xml);
+        }
+
+        return { estado, itensGravados, erro: "erro" in res ? res.erro : undefined };
       });
 
       if (r.estado === "ok") {
@@ -1273,5 +1281,98 @@ export const completarXmlNotas = inngest.createFunction(
     }
 
     return { processadas: notas.length, completadas, aindaResumo, erros };
+  }
+);
+
+// ---------------------------------------------------------------------------
+// enriquecerVariacoes — a cada 3h. Preenche ean/cor/tamanho das
+// VariacaoProduto aos poucos (o sync normal do catálogo só traz o Id da
+// variação). Pega até ENRIQUECER_VARIACOES_POR_EXECUCAO variações ainda sem
+// `ean`, agrupa por produtoId (1 chamada listarVariacoesProduto por produto)
+// e salva. Cursor em SyncState "enriquecer-variacoes:cursor".
+// ---------------------------------------------------------------------------
+
+const ENRIQUECER_VARIACOES_POR_EXECUCAO = 30;
+const ENRIQUECER_PRODUTOS_POR_LOTE = 5;
+
+interface CursorEnriquecer {
+  ultimoId: string;
+}
+
+export const enriquecerVariacoes = inngest.createFunction(
+  { id: "pdv-enriquecer-variacoes", concurrency: { limit: 1 }, retries: 3 },
+  { cron: "0 */3 * * *" },
+  async ({ step }) => {
+    const cursor = await step.run("cursor-enriquecer", () =>
+      lerSyncState<CursorEnriquecer>("enriquecer-variacoes:cursor", { ultimoId: "" })
+    );
+
+    const variacoes = await step.run("proximas-variacoes-sem-ean", () =>
+      prisma.variacaoProduto.findMany({
+        where: { ean: null, id: { gt: cursor.ultimoId } },
+        orderBy: { id: "asc" },
+        take: ENRIQUECER_VARIACOES_POR_EXECUCAO,
+        select: { id: true, produtoId: true, redeId: true },
+      })
+    );
+
+    if (variacoes.length === 0) {
+      await gravarSyncState("enriquecer-variacoes:cursor", { ultimoId: "" });
+      return { fim: true, variacoesProcessadas: 0 };
+    }
+
+    // Produtos distintos a consultar (redeId de qualquer variação do produto).
+    const produtos = [
+      ...new Map(variacoes.map((v) => [v.produtoId, v.redeId])).entries(),
+    ].map(([produtoId, redeId]) => ({ produtoId, redeId }));
+
+    let variacoesAtualizadas = 0;
+
+    for (let i = 0; i < produtos.length; i += ENRIQUECER_PRODUTOS_POR_LOTE) {
+      const lote = produtos.slice(i, i + ENRIQUECER_PRODUTOS_POR_LOTE);
+
+      const n = await step.run(`enriquecer-lote-${cursor.ultimoId || "ini"}-${i}`, async () => {
+        let atualizadas = 0;
+        for (const { produtoId, redeId } of lote) {
+          let lista;
+          try {
+            lista = await listarVariacoesProduto(redeId, produtoId);
+          } catch {
+            continue; // produto que não responde — pula, cursor segue em frente
+          }
+          for (const v of lista) {
+            await prisma.variacaoProduto.updateMany({
+              where: { id: String(v.Id) },
+              data: {
+                // "" quando o PDV não tem EAN -> não re-seleciona essa variação.
+                ean: (v.EAN ?? "").trim(),
+                cor: v.Cor || null,
+                tamanho: v.Tamanho || null,
+              },
+            });
+            atualizadas++;
+          }
+        }
+        return atualizadas;
+      });
+
+      variacoesAtualizadas += n;
+      await step.sleep(`pausa-enriquecer-${cursor.ultimoId || "ini"}-${i}`, PDV_PAUSA_ENTRE_LOTES_MS);
+    }
+
+    // Avança o cursor pra maior id do lote lido.
+    const ultimoId = variacoes[variacoes.length - 1].id;
+    if (variacoes.length < ENRIQUECER_VARIACOES_POR_EXECUCAO) {
+      await gravarSyncState("enriquecer-variacoes:cursor", { ultimoId: "" });
+    } else {
+      await gravarSyncState("enriquecer-variacoes:cursor", { ultimoId });
+    }
+
+    return {
+      lidas: variacoes.length,
+      produtosConsultados: produtos.length,
+      variacoesAtualizadas,
+      proximoCursor: variacoes.length < ENRIQUECER_VARIACOES_POR_EXECUCAO ? "" : ultimoId,
+    };
   }
 );
