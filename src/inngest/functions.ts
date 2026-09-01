@@ -34,7 +34,10 @@ const MAX_ITERACOES_POR_EXECUCAO = 40;
  *    Dispara um evento de sincronização para cada certificado ativo.
  */
 export const cronHorario = inngest.createFunction(
-  { id: "cron-sincronizacao-horaria" },
+  {
+    id: "cron-sincronizacao-horaria",
+    concurrency: [{ scope: "account", key: '"sefaz-pdv-sync"', limit: 4 }],
+  },
   { cron: "0 * * * *" }, // todo início de hora
   async ({ step }) => {
     // Marca como EXPIRED quem passou da validade — evita gastar uma chamada
@@ -77,7 +80,10 @@ export const cronHorario = inngest.createFunction(
 export const sincronizarCertificado = inngest.createFunction(
   {
     id: "sincronizar-certificado",
-    concurrency: { limit: 1, key: "event.data.certificateId" }, // nunca 2 sync do mesmo cert em paralelo
+    concurrency: [
+      { scope: "account", key: '"sefaz-pdv-sync"', limit: 4 },
+      { limit: 1, key: "event.data.certificateId" }, // nunca 2 sync do mesmo cert em paralelo
+    ],
     retries: 3,
   },
   { event: "sefaz/certificate.sync" },
@@ -232,7 +238,10 @@ export const sincronizarCertificado = inngest.createFunction(
 
 /** Disparado assim que um certificado novo é validado, pra já começar o backfill. */
 export const iniciarBackfillAoValidar = inngest.createFunction(
-  { id: "iniciar-backfill-ao-validar" },
+  {
+    id: "iniciar-backfill-ao-validar",
+    concurrency: [{ scope: "account", key: '"sefaz-pdv-sync"', limit: 4 }],
+  },
   { event: "sefaz/certificate.uploaded" },
   async ({ event, step }) => {
     await step.sendEvent("disparar-primeira-sync", {
@@ -247,21 +256,28 @@ export const iniciarBackfillAoValidar = inngest.createFunction(
 //
 // Nada disso tem relação com a SEFAZ / Notas Fiscais. Traz catálogo, vendas e
 // estoque do PDV pro nosso banco pra que o relatório (Fase 2) consulte só o
-// banco. Mesmo padrão de durabilidade das funções acima: cada lote é um
-// `step.run`, com `step.sleep` entre lotes e um cursor salvo em SyncState pra
-// retomar de onde parou na próxima execução do cron.
+// banco. Mesmo padrão de durabilidade das funções acima: cada lote/página é um
+// `step.run` e um cursor salvo em SyncState a cada página pra retomar de onde
+// parou na próxima execução do cron. Sem `step.sleep` entre páginas (dobrava o
+// nº de steps e estourava o teto de 1000 da Inngest).
 // ===========================================================================
 
 // A API do PDV limita TamanhoPagina a 50 (rejeita acima disso).
 const PDV_TAM_PAGINA = 50;
 // Tetos de segurança por execução — o cron continua na próxima rodada usando
-// o cursor salvo em SyncState. Cada `step.run` é uma invocação serverless
-// separada (limite maxDuration=300s), então esses tetos controlam quanto o
-// cron faz por disparo, não o tempo de um step. Dimensionados pra maxDuration
-// de 300s (antes era 60s).
-const MAX_PAGINAS_PRODUTOS_POR_EXECUCAO = 500; // ~25k produtos/disparo
-const MAX_PRODUTOS_BUSCAR_VARIACOES_POR_EXECUCAO = 1200;
-const MAX_PAGINAS_VENDAS_POR_EXECUCAO = 600; // ~30k vendas/disparo
+// o cursor salvo em SyncState. O limite REAL aqui não é tempo (cada `step.run`
+// é uma invocação serverless separada, maxDuration=300s), e sim o teto da
+// Inngest de 1000 steps por run. Depois de tirar o `step.sleep` entre páginas,
+// cada página = 1 step, então: steps ≈ (páginas) + setup (~2) + fallback de
+// variações (~60 no pior caso). Mantemos ~350–400 páginas/disparo pra ficar
+// com folga larga abaixo de 1000.
+const MAX_PAGINAS_PRODUTOS_POR_EXECUCAO = 350; // ~17,5k produtos/disparo (~412 steps c/ fallback)
+const MAX_PRODUTOS_BUSCAR_VARIACOES_POR_EXECUCAO = 1200; // 1200/20 = até 60 steps de fallback
+const MAX_PAGINAS_VENDAS_POR_EXECUCAO = 400; // ~20k vendas/disparo (~401 steps)
+// Pausa entre lotes/páginas. NÃO é mais um `step.sleep` nos loops paginados do
+// PDV (produtos/vendas/preços/estoque/filiais/backfill-histórico) — isso dobrava
+// o nº de steps e estourava o teto de 1000. Usada ainda por consolidar e
+// enriquecer (loops curtos, ~9 iterações).
 const PDV_PAUSA_ENTRE_LOTES_MS = 500;
 // Quanto de histórico de vendas puxar na primeiríssima execução do sync horário.
 const VENDAS_JANELA_INICIAL_DIAS = 7;
@@ -279,13 +295,18 @@ const ESTOQUE_VARIACOES_POR_LOTE = 6; // por step.run (~6 x 6s = ~40s)
 const FILIAIS_POR_EXECUCAO = 600; // lojas processadas por disparo diário
 const FILIAIS_POR_LOTE = 30; // por step.run
 // --- preços ---
-const MAX_PAGINAS_PRECOS_POR_EXECUCAO = 2500; // ~125k preços/disparo
+const MAX_PAGINAS_PRECOS_POR_EXECUCAO = 400; // ~20k preços/disparo (~402 steps)
 const PDV_TABELA_PRECO_VAREJO_FALLBACK = 3; // "3 VAREJO" (confirmado na API)
 // --- vendas: detalhe recente x resumo mensal ---
 const VENDAS_MESES_DETALHE = 12; // mantém 12 meses em VendaItemSync
 const MAX_MESES_CONSOLIDAR_POR_EXECUCAO = 3;
 const MAX_MESES_BACKFILL_POR_EXECUCAO = 1;
-const MAX_PAGINAS_MES_BACKFILL = 3000; // ~150k vendas/mês
+// Teto de páginas de API por disparo do backfill de 1 mês. Cada `step.run`
+// engole BACKFILL_PAGINAS_POR_STEP páginas, então steps ≈ teto / lote-por-step.
+// 1200 / 10 = ~120 steps/disparo (limite Inngest = 1000). Sem `step.sleep`.
+// Um mês grande (>60k vendas) leva alguns disparos; o cursor por mês
+// (`vendas-backfill:mes-atual`) já guarda a página a cada lote.
+const MAX_PAGINAS_MES_BACKFILL = 1200; // ~60k vendas/disparo
 
 async function lerSyncState<T>(chave: string, fallback: T): Promise<T> {
   const row = await prisma.syncState.findUnique({ where: { chave } });
@@ -351,7 +372,14 @@ interface CursorProdutos {
  * a lista embutida.
  */
 export const syncProdutos = inngest.createFunction(
-  { id: "pdv-sync-produtos", concurrency: { limit: 1 }, retries: 3 },
+  {
+    id: "pdv-sync-produtos",
+    concurrency: [
+      { scope: "account", key: '"sefaz-pdv-sync"', limit: 4 },
+      { limit: 1 },
+    ],
+    retries: 3,
+  },
   { cron: "30 */2 * * *" },
   async ({ step }) => {
     const redes = await step.run("listar-redes-ativas", async () => {
@@ -483,7 +511,6 @@ export const syncProdutos = inngest.createFunction(
         }
 
         await gravarSyncState(chave, { lastSync: cursor.lastSync, pagina });
-        await step.sleep(`pausa-produtos-r${rede.id}-p${paginaAtual}`, PDV_PAUSA_ENTRE_LOTES_MS);
       }
 
       // Fallback: produtos sem variação embutida — busca no endpoint dedicado.
@@ -507,7 +534,6 @@ export const syncProdutos = inngest.createFunction(
             return vars;
           });
           variacoesSalvas += n;
-          await step.sleep(`pausa-variacoes-r${rede.id}-${i}`, PDV_PAUSA_ENTRE_LOTES_MS);
         }
       }
 
@@ -543,7 +569,14 @@ interface CursorVendas {
  * mesma janela não duplica).
  */
 export const syncVendas = inngest.createFunction(
-  { id: "pdv-sync-vendas", concurrency: { limit: 1 }, retries: 3 },
+  {
+    id: "pdv-sync-vendas",
+    concurrency: [
+      { scope: "account", key: '"sefaz-pdv-sync"', limit: 4 },
+      { limit: 1 },
+    ],
+    retries: 3,
+  },
   { cron: "5 * * * *" },
   async ({ step }) => {
     const agora = new Date();
@@ -625,19 +658,25 @@ export const syncVendas = inngest.createFunction(
 
       itensSalvos += lote.itens;
       vendasLidas += lote.vendas;
-      if (lote.maxDH && lote.maxDH > maiorDataHora) maiorDataHora = lote.maxDH;
       pagina = paginaAtual + 1;
+
+      // Salva o cursor A CADA página (mesmo padrão de produtos/preços): se a
+      // execução morrer no meio, a próxima continua da maior DataHora já
+      // gravada em vez de reiniciar a janela padrão do zero. Como o `id` de
+      // VendaItemSync é determinístico, reprocessar a página de fronteira não
+      // duplica.
+      if (lote.maxDH && lote.maxDH > maiorDataHora) {
+        maiorDataHora = lote.maxDH;
+        await gravarSyncState("vendas", { desde: maiorDataHora });
+      }
 
       if (!lote.temProxima) {
         concluiu = true;
         break;
       }
-      await step.sleep(`pausa-vendas-p${paginaAtual}`, PDV_PAUSA_ENTRE_LOTES_MS);
     }
 
-    // Avança o cursor pra maior DataHora processada. Se sobrou página (não
-    // concluiu), a próxima execução repete a janela a partir daqui — como o id
-    // é determinístico, o reprocesso não duplica.
+    // Garante o cursor salvo mesmo quando nenhuma página moveu o maxDH.
     await gravarSyncState("vendas", { desde: maiorDataHora });
 
     return { janela: { inicio, fim }, vendasLidas, itensSalvos, concluiu, proximoDesde: maiorDataHora };
@@ -658,7 +697,14 @@ interface CursorEstoque {
  * continuando de onde parou via SyncState "estoque:cursor".
  */
 export const syncEstoque = inngest.createFunction(
-  { id: "pdv-sync-estoque", concurrency: { limit: 1 }, retries: 3 },
+  {
+    id: "pdv-sync-estoque",
+    concurrency: [
+      { scope: "account", key: '"sefaz-pdv-sync"', limit: 4 },
+      { limit: 1 },
+    ],
+    retries: 3,
+  },
   { cron: "15 * * * *" },
   async ({ step }) => {
     const cursor = await step.run("cursor-estoque", () =>
@@ -706,7 +752,6 @@ export const syncEstoque = inngest.createFunction(
       // log de calibragem: quanto tempo o step levou
       console.log(`[syncEstoque] lote ${i / ESTOQUE_VARIACOES_POR_LOTE}: ${lote.length} variações, ${res.linhas} linhas, ${res.ms}ms`);
       await gravarSyncState("estoque:cursor", { ultimoId: lote[lote.length - 1] });
-      await step.sleep(`pausa-estoque-${cursor.ultimoId || "ini"}-${i}`, PDV_PAUSA_ENTRE_LOTES_MS);
     }
 
     // Se veio menos que o lote cheio, terminamos a volta pelo catálogo.
@@ -728,7 +773,14 @@ export const syncEstoque = inngest.createFunction(
 // ---------------------------------------------------------------------------
 
 export const syncRedes = inngest.createFunction(
-  { id: "pdv-sync-redes", concurrency: { limit: 1 }, retries: 3 },
+  {
+    id: "pdv-sync-redes",
+    concurrency: [
+      { scope: "account", key: '"sefaz-pdv-sync"', limit: 4 },
+      { limit: 1 },
+    ],
+    retries: 3,
+  },
   { cron: "0 4 * * *" },
   async ({ step }) => {
     const salvas = await step.run("sync-redes", async () => {
@@ -761,7 +813,14 @@ interface CursorFiliais {
 }
 
 export const syncFiliais = inngest.createFunction(
-  { id: "pdv-sync-filiais", concurrency: { limit: 1 }, retries: 3 },
+  {
+    id: "pdv-sync-filiais",
+    concurrency: [
+      { scope: "account", key: '"sefaz-pdv-sync"', limit: 4 },
+      { limit: 1 },
+    ],
+    retries: 3,
+  },
   { cron: "0 4 * * *" },
   async ({ step }) => {
     const todasLojas = await step.run("listar-lojas", async () => {
@@ -824,7 +883,6 @@ export const syncFiliais = inngest.createFunction(
 
       filiaisSalvas += salvos;
       await gravarSyncState("filiais:cursor", { ultimoLojaId: lote[lote.length - 1].id });
-      await step.sleep(`pausa-filiais-${cursor.ultimoLojaId}-${i}`, PDV_PAUSA_ENTRE_LOTES_MS);
     }
 
     const terminou = alvo.length === pendentes.length;
@@ -862,7 +920,14 @@ async function descobrirTabelaVarejo(): Promise<number> {
 }
 
 export const syncPrecos = inngest.createFunction(
-  { id: "pdv-sync-precos", concurrency: { limit: 1 }, retries: 3 },
+  {
+    id: "pdv-sync-precos",
+    concurrency: [
+      { scope: "account", key: '"sefaz-pdv-sync"', limit: 4 },
+      { limit: 1 },
+    ],
+    retries: 3,
+  },
   { cron: "45 3 * * *" },
   async ({ step }) => {
     const tabelaId = await step.run("descobrir-tabela-varejo", descobrirTabelaVarejo);
@@ -909,7 +974,6 @@ export const syncPrecos = inngest.createFunction(
         break;
       }
       await gravarSyncState("precos:cursor", { pagina });
-      await step.sleep(`pausa-precos-p${paginaAtual}`, PDV_PAUSA_ENTRE_LOTES_MS);
     }
 
     // Terminou a tabela -> recomeça na próxima execução diária.
@@ -934,7 +998,14 @@ export const syncPrecos = inngest.createFunction(
 const CONSOLIDAR_LINHAS_POR_STEP = 2000;
 
 export const consolidarVendasAntigas = inngest.createFunction(
-  { id: "pdv-consolidar-vendas-antigas", concurrency: { limit: 1 }, retries: 3 },
+  {
+    id: "pdv-consolidar-vendas-antigas",
+    concurrency: [
+      { scope: "account", key: '"sefaz-pdv-sync"', limit: 4 },
+      { limit: 1 },
+    ],
+    retries: 3,
+  },
   { cron: "20 3 * * *" },
   async ({ step }) => {
     const corte = anoMesCorteDetalhe(); // meses < corte viram resumo
@@ -1030,10 +1101,20 @@ interface EstadoMesBackfill {
   agg: Record<string, [number, number]>;
 }
 
-const BACKFILL_PAGINAS_POR_STEP = 20;
+// Páginas de API processadas dentro de um único `step.run`. Cada página de
+// vendas leva ~10-15s de I/O, então 10 páginas ≈ 100-150s — folga confortável
+// abaixo do maxDuration de 300s (antes eram 20, ~260s, encostando no teto).
+const BACKFILL_PAGINAS_POR_STEP = 10;
 
 export const backfillVendasHistorico = inngest.createFunction(
-  { id: "pdv-backfill-vendas-historico", concurrency: { limit: 1 }, retries: 3 },
+  {
+    id: "pdv-backfill-vendas-historico",
+    concurrency: [
+      { scope: "account", key: '"sefaz-pdv-sync"', limit: 4 },
+      { limit: 1 },
+    ],
+    retries: 3,
+  },
   { cron: "0 */2 * * *" },
   async ({ step }) => {
     const cursor = await step.run("cursor-backfill", () =>
@@ -1145,7 +1226,6 @@ export const backfillVendasHistorico = inngest.createFunction(
           acabou = true;
           break;
         }
-        await step.sleep(`pausa-backfill-${mesAlvo}-${paginaInicial}`, PDV_PAUSA_ENTRE_LOTES_MS);
       }
 
       // Mês profundo concluído -> grava o resumo (valores absolutos) e limpa.
@@ -1175,7 +1255,6 @@ export const backfillVendasHistorico = inngest.createFunction(
       await gravarSyncState("vendas-backfill:cursor", { mes: mesAlvo, done: false });
 
       mesAlvo = mesAnterior(mesAlvo);
-      await step.sleep(`pausa-mes-${i}`, PDV_PAUSA_ENTRE_LOTES_MS);
     }
 
     return { proximoMes: mesAlvo, mesesProcessados };
@@ -1204,7 +1283,14 @@ const COMPLETAR_XML_REPETIR_APOS_H = 6;
 const INTERVALO_COMPLETAR_XML_MS = 22_000;
 
 export const completarXmlNotas = inngest.createFunction(
-  { id: "completar-xml-notas", concurrency: { limit: 1 }, retries: 2 },
+  {
+    id: "completar-xml-notas",
+    concurrency: [
+      { scope: "account", key: '"sefaz-pdv-sync"', limit: 4 },
+      { limit: 1 },
+    ],
+    retries: 2,
+  },
   { cron: "*/30 * * * *" },
   async ({ step }) => {
     const limite = new Date(Date.now() - COMPLETAR_XML_REPETIR_APOS_H * 3_600_000);
@@ -1320,7 +1406,14 @@ interface CursorEnriquecer {
 }
 
 export const enriquecerVariacoes = inngest.createFunction(
-  { id: "pdv-enriquecer-variacoes", concurrency: { limit: 1 }, retries: 3 },
+  {
+    id: "pdv-enriquecer-variacoes",
+    concurrency: [
+      { scope: "account", key: '"sefaz-pdv-sync"', limit: 4 },
+      { limit: 1 },
+    ],
+    retries: 3,
+  },
   { cron: "0 */3 * * *" },
   async ({ step }) => {
     const cursor = await step.run("cursor-enriquecer", () =>
