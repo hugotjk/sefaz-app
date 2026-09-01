@@ -15,6 +15,10 @@ export default function RelatoriosPage() {
           <p>Compara vendas e estoque por gestor ou loja, com filtros por rede, coleção, grupo e mais.</p>
           <span className="tag">Em construção</span>
         </Link>
+        <Link href="/relatorios/conferencia-prazo" className="report-card">
+          <h3>Conferência de Prazo</h3>
+          <p>Uma linha por nota fiscal recebida: fornecedor, modelo, loja e o prazo de pagamento das duplicatas.</p>
+        </Link>
       </div>
     </div>
   );

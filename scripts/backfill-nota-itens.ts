@@ -34,9 +34,9 @@ async function main() {
         continue; // resumo travado, não é procNFe
       }
       const q = await popularNotaItens(n.id, n.xmlCompleto);
-      itensTotal += q;
+      itensTotal += q.itens;
       feitas++;
-      if (q === 0) semItens++;
+      if (q.itens === 0) semItens++;
     }
     console.log(`... ${feitas} notas com itens | ${itensTotal} NotaItem | ${semItens} sem itens úteis`);
   }

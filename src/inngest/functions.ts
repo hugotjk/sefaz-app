@@ -1262,13 +1262,21 @@ export const completarXmlNotas = inngest.createFunction(
           select: { id: true },
         });
 
-        // XML completo obtido -> (re)popula os itens da nota (NotaItem).
+        // XML completo obtido -> (re)popula itens e duplicatas da nota.
         let itensGravados = 0;
+        let duplicatasGravadas = 0;
         if (estado === "ok" && !("erro" in res)) {
-          itensGravados = await popularNotaItens(nota.id, res.xml);
+          const r = await popularNotaItens(nota.id, res.xml);
+          itensGravados = r.itens;
+          duplicatasGravadas = r.duplicatas;
         }
 
-        return { estado, itensGravados, erro: "erro" in res ? res.erro : undefined };
+        return {
+          estado,
+          itensGravados,
+          duplicatasGravadas,
+          erro: "erro" in res ? res.erro : undefined,
+        };
       });
 
       if (r.estado === "ok") {

@@ -5,28 +5,56 @@ import {
   identificarReferenciaFornecedor,
 } from "@/lib/identificar-produto";
 
+export interface ResultadoPopularNota {
+  itens: number;
+  duplicatas: number;
+}
+
 /**
- * A partir do XML completo de uma nota, (re)cria as linhas `NotaItem`:
- * apaga as existentes daquela nota e insere de novo, já com `modelo`,
- * `referenciaFornecedor` e `temCadastro` (EAN encontrado no catálogo).
+ * A partir do XML completo de uma nota, (re)cria as linhas `NotaItem` E
+ * `NotaDuplicata`: apaga as existentes daquela nota e insere de novo.
+ * NotaItem já vem com `modelo`, `referenciaFornecedor` e `temCadastro`.
  *
- * Retorna quantos itens foram gravados (0 se o XML não for interpretável).
+ * Retorna a contagem de itens e duplicatas gravados (ambos 0 se o XML não
+ * for interpretável).
  */
-export async function popularNotaItens(noteId: string, xml: string): Promise<number> {
+export async function popularNotaItens(
+  noteId: string,
+  xml: string
+): Promise<ResultadoPopularNota> {
   let nfe;
   try {
     nfe = parseNFeXml(xml);
   } catch {
-    return 0;
+    return { itens: 0, duplicatas: 0 };
   }
 
   const emitente = nfe.emitente.nome || "";
   const infCpl = nfe.informacoesComplementares || "";
   const itens = nfe.itens;
 
+  // ---- Duplicatas ----
+  const dups = (nfe.duplicatas ?? [])
+    .map((d) => {
+      const venc = new Date(d.vencimento);
+      return {
+        numero: String(d.numero ?? ""),
+        vencimento: venc,
+        valor: d.valor && d.valor !== "" ? d.valor : "0",
+        _ok: !isNaN(venc.getTime()),
+      };
+    })
+    .filter((d) => d._ok)
+    .map(({ _ok, ...rest }) => ({ noteId, ...rest }));
+
+  // ---- Itens ----
   if (itens.length === 0) {
-    await prisma.notaItem.deleteMany({ where: { noteId } });
-    return 0;
+    await prisma.$transaction([
+      prisma.notaItem.deleteMany({ where: { noteId } }),
+      prisma.notaDuplicata.deleteMany({ where: { noteId } }),
+      ...(dups.length ? [prisma.notaDuplicata.createMany({ data: dups })] : []),
+    ]);
+    return { itens: 0, duplicatas: dups.length };
   }
 
   // EANs (não vazios) que já existem no catálogo (VariacaoProduto.ean).
@@ -66,8 +94,10 @@ export async function popularNotaItens(noteId: string, xml: string): Promise<num
 
   await prisma.$transaction([
     prisma.notaItem.deleteMany({ where: { noteId } }),
+    prisma.notaDuplicata.deleteMany({ where: { noteId } }),
     prisma.notaItem.createMany({ data: dados }),
+    ...(dups.length ? [prisma.notaDuplicata.createMany({ data: dups })] : []),
   ]);
 
-  return dados.length;
+  return { itens: dados.length, duplicatas: dups.length };
 }

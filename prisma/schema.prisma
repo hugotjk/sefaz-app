@@ -244,10 +244,39 @@ model Note {
 
   eventos       NoteEvent[]
   itens         NotaItem[]
+  duplicatas    NotaDuplicata[]
 
   @@index([cnpjDestino])
   @@index([emitenteCnpj])
   @@index([ultimaTentativaXml])
+}
+
+// Vencimentos/duplicatas de cada nota (grupo `cobr/dup` do XML). Populado
+// junto com NotaItem (ver popular-nota-itens.ts).
+model NotaDuplicata {
+  id         String   @id @default(cuid())
+  noteId     String
+  note       Note     @relation(fields: [noteId], references: [id])
+  numero     String // nDup
+  vencimento DateTime
+  valor      Decimal  @db.Decimal(14, 2)
+
+  @@index([noteId])
+}
+
+// Planilha de referência de lojas mantida pelo cliente (não tem API no PDV).
+// Importada via scripts/importar-lojas-referencia.ts ou POST
+// /api/lojas-referencia/importar (TSV colado).
+model LojaReferencia {
+  cnpj        String   @id
+  status      String // ATIVO ou INATIVO
+  loja        String // nome da loja
+  gestor      String?
+  rede        String?
+  tipoLoja    String?
+  razaoSocial String?
+  comprador   String?
+  updatedAt   DateTime @updatedAt
 }
 
 // Itens (linhas) de cada nota fiscal recebida, persistidos a partir do XML
