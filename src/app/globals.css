@@ -172,7 +172,7 @@ h2 { font-size: 16px; margin: 0 0 12px; }
 .nota-acoes button:hover:not(:disabled) { color: var(--text); border-color: var(--accent); }
 .nota-acoes button:disabled { opacity: 0.5; cursor: default; }
 
-/* Nota sem XML completo ainda (só resumo na SEFAZ) */
+/* Nota ainda aguardando o XML completo da SEFAZ (pode aparecer depois) */
 .nota-acoes.aguardando button {
   color: var(--yellow);
   border-color: rgba(229, 185, 61, 0.4);
@@ -182,6 +182,18 @@ h2 { font-size: 16px; margin: 0 0 12px; }
   border-color: var(--yellow);
 }
 .nota-link.aguardando { color: var(--yellow); }
+
+/* SEFAZ não vai mais disponibilizar o XML completo — estado "definitivo",
+   cor neutra (não é alerta, é só informação). */
+.nota-acoes.indisponivel button {
+  color: var(--text-dim);
+  border-style: dashed;
+}
+.nota-acoes.indisponivel button:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--border);
+}
+.nota-link.indisponivel { color: var(--text-dim); font-style: italic; }
 
 .notes-pag {
   display: flex;

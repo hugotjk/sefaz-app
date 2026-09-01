@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { NotaModal } from "@/components/NotaModal";
 
+type StatusXml = "completo" | "aguardando" | "indisponivel";
+
 interface NotaLinha {
   chaveAcesso: string;
   numero: string | null;
@@ -14,10 +16,12 @@ interface NotaLinha {
   destinatarioNome: string;
   status: string;
   qtdEventos: number;
-  temXmlCompleto: boolean;
+  statusXml: StatusXml;
 }
 
-const TITULO_PENDENTE = "Aguardando XML completo da SEFAZ";
+const TITULO_AGUARDANDO = "Aguardando XML completo da SEFAZ";
+const MSG_INDISPONIVEL =
+  "A SEFAZ não disponibilizou o XML completo desta nota (só o resumo está disponível).";
 
 interface Resposta {
   notas: NotaLinha[];
@@ -164,43 +168,52 @@ export function NotasTable() {
           </thead>
           <tbody>
             {(dados?.notas ?? []).map((nota) => {
-              const pendente = !nota.temXmlCompleto;
-              const tituloPendente = pendente ? TITULO_PENDENTE : undefined;
+              const chave = nota.chaveAcesso;
+              const aguardando = nota.statusXml === "aguardando";
+              const indisponivel = nota.statusXml === "indisponivel";
+              const titulo = aguardando
+                ? TITULO_AGUARDANDO
+                : indisponivel
+                ? MSG_INDISPONIVEL
+                : undefined;
+              const marcador = aguardando ? " aguardando" : indisponivel ? " indisponivel" : "";
+              // Nota sem XML completo definitivo: não bate na SEFAZ de novo,
+              // só explica na hora.
+              const abrir = () =>
+                indisponivel ? setErroAcao(MSG_INDISPONIVEL) : setChaveAberta(chave);
+              const baixarOuAvisar = (tipo: "xml" | "pdf") =>
+                indisponivel ? setErroAcao(MSG_INDISPONIVEL) : baixar(chave, tipo);
               return (
-              <tr key={nota.chaveAcesso} className="nota-row">
+              <tr key={chave} className="nota-row">
                 <td>
-                  <span className={`nota-acoes${pendente ? " aguardando" : ""}`}>
-                    <button
-                      type="button"
-                      title={tituloPendente}
-                      onClick={() => setChaveAberta(nota.chaveAcesso)}
-                    >
+                  <span className={`nota-acoes${marcador}`}>
+                    <button type="button" title={titulo} onClick={abrir}>
                       Ver
                     </button>
                     <button
                       type="button"
-                      title={tituloPendente}
-                      disabled={baixando === `${nota.chaveAcesso}:xml`}
-                      onClick={() => baixar(nota.chaveAcesso, "xml")}
+                      title={titulo}
+                      disabled={baixando === `${chave}:xml`}
+                      onClick={() => baixarOuAvisar("xml")}
                     >
-                      {baixando === `${nota.chaveAcesso}:xml` ? "…" : "XML"}
+                      {baixando === `${chave}:xml` ? "…" : "XML"}
                     </button>
                     <button
                       type="button"
-                      title={tituloPendente}
-                      disabled={baixando === `${nota.chaveAcesso}:pdf`}
-                      onClick={() => baixar(nota.chaveAcesso, "pdf")}
+                      title={titulo}
+                      disabled={baixando === `${chave}:pdf`}
+                      onClick={() => baixarOuAvisar("pdf")}
                     >
-                      {baixando === `${nota.chaveAcesso}:pdf` ? "…" : "PDF"}
+                      {baixando === `${chave}:pdf` ? "…" : "PDF"}
                     </button>
                   </span>
                 </td>
                 <td>
                   <button
                     type="button"
-                    className={`nota-link${pendente ? " aguardando" : ""}`}
-                    title={tituloPendente}
-                    onClick={() => setChaveAberta(nota.chaveAcesso)}
+                    className={`nota-link${marcador}`}
+                    title={titulo}
+                    onClick={abrir}
                   >
                     {nota.numero || "-"}
                   </button>

@@ -1,13 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
+import { statusXmlNota, TAMANHO_MINIMO_XML_COMPLETO } from "@/lib/nota-xml-status";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-// Um procNFe (documento completo) tem vários KB; um resNFe (resumo) tem ~0,5 KB.
-// Usamos o tamanho pra decidir "tem XML completo" sem trazer a string na query.
-const TAMANHO_MINIMO_XML_COMPLETO = 2000;
 
 const POR_PAGINA_OPCOES = [25, 50, 100];
 
@@ -35,6 +32,7 @@ export async function GET(req: NextRequest) {
         emitenteNome: true,
         emitenteCnpj: true,
         status: true,
+        tentativasXml: true,
         _count: { select: { eventos: true } },
         certificate: { select: { razaoSocial: true, cnpj: true } },
       },
@@ -68,7 +66,11 @@ export async function GET(req: NextRequest) {
     destinatarioNome: nota.certificate.razaoSocial || nota.certificate.cnpj,
     status: nota.status,
     qtdEventos: nota._count.eventos,
-    temXmlCompleto: comXml.has(nota.chaveAcesso),
+    statusXml: statusXmlNota({
+      temXmlCompleto: comXml.has(nota.chaveAcesso),
+      tentativasXml: nota.tentativasXml,
+      dataEmissao: nota.dataEmissao,
+    }),
   }));
 
   return NextResponse.json({ notas: linhas, total, pagina, porPagina, ordem });

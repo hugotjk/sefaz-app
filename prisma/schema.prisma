@@ -225,6 +225,9 @@ model Note {
   xmlCompleto   String
   // Última vez que o job tentou buscar o XML completo (pra não insistir toda hora).
   ultimaTentativaXml DateTime?
+  // Quantas vezes o job já tentou e a SEFAZ só devolveu o resumo. Passado um
+  // limite, se a nota já for antiga, o job desiste dela (ver completarXmlNotas).
+  tentativasXml Int      @default(0)
 
   nsu           String       // NSU em que este documento foi recebido
   createdAt     DateTime     @default(now())

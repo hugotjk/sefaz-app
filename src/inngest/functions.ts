@@ -5,6 +5,7 @@ import { decryptCertificate } from "@/lib/crypto";
 import { consultarDistribuicaoDFe } from "@/lib/sefaz";
 import { parseDocumento } from "@/lib/parse-documento";
 import { obterXmlNota } from "@/lib/obter-xml-nota";
+import { LIMITE_TENTATIVAS_XML, DIAS_NOTA_RECENTE } from "@/lib/nota-xml-status";
 import {
   listarRedes,
   listarLojas,
@@ -1174,6 +1175,10 @@ export const backfillVendasHistorico = inngest.createFunction(
 // - Só re-tenta uma nota se já faz >= COMPLETAR_XML_REPETIR_APOS_H horas.
 // - Rate limit da SEFAZ (cStat 656 / "consumo indevido") costuma valer pro
 //   certificado inteiro: nesse caso para a execução toda.
+// - DESISTE de uma nota (ignora nas próximas buscas) quando ela já teve
+//   LIMITE_TENTATIVAS_XML tentativas E foi emitida há mais de
+//   DIAS_NOTA_RECENTE dias — nesse ponto a SEFAZ provavelmente não vai mais
+//   disponibilizar o XML completo. Notas recentes continuam sendo tentadas.
 // ---------------------------------------------------------------------------
 
 const MAX_NOTAS_COMPLETAR_XML = 10;
@@ -1185,12 +1190,21 @@ export const completarXmlNotas = inngest.createFunction(
   { cron: "*/30 * * * *" },
   async ({ step }) => {
     const limite = new Date(Date.now() - COMPLETAR_XML_REPETIR_APOS_H * 3_600_000);
+    const trintaDiasAtras = new Date(Date.now() - DIAS_NOTA_RECENTE * 86_400_000);
 
     const notas = await step.run("buscar-notas-pendentes", () =>
       prisma.note.findMany({
         where: {
           xmlCompleto: "",
           OR: [{ ultimaTentativaXml: null }, { ultimaTentativaXml: { lt: limite } }],
+          // Não desistiu ainda: poucas tentativas OU nota ainda recente
+          // (sem data de emissão contamos como "ainda pode aparecer").
+          NOT: {
+            AND: [
+              { tentativasXml: { gte: LIMITE_TENTATIVAS_XML } },
+              { dataEmissao: { lt: trintaDiasAtras } },
+            ],
+          },
         },
         orderBy: [
           { ultimaTentativaXml: { sort: "asc", nulls: "first" } },
@@ -1212,17 +1226,24 @@ export const completarXmlNotas = inngest.createFunction(
 
       const r = await step.run(`completar-${chave}`, async () => {
         const res = await obterXmlNota(chave);
+
+        let estado: "ok" | "ratelimit" | "resumo" | "erro";
+        if (!("erro" in res)) estado = "ok";
+        else if (/cstat\s*656|consumo\s+indevido/i.test(res.erro)) estado = "ratelimit";
+        else if (res.status === 409) estado = "resumo";
+        else estado = "erro";
+
         await prisma.note.update({
           where: { chaveAcesso: chave },
-          data: { ultimaTentativaXml: new Date() },
+          data: {
+            ultimaTentativaXml: new Date(),
+            // Só conta como "tentativa gasta" quando a SEFAZ realmente só tinha
+            // o resumo (não em rate limit nem erro passageiro).
+            ...(estado === "resumo" ? { tentativasXml: { increment: 1 } } : {}),
+          },
         });
 
-        if (!("erro" in res)) return { estado: "ok" as const };
-        if (/cstat\s*656|consumo\s+indevido/i.test(res.erro)) {
-          return { estado: "ratelimit" as const, erro: res.erro };
-        }
-        if (res.status === 409) return { estado: "resumo" as const };
-        return { estado: "erro" as const, erro: res.erro };
+        return { estado, erro: "erro" in res ? res.erro : undefined };
       });
 
       if (r.estado === "ok") {
