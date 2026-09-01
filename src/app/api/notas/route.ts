@@ -7,6 +7,32 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const POR_PAGINA_OPCOES = [25, 50, 100];
+const CAMPOS_BUSCA = ["conteudo", "emitente", "chave", "numero"] as const;
+type CampoBusca = (typeof CAMPOS_BUSCA)[number];
+
+function montarWhere(sp: URLSearchParams): Prisma.NoteWhereInput {
+  const where: Prisma.NoteWhereInput = {};
+
+  const certificateId = sp.get("certificateId")?.trim();
+  if (certificateId) where.certificateId = certificateId;
+
+  const termo = sp.get("buscaTermo")?.trim();
+  const campo = (sp.get("buscaCampo") ?? "") as CampoBusca;
+  if (termo && CAMPOS_BUSCA.includes(campo)) {
+    const contemI = { contains: termo, mode: "insensitive" as const };
+    if (campo === "emitente") {
+      where.OR = [{ emitenteNome: contemI }, { emitenteCnpj: contemI }];
+    } else if (campo === "chave") {
+      where.chaveAcesso = { contains: termo };
+    } else if (campo === "numero") {
+      where.numero = { contains: termo };
+    } else if (campo === "conteudo") {
+      where.xmlCompleto = contemI;
+    }
+  }
+
+  return where;
+}
 
 export async function GET(req: NextRequest) {
   const sp = req.nextUrl.searchParams;
@@ -16,9 +42,12 @@ export async function GET(req: NextRequest) {
   const porPagina = POR_PAGINA_OPCOES.includes(porPaginaRaw) ? porPaginaRaw : 25;
   const ordem: "asc" | "desc" = sp.get("ordem") === "asc" ? "asc" : "desc";
 
+  const where = montarWhere(sp);
+
   const [total, notas] = await Promise.all([
-    prisma.note.count(),
+    prisma.note.count({ where }),
     prisma.note.findMany({
+      where,
       orderBy: { dataEmissao: { sort: ordem, nulls: "last" } },
       skip: (pagina - 1) * porPagina,
       take: porPagina,

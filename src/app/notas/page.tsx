@@ -6,9 +6,7 @@ export default function NotasPage() {
   return (
     <div>
       <h1>Notas recebidas</h1>
-      <div className="card">
-        <NotasTable />
-      </div>
+      <NotasTable />
     </div>
   );
 }
