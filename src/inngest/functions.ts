@@ -1,4 +1,4 @@
-import { PrismaClient } from "@prisma/client";
+import { PrismaClient, Prisma } from "@prisma/client";
 import { inngest } from "@/lib/inngest";
 import { prisma } from "@/lib/db";
 import { decryptCertificate } from "@/lib/crypto";
@@ -8,6 +8,7 @@ import { obterXmlNota } from "@/lib/obter-xml-nota";
 import { LIMITE_TENTATIVAS_XML, DIAS_NOTA_RECENTE } from "@/lib/nota-xml-status";
 import { classificarTipoLoja } from "@/lib/classificar-tipo-loja";
 import { popularNotaItens } from "@/lib/popular-nota-itens";
+import { upsertEstoqueBulk } from "@/lib/bulk-upsert-estoque";
 import {
   listarRedes,
   listarLojas,
@@ -254,25 +255,31 @@ export const iniciarBackfillAoValidar = inngest.createFunction(
 // A API do PDV limita TamanhoPagina a 50 (rejeita acima disso).
 const PDV_TAM_PAGINA = 50;
 // Tetos de segurança por execução — o cron continua na próxima rodada usando
-// o cursor salvo em SyncState. Como cada página traz só 50 itens, os tetos
-// precisam ser altos pra o backfill inicial não levar semanas.
-const MAX_PAGINAS_PRODUTOS_POR_EXECUCAO = 200; // ~10k produtos/execução
-const MAX_PRODUTOS_BUSCAR_VARIACOES_POR_EXECUCAO = 400;
-const MAX_PAGINAS_VENDAS_POR_EXECUCAO = 300; // ~15k vendas/execução
-const PDV_PAUSA_ENTRE_LOTES_MS = 1_000;
+// o cursor salvo em SyncState. Cada `step.run` é uma invocação serverless
+// separada (limite maxDuration=300s), então esses tetos controlam quanto o
+// cron faz por disparo, não o tempo de um step. Dimensionados pra maxDuration
+// de 300s (antes era 60s).
+const MAX_PAGINAS_PRODUTOS_POR_EXECUCAO = 500; // ~25k produtos/disparo
+const MAX_PRODUTOS_BUSCAR_VARIACOES_POR_EXECUCAO = 1200;
+const MAX_PAGINAS_VENDAS_POR_EXECUCAO = 600; // ~30k vendas/disparo
+const PDV_PAUSA_ENTRE_LOTES_MS = 500;
 // Quanto de histórico de vendas puxar na primeiríssima execução do sync horário.
 const VENDAS_JANELA_INICIAL_DIAS = 7;
 // Data bem antiga = "traz o catálogo inteiro" no primeiro backfill de produtos.
 const PRODUTOS_DATA_BACKFILL = "2000-01-01";
 
-// --- estoque (agora orientado pelo nosso catálogo) ---
-const ESTOQUE_VARIACOES_POR_EXECUCAO = 100; // variações consultadas por hora
-const ESTOQUE_VARIACOES_POR_LOTE = 20; // por step.run
+// --- estoque (orientado pelo nosso catálogo) ---
+// ATENÇÃO: `listarEstoqueDaVariacao` de UMA variação traz MILHARES de linhas
+// (~2k, loja a loja) e leva ~5s. Com upsert em massa (upsertEstoqueBulk) a
+// escrita fica barata, mas o fetch continua caro -> lote pequeno por step.run
+// pra não estourar os 300s.
+const ESTOQUE_VARIACOES_POR_EXECUCAO = 80; // variações por disparo
+const ESTOQUE_VARIACOES_POR_LOTE = 6; // por step.run (~6 x 6s = ~40s)
 // --- filiais ---
-const FILIAIS_POR_EXECUCAO = 300; // lojas processadas por execução diária
-const FILIAIS_POR_LOTE = 20; // por step.run
+const FILIAIS_POR_EXECUCAO = 600; // lojas processadas por disparo diário
+const FILIAIS_POR_LOTE = 30; // por step.run
 // --- preços ---
-const MAX_PAGINAS_PRECOS_POR_EXECUCAO = 1000; // ~50k preços/execução
+const MAX_PAGINAS_PRECOS_POR_EXECUCAO = 2500; // ~125k preços/disparo
 const PDV_TABELA_PRECO_VAREJO_FALLBACK = 3; // "3 VAREJO" (confirmado na API)
 // --- vendas: detalhe recente x resumo mensal ---
 const VENDAS_MESES_DETALHE = 12; // mantém 12 meses em VendaItemSync
@@ -385,61 +392,70 @@ export const syncProdutos = inngest.createFunction(
             tamanhoPagina: PDV_TAM_PAGINA,
           });
 
-          let salvos = 0;
+          // Monta as operações e executa TUDO num $transaction em lote (array):
+          // 1 round-trip em vez de N upserts sequenciais (~80ms cada).
+          const ops: Prisma.PrismaPromise<unknown>[] = [];
           let vars = 0;
-          const semEmbutida: string[] = [];
+          const semEmbutidaCandidatos: string[] = [];
 
           for (const p of registros) {
-            await prisma.produto.upsert({
-              where: { id: p.Id },
-              create: {
-                id: p.Id,
-                redeId: p.RedeId ?? rede.id,
-                nome: p.Nome || null,
-                referenciaFornecedor: p.ReferenciaProdutoFornecedor || null,
-                fornecedorId: p.FornecedorId || null,
-                fornecedorNome: p.Fornecedor || null,
-                modeloId: p.ModeloId != null ? String(p.ModeloId) : null,
-                modeloNome: p.Modelo || null,
-                colecaoId: p.ColecaoId ?? null,
-                colecaoNome: p.Colecao || null,
-                grupoId: p.GrupoId ?? null,
-                grupoNome: p.Grupo || null,
-                compradorId: p.CompradorId != null ? String(p.CompradorId) : null,
-                compradorNome: p.Comprador || null,
-              },
-              update: {
-                redeId: p.RedeId ?? rede.id,
-                nome: p.Nome || null,
-                referenciaFornecedor: p.ReferenciaProdutoFornecedor || null,
-                fornecedorId: p.FornecedorId || null,
-                fornecedorNome: p.Fornecedor || null,
-                modeloId: p.ModeloId != null ? String(p.ModeloId) : null,
-                modeloNome: p.Modelo || null,
-                colecaoId: p.ColecaoId ?? null,
-                colecaoNome: p.Colecao || null,
-                grupoId: p.GrupoId ?? null,
-                grupoNome: p.Grupo || null,
-                compradorId: p.CompradorId != null ? String(p.CompradorId) : null,
-                compradorNome: p.Comprador || null,
-              },
-            });
-            salvos++;
+            const campos = {
+              redeId: p.RedeId ?? rede.id,
+              nome: p.Nome || null,
+              referenciaFornecedor: p.ReferenciaProdutoFornecedor || null,
+              fornecedorId: p.FornecedorId || null,
+              fornecedorNome: p.Fornecedor || null,
+              modeloId: p.ModeloId != null ? String(p.ModeloId) : null,
+              modeloNome: p.Modelo || null,
+              colecaoId: p.ColecaoId ?? null,
+              colecaoNome: p.Colecao || null,
+              grupoId: p.GrupoId ?? null,
+              grupoNome: p.Grupo || null,
+              compradorId: p.CompradorId != null ? String(p.CompradorId) : null,
+              compradorNome: p.Comprador || null,
+            };
+            ops.push(
+              prisma.produto.upsert({
+                where: { id: p.Id },
+                create: { id: p.Id, ...campos },
+                update: campos,
+              })
+            );
 
             const embutidas = p.Variacoes ?? [];
             if (embutidas.length > 0) {
               for (const v of embutidas) {
-                await prisma.variacaoProduto.upsert({
-                  where: { id: v.Id },
-                  create: { id: v.Id, produtoId: p.Id, redeId: p.RedeId ?? rede.id },
-                  update: { produtoId: p.Id, redeId: p.RedeId ?? rede.id },
-                });
+                ops.push(
+                  prisma.variacaoProduto.upsert({
+                    where: { id: v.Id },
+                    create: { id: v.Id, produtoId: p.Id, redeId: p.RedeId ?? rede.id },
+                    update: { produtoId: p.Id, redeId: p.RedeId ?? rede.id },
+                  })
+                );
                 vars++;
               }
             } else {
-              const jaTem = await prisma.variacaoProduto.count({ where: { produtoId: p.Id } });
-              if (jaTem === 0) semEmbutida.push(p.Id);
+              semEmbutidaCandidatos.push(p.Id);
             }
+          }
+
+          if (ops.length > 0) await prisma.$transaction(ops);
+          const salvos = registros.length;
+
+          // Produtos sem variação embutida que AINDA não têm nenhuma variação
+          // salva — numa query só, em vez de um count por produto.
+          let semEmbutida: string[] = [];
+          if (semEmbutidaCandidatos.length > 0) {
+            const jaComVariacao = new Set(
+              (
+                await prisma.variacaoProduto.findMany({
+                  where: { produtoId: { in: semEmbutidaCandidatos } },
+                  select: { produtoId: true },
+                  distinct: ["produtoId"],
+                })
+              ).map((r) => r.produtoId)
+            );
+            semEmbutida = semEmbutidaCandidatos.filter((id) => !jaComVariacao.has(id));
           }
 
           return {
@@ -670,29 +686,25 @@ export const syncEstoque = inngest.createFunction(
     for (let i = 0; i < ids.length; i += ESTOQUE_VARIACOES_POR_LOTE) {
       const lote = ids.slice(i, i + ESTOQUE_VARIACOES_POR_LOTE);
 
-      const salvos = await step.run(`estoque-lote-${cursor.ultimoId || "ini"}-${i}`, async () => {
+      const res = await step.run(`estoque-lote-${cursor.ultimoId || "ini"}-${i}`, async () => {
+        const t0 = Date.now();
         let n = 0;
         for (const variacaoId of lote) {
           const linhas = await listarEstoqueDaVariacao(variacaoId);
-          for (const e of linhas) {
-            await prisma.estoqueVariacaoSync.upsert({
-              where: {
-                variacaoId_lojaId: { variacaoId: String(e.VariacaoId), lojaId: e.LojaId },
-              },
-              create: {
-                variacaoId: String(e.VariacaoId),
-                lojaId: e.LojaId,
-                quantidade: Number(e.Quantidade ?? 0),
-              },
-              update: { quantidade: Number(e.Quantidade ?? 0) },
-            });
-            n++;
-          }
+          n += await upsertEstoqueBulk(
+            linhas.map((e) => ({
+              variacaoId: String(e.VariacaoId),
+              lojaId: e.LojaId,
+              quantidade: Number(e.Quantidade ?? 0),
+            }))
+          );
         }
-        return n;
+        return { linhas: n, ms: Date.now() - t0 };
       });
 
-      linhasSalvas += salvos;
+      linhasSalvas += res.linhas;
+      // log de calibragem: quanto tempo o step levou
+      console.log(`[syncEstoque] lote ${i / ESTOQUE_VARIACOES_POR_LOTE}: ${lote.length} variações, ${res.linhas} linhas, ${res.ms}ms`);
       await gravarSyncState("estoque:cursor", { ultimoId: lote[lote.length - 1] });
       await step.sleep(`pausa-estoque-${cursor.ultimoId || "ini"}-${i}`, PDV_PAUSA_ENTRE_LOTES_MS);
     }
@@ -1292,8 +1304,8 @@ export const completarXmlNotas = inngest.createFunction(
 // e salva. Cursor em SyncState "enriquecer-variacoes:cursor".
 // ---------------------------------------------------------------------------
 
-const ENRIQUECER_VARIACOES_POR_EXECUCAO = 30;
-const ENRIQUECER_PRODUTOS_POR_LOTE = 5;
+const ENRIQUECER_VARIACOES_POR_EXECUCAO = 90;
+const ENRIQUECER_PRODUTOS_POR_LOTE = 10;
 
 interface CursorEnriquecer {
   ultimoId: string;

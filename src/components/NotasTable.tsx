@@ -69,6 +69,7 @@ export function NotasTable() {
   const [buscaTermo, setBuscaTermo] = useState("");
   const [buscaTermoAplicado, setBuscaTermoAplicado] = useState("");
   const [certificateId, setCertificateId] = useState("");
+  const [empresaTexto, setEmpresaTexto] = useState(""); // texto visível do input com datalist
   const [certificados, setCertificados] = useState<CertificadoOpcao[]>([]);
 
   const [dados, setDados] = useState<Resposta | null>(null);
@@ -81,11 +82,20 @@ export function NotasTable() {
 
   const filtroAtivo = buscaTermoAplicado.trim() !== "" || certificateId !== "";
 
-  // Lista de empresas recebedoras (certificados).
+  // Lista de empresas recebedoras (certificados), ordenada alfabeticamente.
   useEffect(() => {
     fetch("/api/certificados")
       .then((r) => r.json())
-      .then((j) => setCertificados(j.certificados ?? []))
+      .then((j) => {
+        const lista: CertificadoOpcao[] = j.certificados ?? [];
+        lista.sort((a, b) =>
+          (a.razaoSocial?.trim() || a.cnpj).localeCompare(
+            b.razaoSocial?.trim() || b.cnpj,
+            "pt-BR"
+          )
+        );
+        setCertificados(lista);
+      })
       .catch(() => setCertificados([]));
   }, []);
 
@@ -138,6 +148,7 @@ export function NotasTable() {
     setBuscaTermo("");
     setBuscaTermoAplicado("");
     setCertificateId("");
+    setEmpresaTexto("");
     setPagina(1);
   }
 
@@ -171,7 +182,16 @@ export function NotasTable() {
     }
   }
 
-  const nomeCertificado = (c: CertificadoOpcao) => c.razaoSocial?.trim() || c.cnpj;
+  // Texto visível/pesquisável de cada certificado no datalist: "Razão Social - CNPJ".
+  const rotuloCertificado = (c: CertificadoOpcao) =>
+    c.razaoSocial?.trim() ? `${c.razaoSocial.trim()} - ${c.cnpj}` : c.cnpj;
+
+  function aoMudarEmpresa(texto: string) {
+    setEmpresaTexto(texto);
+    const achado = certificados.find((c) => rotuloCertificado(c) === texto.trim());
+    setCertificateId(achado ? achado.id : "");
+    setPagina(1);
+  }
 
   const total = dados?.total ?? 0;
   const totalPaginas = Math.max(1, Math.ceil(total / porPagina));
@@ -202,20 +222,18 @@ export function NotasTable() {
 
         <div className="field">
           <label>Empresa recebedora</label>
-          <select
-            value={certificateId}
-            onChange={(e) => {
-              setCertificateId(e.target.value);
-              setPagina(1);
-            }}
-          >
-            <option value="">Todas</option>
+          <input
+            type="text"
+            list="notas-empresas-recebedoras"
+            placeholder="Todas — digite pra buscar…"
+            value={empresaTexto}
+            onChange={(e) => aoMudarEmpresa(e.target.value)}
+          />
+          <datalist id="notas-empresas-recebedoras">
             {certificados.map((c) => (
-              <option key={c.id} value={c.id}>
-                {nomeCertificado(c)}
-              </option>
+              <option key={c.id} value={rotuloCertificado(c)} />
             ))}
-          </select>
+          </datalist>
         </div>
 
         {filtroAtivo && (
