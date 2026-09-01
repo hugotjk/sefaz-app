@@ -1124,9 +1124,15 @@ export const backfillVendasHistorico = inngest.createFunction(
 
     const agora = new Date();
     const corte = anoMesCorteDetalhe(agora);
+    const mesCorrente = anoMesDe(agora);
+    // Um mês vazio só conta como "fim do histórico" se estiver pelo menos 2
+    // meses atrás do corrente — assim o mês em andamento (parcial por natureza,
+    // pode estar recém-começado e sem vendas) e o anterior nunca desligam o
+    // backfill por engano. Formato "YYYY-MM" compara certo como string.
+    const limiteMesVazio = mesAnterior(mesAnterior(mesCorrente));
 
     let mesesProcessados = 0;
-    let mesAlvo = cursor.mes ? mesAnterior(cursor.mes) : anoMesDe(agora);
+    let mesAlvo = cursor.mes ? mesAnterior(cursor.mes) : mesCorrente;
 
     for (let i = 0; i < MAX_MESES_BACKFILL_POR_EXECUCAO; i++) {
       const ini = primeiroInstanteDoMes(mesAlvo).toISOString();
@@ -1248,7 +1254,12 @@ export const backfillVendasHistorico = inngest.createFunction(
       await gravarSyncState(chaveMes, { mes: "", pagina: 1, agg: {} });
 
       mesesProcessados++;
-      if (vazioLogo && vendasNoMes === 0) {
+      // "Fim do histórico" só quando um mês PASSADO inteiro (varrido desde a
+      // página 1 -> `vazioLogo`) veio sem nenhuma venda. Nunca pelo mês
+      // corrente nem pelo anterior (ver `limiteMesVazio`).
+      const mesPassadoInteiroVazio =
+        mesAlvo <= limiteMesVazio && vazioLogo && vendasNoMes === 0;
+      if (mesPassadoInteiroVazio) {
         await gravarSyncState("vendas-backfill:cursor", { mes: mesAlvo, done: true });
         return { mesAlvo, done: true, mesesProcessados };
       }
