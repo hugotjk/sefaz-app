@@ -6,3 +6,4 @@ node_modules
 *.p12
 .DS_Store
 *.tsbuildinfo
+gabarito-tipoloja.tsv

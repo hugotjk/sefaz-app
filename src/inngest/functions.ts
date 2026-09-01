@@ -6,6 +6,7 @@ import { consultarDistribuicaoDFe } from "@/lib/sefaz";
 import { parseDocumento } from "@/lib/parse-documento";
 import { obterXmlNota } from "@/lib/obter-xml-nota";
 import { LIMITE_TENTATIVAS_XML, DIAS_NOTA_RECENTE } from "@/lib/nota-xml-status";
+import { classificarTipoLoja } from "@/lib/classificar-tipo-loja";
 import {
   listarRedes,
   listarLojas,
@@ -780,20 +781,24 @@ export const syncFiliais = inngest.createFunction(
         for (const loja of lote) {
           try {
             const filial = await obterFilial(loja.id);
+            const nome = loja.nome ?? filial.RazaoSocial ?? null;
+            const tipoLoja = classificarTipoLoja(loja.id, loja.nome ?? "");
             await prisma.filialSync.upsert({
               where: { lojaId: loja.id },
               create: {
                 lojaId: loja.id,
-                nome: loja.nome ?? filial.RazaoSocial ?? null,
+                nome,
                 empresaId: filial.Empresa ?? null,
                 grupoId: filial.Grupo ?? null,
                 supervisor: filial.Supervisor ?? null,
+                tipoLoja,
               },
               update: {
-                nome: loja.nome ?? filial.RazaoSocial ?? null,
+                nome,
                 empresaId: filial.Empresa ?? null,
                 grupoId: filial.Grupo ?? null,
                 supervisor: filial.Supervisor ?? null,
+                tipoLoja,
               },
             });
             n++;

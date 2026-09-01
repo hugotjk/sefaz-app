@@ -26,7 +26,7 @@ const FILTROS_INICIAIS: FiltrosForm = {
   dataInicial: diasAtras(30),
   dataFinal: hojeISO(),
   redeId: null,
-  tipoLojaId: null,
+  tipoLoja: null,
   grupoLojaId: null,
   campoProduto: "fornecedor",
   fornecedorNome: null,
@@ -44,7 +44,7 @@ function montarQuery(f: FiltrosForm, pagina: number): string {
   p.set("dataInicial", f.dataInicial);
   p.set("dataFinal", f.dataFinal);
   if (f.redeId != null) p.set("redeId", String(f.redeId));
-  if (f.tipoLojaId != null) p.set("tipoLojaId", String(f.tipoLojaId));
+  if (f.tipoLoja != null) p.set("tipoLoja", f.tipoLoja);
   if (f.grupoLojaId != null) p.set("grupoLojaId", String(f.grupoLojaId));
   p.set("campoProduto", f.campoProduto);
   if (f.campoProduto === "fornecedor" && f.fornecedorNome) p.set("fornecedorNome", f.fornecedorNome);

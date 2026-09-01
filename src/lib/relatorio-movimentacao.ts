@@ -23,7 +23,7 @@ export interface FiltrosRelatorio {
   dataInicial: string; // YYYY-MM-DD
   dataFinal: string; // YYYY-MM-DD
   redeId: number | null;
-  tipoLojaId: number | null; // EmpresaLoja.codigo -> FilialSync.empresaId
+  tipoLoja: string | null; // marca (FilialSync.tipoLoja, classificada pelo nome)
   grupoLojaId: number | null; // GrupoLoja.codigo   -> FilialSync.grupoId
   campoProduto: CampoProduto;
   fornecedorNome: string | null;
@@ -177,14 +177,12 @@ export async function montarRelatorio(f: FiltrosRelatorio): Promise<RelatorioRes
   const { ini, fimExcl, iniMes, fimMes } = limitesData(f.dataInicial, f.dataFinal);
 
   // ---- 1. Lojas em escopo (filtro Tipo Loja / Grupo Loja) + regra NAOUSAR ----
-  const [filiais, empresas, grupos, redes] = await Promise.all([
+  const [filiais, grupos, redes] = await Promise.all([
     prisma.filialSync.findMany(),
-    prisma.empresaLoja.findMany(),
     prisma.grupoLoja.findMany(),
     prisma.redeSync.findMany(),
   ]);
 
-  const nomeEmpresa = new Map(empresas.map((e) => [e.codigo, e.nome]));
   const nomeGrupoLoja = new Map(grupos.map((g) => [g.codigo, g.nome]));
   const nomeRede = new Map(redes.map((r) => [r.id, r.nome]));
 
@@ -223,11 +221,11 @@ export async function montarRelatorio(f: FiltrosRelatorio): Promise<RelatorioRes
   }
 
   let lojaIdsEscopo: number[] | null = null;
-  if (f.tipoLojaId != null || f.grupoLojaId != null) {
+  if (f.tipoLoja != null || f.grupoLojaId != null) {
     lojaIdsEscopo = filiais
       .filter(
         (fil) =>
-          (f.tipoLojaId == null || fil.empresaId === f.tipoLojaId) &&
+          (f.tipoLoja == null || fil.tipoLoja === f.tipoLoja) &&
           (f.grupoLojaId == null || fil.grupoId === f.grupoLojaId)
       )
       .map((fil) => fil.lojaId);
@@ -387,10 +385,15 @@ export async function montarRelatorio(f: FiltrosRelatorio): Promise<RelatorioRes
   });
 
   // ---- 5. Opções dos filtros (com regra de prioridade venda/estoque) ----
+  // Tipo Loja: valores distintos já classificados nas filiais.
+  const tiposLojaDistintos = [
+    ...new Set(filiais.map((fl) => fl.tipoLoja).filter((v): v is string => !!v)),
+  ].sort((a, b) => a.localeCompare(b, "pt-BR"));
+
   const opcoes = await montarOpcoes(
     f,
     { ini, fimExcl, iniMes, fimMes },
-    nomeEmpresa,
+    tiposLojaDistintos,
     nomeGrupoLoja,
     nomeRede
   );
@@ -417,7 +420,7 @@ interface OpcaoBucketRow {
 async function montarOpcoes(
   f: FiltrosRelatorio,
   d: { ini: Date; fimExcl: Date; iniMes: string; fimMes: string },
-  nomeEmpresa: Map<number, string>,
+  tiposLojaDistintos: string[],
   nomeGrupoLoja: Map<number, string>,
   nomeRede: Map<number, string>
 ): Promise<OpcoesRelatorio> {
@@ -490,7 +493,7 @@ async function montarOpcoes(
 
   return {
     redes: listaTabela(nomeRede),
-    tiposLoja: listaTabela(nomeEmpresa),
+    tiposLoja: tiposLojaDistintos.map((v) => ({ valor: v, label: v })),
     gruposLoja: listaTabela(nomeGrupoLoja),
     modelos: doCampo("modelo"),
     fornecedores: doCampo("fornecedor"),
@@ -524,7 +527,7 @@ export function parseFiltros(sp: URLSearchParams): FiltrosRelatorio {
     dataInicial,
     dataFinal,
     redeId: s("redeId") ? Number(s("redeId")) : null,
-    tipoLojaId: s("tipoLojaId") ? Number(s("tipoLojaId")) : null,
+    tipoLoja: s("tipoLoja"),
     grupoLojaId: s("grupoLojaId") ? Number(s("grupoLojaId")) : null,
     campoProduto: s("campoProduto") === "modelo" ? "modelo" : "fornecedor",
     fornecedorNome: s("fornecedorNome"),

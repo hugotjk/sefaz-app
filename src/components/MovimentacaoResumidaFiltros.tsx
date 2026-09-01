@@ -8,7 +8,7 @@ export interface FiltrosForm {
   dataInicial: string;
   dataFinal: string;
   redeId: number | null;
-  tipoLojaId: number | null;
+  tipoLoja: string | null;
   grupoLojaId: number | null;
   campoProduto: "fornecedor" | "modelo";
   fornecedorNome: string | null;
@@ -121,8 +121,8 @@ export function MovimentacaoResumidaFiltros({
         <div className="field">
           <label>Tipo Loja</label>
           <select
-            value={filtros.tipoLojaId == null ? "" : String(filtros.tipoLojaId)}
-            onChange={(e) => onChange({ tipoLojaId: e.target.value === "" ? null : Number(e.target.value) })}
+            value={filtros.tipoLoja ?? ""}
+            onChange={(e) => onChange({ tipoLoja: e.target.value === "" ? null : e.target.value })}
           >
             <option value="">Todos</option>
             {(opcoes?.tiposLoja ?? []).map((t) => (

@@ -50,10 +50,14 @@ model FilialSync {
   empresaId  Int?
   grupoId    Int?
   supervisor Int?
+  // Marca da loja ("Tipo Loja"), classificada pelo NOME (ver
+  // classificar-tipo-loja.ts). null = não deu pra classificar.
+  tipoLoja   String?
   updatedAt  DateTime @updatedAt
 
   @@index([empresaId])
   @@index([grupoId])
+  @@index([tipoLoja])
 }
 
 // Nome das redes (Produto.redeId -> nome). Populado por syncRedes.
