@@ -16,6 +16,21 @@ function montarWhere(sp: URLSearchParams): Prisma.NoteWhereInput {
   const certificateId = sp.get("certificateId")?.trim();
   if (certificateId) where.certificateId = certificateId;
 
+  // Intervalo de data de emissão (inputs date -> "YYYY-MM-DD"). Inclui o dia
+  // final inteiro. Datas inválidas são ignoradas.
+  const dataInicial = sp.get("dataInicial")?.trim();
+  const dataFinal = sp.get("dataFinal")?.trim();
+  const intervalo: Prisma.DateTimeFilter = {};
+  if (dataInicial) {
+    const d = new Date(`${dataInicial}T00:00:00.000Z`);
+    if (!Number.isNaN(d.getTime())) intervalo.gte = d;
+  }
+  if (dataFinal) {
+    const d = new Date(`${dataFinal}T23:59:59.999Z`);
+    if (!Number.isNaN(d.getTime())) intervalo.lte = d;
+  }
+  if (intervalo.gte || intervalo.lte) where.dataEmissao = intervalo;
+
   const termo = sp.get("buscaTermo")?.trim();
   const campo = (sp.get("buscaCampo") ?? "") as CampoBusca;
   if (termo && CAMPOS_BUSCA.includes(campo)) {

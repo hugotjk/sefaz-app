@@ -46,6 +46,15 @@ const CAMPOS_BUSCA: { valor: string; label: string }[] = [
   { valor: "numero", label: "Número da NF-e" },
 ];
 
+function ymd(d: Date) {
+  return d.toISOString().slice(0, 10);
+}
+function intervaloPadrao() {
+  const fim = new Date();
+  const inicio = new Date(fim.getTime() - 30 * 24 * 60 * 60 * 1000);
+  return { inicio: ymd(inicio), fim: ymd(fim) };
+}
+
 function formatarMoeda(valor: unknown) {
   return Number(valor ?? 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 }
@@ -71,6 +80,9 @@ export function NotasTable() {
   const [certificateId, setCertificateId] = useState("");
   const [empresaTexto, setEmpresaTexto] = useState(""); // texto visível do input com datalist
   const [certificados, setCertificados] = useState<CertificadoOpcao[]>([]);
+  // intervalo de data de emissão — pré-preenchido com os últimos 30 dias
+  const [dataInicial, setDataInicial] = useState(() => intervaloPadrao().inicio);
+  const [dataFinal, setDataFinal] = useState(() => intervaloPadrao().fim);
 
   const [dados, setDados] = useState<Resposta | null>(null);
   const [carregando, setCarregando] = useState(true);
@@ -122,6 +134,8 @@ export function NotasTable() {
         qs.set("buscaTermo", buscaTermoAplicado.trim());
       }
       if (certificateId) qs.set("certificateId", certificateId);
+      if (dataInicial) qs.set("dataInicial", dataInicial);
+      if (dataFinal) qs.set("dataFinal", dataFinal);
 
       const res = await fetch(`/api/notas?${qs}`);
       const json = await res.json();
@@ -133,7 +147,7 @@ export function NotasTable() {
     } finally {
       setCarregando(false);
     }
-  }, [pagina, porPagina, ordem, buscaCampo, buscaTermoAplicado, certificateId]);
+  }, [pagina, porPagina, ordem, buscaCampo, buscaTermoAplicado, certificateId, dataInicial, dataFinal]);
 
   useEffect(() => {
     buscar();
@@ -149,6 +163,9 @@ export function NotasTable() {
     setBuscaTermoAplicado("");
     setCertificateId("");
     setEmpresaTexto("");
+    const p = intervaloPadrao();
+    setDataInicial(p.inicio);
+    setDataFinal(p.fim);
     setPagina(1);
   }
 
@@ -198,47 +215,76 @@ export function NotasTable() {
   const inicio = total === 0 ? 0 : (pagina - 1) * porPagina + 1;
   const fim = Math.min(pagina * porPagina, total);
 
+  function aoMudarData(qual: "inicial" | "final", valor: string) {
+    if (qual === "inicial") setDataInicial(valor);
+    else setDataFinal(valor);
+    setPagina(1);
+  }
+
   const filtros = (
     <div className="card notes-filtros-card">
       <div className="notes-filtros">
-        <div className="field notes-filtro-busca">
-          <label>Buscar por</label>
-          <div className="notes-busca-linha">
-            <select value={buscaCampo} onChange={(e) => setBuscaCampo(e.target.value)}>
-              {CAMPOS_BUSCA.map((c) => (
-                <option key={c.valor} value={c.valor}>
-                  {c.label}
-                </option>
-              ))}
-            </select>
+        {/* Linha 1 — Empresa recebedora, largura total */}
+        <div className="notes-filtros-linha linha-empresa">
+          <div className="field">
+            <label>Empresa recebedora</label>
             <input
               type="text"
-              placeholder="Digite o termo…"
-              value={buscaTermo}
-              onChange={(e) => setBuscaTermo(e.target.value)}
+              list="notas-empresas-recebedoras"
+              placeholder="Todas as empresas — digite o nome ou o CNPJ pra buscar…"
+              value={empresaTexto}
+              onChange={(e) => aoMudarEmpresa(e.target.value)}
             />
+            <datalist id="notas-empresas-recebedoras">
+              {certificados.map((c) => (
+                <option key={c.id} value={rotuloCertificado(c)} />
+              ))}
+            </datalist>
           </div>
         </div>
 
-        <div className="field">
-          <label>Empresa recebedora</label>
-          <input
-            type="text"
-            list="notas-empresas-recebedoras"
-            placeholder="Todas — digite pra buscar…"
-            value={empresaTexto}
-            onChange={(e) => aoMudarEmpresa(e.target.value)}
-          />
-          <datalist id="notas-empresas-recebedoras">
-            {certificados.map((c) => (
-              <option key={c.id} value={rotuloCertificado(c)} />
-            ))}
-          </datalist>
+        {/* Linha 2 — Data inicial, Data final, Buscar por */}
+        <div className="notes-filtros-linha linha-busca">
+          <div className="field">
+            <label>Data inicial</label>
+            <input
+              type="date"
+              value={dataInicial}
+              max={dataFinal || undefined}
+              onChange={(e) => aoMudarData("inicial", e.target.value)}
+            />
+          </div>
+          <div className="field">
+            <label>Data final</label>
+            <input
+              type="date"
+              value={dataFinal}
+              min={dataInicial || undefined}
+              onChange={(e) => aoMudarData("final", e.target.value)}
+            />
+          </div>
+          <div className="field notes-filtro-busca">
+            <label>Buscar por</label>
+            <div className="notes-busca-linha">
+              <select value={buscaCampo} onChange={(e) => setBuscaCampo(e.target.value)}>
+                {CAMPOS_BUSCA.map((c) => (
+                  <option key={c.valor} value={c.valor}>
+                    {c.label}
+                  </option>
+                ))}
+              </select>
+              <input
+                type="text"
+                placeholder="Digite o termo…"
+                value={buscaTermo}
+                onChange={(e) => setBuscaTermo(e.target.value)}
+              />
+            </div>
+          </div>
         </div>
 
         {filtroAtivo && (
-          <div className="field notes-filtro-limpar">
-            <label>&nbsp;</label>
+          <div className="notes-filtros-rodape">
             <button type="button" className="btn-secundario" onClick={limparFiltros}>
               Limpar filtros
             </button>
@@ -282,8 +328,8 @@ export function NotasTable() {
                   </th>
                   <th>Tipo</th>
                   <th>Valor</th>
-                  <th>Empresa (Emit.)</th>
-                  <th>Empresa (Receb.)</th>
+                  <th className="col-empresa">Empresa (Emit.)</th>
+                  <th className="col-empresa">Empresa (Receb.)</th>
                   <th>Status</th>
                   <th>Eventos</th>
                 </tr>
@@ -345,8 +391,8 @@ export function NotasTable() {
                       <td>{formatarData(nota.dataEmissao)}</td>
                       <td>{nota.tipoOperacao || "-"}</td>
                       <td>{formatarMoeda(nota.valorTotal)}</td>
-                      <td>{nota.emitenteNome || nota.emitenteCnpj}</td>
-                      <td>{nota.destinatarioNome}</td>
+                      <td className="col-empresa">{nota.emitenteNome || nota.emitenteCnpj}</td>
+                      <td className="col-empresa">{nota.destinatarioNome}</td>
                       <td>
                         <span className={badgeClasse(nota.status)}>{nota.status}</span>
                       </td>

@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
-import Link from "next/link";
 import "./globals.css";
+import { SidebarNav } from "@/components/SidebarNav";
 
 export const metadata: Metadata = {
   title: "Painel da Loja",
@@ -13,18 +13,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body>
         <div className="app-shell-sidebar">
           <aside className="sidebar">
-            <div className="sidebar-logo">Painel</div>
-            <nav className="sidebar-nav">
-              <Link href="/notas" className="sidebar-link">
-                <span className="sidebar-icon">📄</span> Notas Fiscais
-              </Link>
-              <Link href="/certificados" className="sidebar-link">
-                <span className="sidebar-icon">🔑</span> Certificados
-              </Link>
-              <Link href="/relatorios" className="sidebar-link">
-                <span className="sidebar-icon">📊</span> Relatórios
-              </Link>
-            </nav>
+            <div className="sidebar-logo" aria-hidden>
+              P
+            </div>
+            <SidebarNav />
           </aside>
           <div className="app-content">
             <main className="app-main">{children}</main>
