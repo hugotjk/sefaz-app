@@ -151,6 +151,22 @@ export const sincronizarCertificado = inngest.createFunction(
         }
       });
 
+      ultimoStatus = resultado.statusCode;
+      ultimoMotivo = resultado.motivo;
+
+      // cStat de SUCESSO conhecidos da distribuição DFe:
+      //   138 = "Documento(s) localizado(s)" (veio lote)
+      //   137 = "Nenhum documento localizado" (fim real da paginação)
+      // Qualquer outro (ex.: 656 "Rejeição: Consumo Indevido" — rate limit da
+      // SEFAZ) chega DENTRO de um HTTP 200, então NÃO cai no catch acima.
+      // É rejeição recuperável: não tocamos em ultNSU/maxNSU/backfillDone
+      // (os valores ecoados numa rejeição — no 656 vêm ultNSU real + maxNSU 0 —
+      // corromperiam o ponteiro e marcariam o backfill como concluído) e
+      // paramos aqui; a próxima execução horária tenta de novo.
+      const respostaOk =
+        resultado.statusCode === "138" || resultado.statusCode === "137";
+      if (!respostaOk) break;
+
       // Salva os documentos deste lote (nota a nota / evento a evento)
       await step.run(`salvar-lote-${iteracoes}`, async () => {
         for (const doc of resultado.documentos) {
@@ -204,8 +220,6 @@ export const sincronizarCertificado = inngest.createFunction(
       });
 
       ultNSU = resultado.ultNSU;
-      ultimoStatus = resultado.statusCode;
-      ultimoMotivo = resultado.motivo;
 
       await step.run(`atualizar-ultnsu-${iteracoes}`, async () => {
         await prisma.certificate.update({
@@ -214,9 +228,11 @@ export const sincronizarCertificado = inngest.createFunction(
         });
       });
 
-      const chegouNoFim =
-        BigInt(ultNSU || "0") >= BigInt(resultado.maxNSU || "0") || resultado.semDocumentosNovos;
-      if (chegouNoFim) {
+      // "Chegou ao fim" só quando a SEFAZ diz explicitamente cStat 137 (nenhum
+      // documento localizado). NÃO usamos `ultNSU >= maxNSU` como atalho: o
+      // maxNSU vem 0/inconsistente em várias respostas e era justamente o que
+      // fazia o backfill ser marcado como concluído cedo demais.
+      if (resultado.semDocumentosNovos) {
         if (!certificado.backfillDone) {
           await step.run("marcar-backfill-concluido", async () => {
             await prisma.certificate.update({
