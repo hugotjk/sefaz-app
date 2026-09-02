@@ -4,7 +4,18 @@ import { useEffect, useState } from "react";
 import { parseNFeXml, type NFeParaExibir } from "@/lib/parse-nfe-xml";
 import { DanfeView } from "@/components/DanfeView";
 
-export function NotaModal({ chave, onClose }: { chave: string; onClose: () => void }) {
+export function NotaModal({
+  chave,
+  onClose,
+  onXmlCarregado,
+}: {
+  chave: string;
+  onClose: () => void;
+  /** Chamado quando o XML completo é obtido com sucesso (o backend acabou de
+   *  salvar `xmlCompleto`/`numero`/`serie` no banco). Serve pra o NotasTable
+   *  atualizar a linha correspondente sem recarregar a página. */
+  onXmlCarregado?: (chave: string, numero: string | null, serie: string | null) => void;
+}) {
   const [nfe, setNfe] = useState<NFeParaExibir | null>(null);
   const [erro, setErro] = useState<string | null>(null);
   const [carregando, setCarregando] = useState(true);
@@ -19,7 +30,11 @@ export function NotaModal({ chave, onClose }: { chave: string; onClose: () => vo
       .then(async (res) => {
         const data = await res.json();
         if (!res.ok) throw new Error(data.error);
-        if (!cancelado) setNfe(parseNFeXml(data.xml));
+        const parsed = parseNFeXml(data.xml);
+        if (!cancelado) setNfe(parsed);
+        // Sucesso => a nota agora tem XML completo no banco. Avisa o pai mesmo
+        // se o modal já foi fechado (a atualização é na tabela, não aqui).
+        onXmlCarregado?.(chave, parsed.numero || null, parsed.serie || null);
       })
       .catch((e) => {
         if (!cancelado) setErro(e.message);
@@ -31,7 +46,7 @@ export function NotaModal({ chave, onClose }: { chave: string; onClose: () => vo
     return () => {
       cancelado = true;
     };
-  }, [chave]);
+  }, [chave, onXmlCarregado]);
 
   return (
     <div className="modal-overlay" onClick={onClose}>

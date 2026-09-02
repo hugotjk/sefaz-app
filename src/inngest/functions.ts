@@ -1297,25 +1297,44 @@ export const backfillVendasHistorico = inngest.createFunction(
 // - No máximo MAX_NOTAS_COMPLETAR_XML notas por execução, mais antigas /
 //   sem tentativa recente primeiro (campo `ultimaTentativaXml`).
 // - Só re-tenta uma nota se já faz >= COMPLETAR_XML_REPETIR_APOS_H horas.
-// - Rate limit da SEFAZ (cStat 656 / "consumo indevido") costuma valer pro
-//   certificado inteiro: nesse caso para a execução toda.
+// - O intervalo de 22s (INTERVALO_COMPLETAR_XML_MS) só é necessário ENTRE notas
+//   do MESMO certificado — o rate limit da SEFAZ (cStat 656 / "consumo
+//   indevido") é por-CNPJ. As notas são agrupadas por certificado e
+//   intercaladas (round-robin): com muitos certs na fila, a espera de 22s
+//   some, porque entre duas notas do mesmo cert já passaram várias notas de
+//   outros. Um 656 num cert só bloqueia esse cert nesta execução, não aborta.
 // - DESISTE de uma nota (ignora nas próximas buscas) quando ela já teve
 //   LIMITE_TENTATIVAS_XML tentativas E foi emitida há mais de
 //   DIAS_NOTA_RECENTE dias — nesse ponto a SEFAZ provavelmente não vai mais
 //   disponibilizar o XML completo. Notas recentes continuam sendo tentadas.
 // ---------------------------------------------------------------------------
 
-const MAX_NOTAS_COMPLETAR_XML = 10;
+// Teto de notas por execução. Custo real por nota ≈ 1 consulta SOAP mTLS à
+// SEFAZ (~3-6s) + upsert dos itens/duplicatas. As esperas de 22s são
+// `step.sleep` (offloaded pela Inngest, não contam no maxDuration de 300s), e
+// a Inngest quebra a execução em várias invocações se precisar — então 100
+// notas cabem com folga.
+const MAX_NOTAS_COMPLETAR_XML = 100;
+// Não deixa um único certificado (ex.: GAVEA com 165 notas pendentes) dominar
+// a fila e virar uma corrente serial de 22s.
+const MAX_NOTAS_POR_CERT_POR_EXECUCAO = 10;
+// Quantas notas trazer do banco pra depois agrupar/intercalar por certificado.
+const COMPLETAR_XML_CANDIDATOS = 600;
 const COMPLETAR_XML_REPETIR_APOS_H = 6;
+// Espera entre duas notas do MESMO certificado (evita o 656 da SEFAZ).
 const INTERVALO_COMPLETAR_XML_MS = 22_000;
+// Quantas notas de OUTROS certificados equivalem, na prática, aos 22s de
+// espera. Se pelo menos isso passou desde a última nota de um cert, não
+// esperamos (a rotação já espaçou o suficiente). Determinístico -> replay-safe.
+const NOTAS_ENTRE_MESMO_CERT = 12;
 
 export const completarXmlNotas = inngest.createFunction(
   {
     id: "completar-xml-notas",
-    concurrency: [
-      { scope: "account", key: '"sefaz-pdv-sync"', limit: 4 },
-      { limit: 1 },
-    ],
+    // Balde de concorrência PRÓPRIO: `key` diferente do "sefaz-pdv-sync" que as
+    // syncs de PDV/certificado usam -> pool independente, não disputa as 4
+    // vagas gerais (que ficam dominadas pelos backfills longos de certificado).
+    concurrency: [{ scope: "account", key: '"completar-xml-notas"', limit: 1 }],
     retries: 2,
   },
   { cron: "*/30 * * * *" },
@@ -1323,7 +1342,7 @@ export const completarXmlNotas = inngest.createFunction(
     const limite = new Date(Date.now() - COMPLETAR_XML_REPETIR_APOS_H * 3_600_000);
     const trintaDiasAtras = new Date(Date.now() - DIAS_NOTA_RECENTE * 86_400_000);
 
-    const notas = await step.run("buscar-notas-pendentes", () =>
+    const candidatas = await step.run("buscar-notas-pendentes", () =>
       prisma.note.findMany({
         where: {
           xmlCompleto: "",
@@ -1341,19 +1360,55 @@ export const completarXmlNotas = inngest.createFunction(
           { ultimaTentativaXml: { sort: "asc", nulls: "first" } },
           { createdAt: "asc" },
         ],
-        take: MAX_NOTAS_COMPLETAR_XML,
-        select: { chaveAcesso: true },
+        take: COMPLETAR_XML_CANDIDATOS,
+        select: { chaveAcesso: true, certificateId: true },
       })
     );
 
-    if (notas.length === 0) return { pendentes: 0 };
+    if (candidatas.length === 0) return { pendentes: 0 };
+
+    // Agrupa por certificado (mantendo a ordem de prioridade), limita quantas
+    // notas de cada cert entram nesta execução e depois intercala os grupos.
+    const grupos = new Map<string, string[]>();
+    for (const n of candidatas) {
+      const arr = grupos.get(n.certificateId) ?? [];
+      if (arr.length < MAX_NOTAS_POR_CERT_POR_EXECUCAO) {
+        arr.push(n.chaveAcesso);
+        grupos.set(n.certificateId, arr);
+      }
+    }
+    const listas = [...grupos.entries()];
+    const fila: { chave: string; certId: string }[] = [];
+    for (let rodada = 0; fila.length < MAX_NOTAS_COMPLETAR_XML; rodada++) {
+      let adicionou = false;
+      for (const [certId, chaves] of listas) {
+        if (chaves.length > rodada) {
+          fila.push({ chave: chaves[rodada], certId });
+          adicionou = true;
+          if (fila.length >= MAX_NOTAS_COMPLETAR_XML) break;
+        }
+      }
+      if (!adicionou) break;
+    }
 
     let completadas = 0;
     let aindaResumo = 0;
     let erros = 0;
+    const certsBloqueados = new Set<string>(); // pegaram 656 nesta execução
+    // certId -> nº de notas (de qualquer cert) processadas desde a última desse
+    // cert. Reconstruído igual em todo replay -> não usa Date.now().
+    const desdeUltima = new Map<string, number>();
 
-    for (let i = 0; i < notas.length; i++) {
-      const chave = notas[i].chaveAcesso;
+    for (let i = 0; i < fila.length; i++) {
+      const { chave, certId } = fila[i];
+      if (certsBloqueados.has(certId)) continue; // 656 nesse cert -> pula o resto dele
+
+      const gap = desdeUltima.get(certId);
+      if (gap !== undefined && gap < NOTAS_ENTRE_MESMO_CERT) {
+        // Ainda não passaram notas de outros certs suficientes pra cobrir os
+        // 22s -> espera o intervalo cheio.
+        await step.sleep(`aguardar-${certId}-${i}`, INTERVALO_COMPLETAR_XML_MS);
+      }
 
       const r = await step.run(`completar-${chave}`, async () => {
         const res = await obterXmlNota(chave);
@@ -1379,9 +1434,9 @@ export const completarXmlNotas = inngest.createFunction(
         let itensGravados = 0;
         let duplicatasGravadas = 0;
         if (estado === "ok" && !("erro" in res)) {
-          const r = await popularNotaItens(nota.id, res.xml);
-          itensGravados = r.itens;
-          duplicatasGravadas = r.duplicatas;
+          const p = await popularNotaItens(nota.id, res.xml);
+          itensGravados = p.itens;
+          duplicatasGravadas = p.duplicatas;
         }
 
         return {
@@ -1392,28 +1447,23 @@ export const completarXmlNotas = inngest.createFunction(
         };
       });
 
-      if (r.estado === "ok") {
-        completadas++;
-      } else if (r.estado === "resumo") {
-        aindaResumo++;
-      } else if (r.estado === "ratelimit") {
-        return {
-          parou: "rate limit da SEFAZ (656)",
-          processadas: i + 1,
-          completadas,
-          aindaResumo,
-          erros,
-        };
-      } else {
-        erros++;
-      }
+      // essa nota "zera" o contador do seu cert; +1 nos demais
+      for (const [c, v] of desdeUltima) desdeUltima.set(c, v + 1);
+      desdeUltima.set(certId, 0);
 
-      if (i < notas.length - 1) {
-        await step.sleep(`aguardar-${chave}`, INTERVALO_COMPLETAR_XML_MS);
-      }
+      if (r.estado === "ok") completadas++;
+      else if (r.estado === "resumo") aindaResumo++;
+      else if (r.estado === "ratelimit") certsBloqueados.add(certId); // 656 é por-CNPJ
+      else erros++;
     }
 
-    return { processadas: notas.length, completadas, aindaResumo, erros };
+    return {
+      processadas: fila.length,
+      completadas,
+      aindaResumo,
+      erros,
+      certsBloqueados: certsBloqueados.size,
+    };
   }
 );
 

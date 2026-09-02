@@ -158,6 +158,26 @@ export function NotasTable() {
     setOrdem((o) => (o === "desc" ? "asc" : "desc"));
   }
 
+  // Quando o modal consegue buscar o XML completo, o backend já gravou
+  // xmlCompleto/numero no banco. Atualiza só a linha afetada em memória pra ela
+  // sair do estado "aguardando" (amarelo) sem recarregar a página.
+  const aoXmlCarregado = useCallback(
+    (chave: string, numero: string | null) => {
+      setDados((atual) => {
+        if (!atual) return atual;
+        return {
+          ...atual,
+          notas: atual.notas.map((n) =>
+            n.chaveAcesso === chave
+              ? { ...n, statusXml: "completo" as StatusXml, numero: n.numero || numero }
+              : n
+          ),
+        };
+      });
+    },
+    []
+  );
+
   function limparFiltros() {
     setBuscaTermo("");
     setBuscaTermoAplicado("");
@@ -449,7 +469,13 @@ export function NotasTable() {
         )}
       </div>
 
-      {chaveAberta && <NotaModal chave={chaveAberta} onClose={() => setChaveAberta(null)} />}
+      {chaveAberta && (
+        <NotaModal
+          chave={chaveAberta}
+          onClose={() => setChaveAberta(null)}
+          onXmlCarregado={aoXmlCarregado}
+        />
+      )}
     </>
   );
 }
