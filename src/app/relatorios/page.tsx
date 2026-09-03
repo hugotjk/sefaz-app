@@ -24,6 +24,13 @@ const RELATORIOS: CardRelatorio[] = [
       "Uma linha por nota fiscal recebida: fornecedor, modelo, loja e o prazo de pagamento das duplicatas.",
     etiqueta: "Notas Fiscais",
   },
+  {
+    href: "/relatorios/conferencia-produtos",
+    titulo: "Conferência de Produtos Sem Cadastro",
+    descricao:
+      "Itens que apareceram em notas fiscais mas não batem com nenhum EAN do catálogo, com o fornecedor/modelo identificados por regra.",
+    etiqueta: "Notas Fiscais",
+  },
 ];
 
 export default function RelatoriosPage() {

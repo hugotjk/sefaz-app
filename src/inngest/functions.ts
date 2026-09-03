@@ -7,7 +7,7 @@ import { parseDocumento } from "@/lib/parse-documento";
 import { obterXmlNota } from "@/lib/obter-xml-nota";
 import { LIMITE_TENTATIVAS_XML, DIAS_NOTA_RECENTE } from "@/lib/nota-xml-status";
 import { classificarTipoLoja } from "@/lib/classificar-tipo-loja";
-import { popularNotaItens } from "@/lib/popular-nota-itens";
+import { popularNotaItens, avaliarCadastroItens } from "@/lib/popular-nota-itens";
 import { upsertEstoqueBulk } from "@/lib/bulk-upsert-estoque";
 import {
   listarRedes,
@@ -299,6 +299,15 @@ const PDV_PAUSA_ENTRE_LOTES_MS = 500;
 const VENDAS_JANELA_INICIAL_DIAS = 7;
 // Data bem antiga = "traz o catálogo inteiro" no primeiro backfill de produtos.
 const PRODUTOS_DATA_BACKFILL = "2000-01-01";
+// Janelas do backfill INICIAL de produtos (dias atrás; null = sem filtro de
+// data = catálogo inteiro). A API do PDV (/api/public/produtos/{redeId}) NÃO
+// tem parâmetro de ordenação — só o filtro `aPartirDe`. Então, enquanto a rede
+// nunca terminou o 1º backfill, varremos por janelas da MAIS RECENTE pra mais
+// antiga: assim os produtos que aparecem nas notas fiscais recentes (o que o
+// relatório de conferência analisa) ficam catalogados em ~1 disparo, sem
+// esperar os ~130k produtos inteiros. A sobreposição entre janelas é
+// deduplicada pelo upsert; a janela em andamento fica no SyncState.
+const JANELAS_BACKFILL_PRODUTOS_DIAS: (number | null)[] = [30, 90, 180, 365, null];
 
 // --- estoque (orientado pelo nosso catálogo) ---
 // ATENÇÃO: `listarEstoqueDaVariacao` de UMA variação traz MILHARES de linhas
@@ -376,6 +385,10 @@ function anoMesCorteDetalhe(agora = new Date()): string {
 interface CursorProdutos {
   lastSync: string | null; // ISO da última sincronização concluída (incremental)
   pagina: number; // página em andamento (backfill retomável)
+  // Índice em JANELAS_BACKFILL_PRODUTOS_DIAS da janela de data em andamento.
+  // Só existe durante o backfill inicial (lastSync === null). Ausente = ainda
+  // não migrou pro backfill por janelas -> começa da janela 0.
+  janela?: number;
 }
 
 /**
@@ -411,14 +424,39 @@ export const syncProdutos = inngest.createFunction(
       const cursor = await step.run(`cursor-produtos-r${rede.id}`, () =>
         lerSyncState<CursorProdutos>(chave, { lastSync: null, pagina: 1 })
       );
-      const aPartirDe = cursor.lastSync
-        ? cursor.lastSync.slice(0, 10)
-        : PRODUTOS_DATA_BACKFILL;
+      // Modo backfill inicial (lastSync === null) = varre por janelas de data,
+      // da mais recente pra mais antiga. Modo incremental = 1 sweep só, a
+      // partir da última sincronização.
+      const emBackfill = cursor.lastSync === null;
+      // `janela` ausente + backfill = 1ª vez no modo por janelas (ou migração
+      // do backfill antigo sem janela) -> recomeça da janela 0, página 1. Os
+      // produtos já baixados não se perdem (estão no banco); o upsert só
+      // re-grava, agora priorizando os recentes.
+      let janelaIdx =
+        emBackfill && cursor.janela != null
+          ? Math.min(cursor.janela, JANELAS_BACKFILL_PRODUTOS_DIAS.length - 1)
+          : 0;
+      let pagina =
+        emBackfill && cursor.janela == null
+          ? 1
+          : cursor.pagina > 0
+          ? cursor.pagina
+          : 1;
 
-      let pagina = cursor.pagina > 0 ? cursor.pagina : 1;
+      // aPartirDe da janela/sweep atual. No backfill, é a data da janela
+      // (null = catálogo inteiro). No incremental, é a última sincronização.
+      const aPartirDeAtual = (idx: number): string => {
+        if (!emBackfill) return cursor.lastSync!.slice(0, 10);
+        const dias = JANELAS_BACKFILL_PRODUTOS_DIAS[idx];
+        if (dias == null) return PRODUTOS_DATA_BACKFILL;
+        return new Date(Date.now() - dias * 86_400_000).toISOString().slice(0, 10);
+      };
+
       let paginasNestaExec = 0;
       let produtosSalvos = 0;
       let variacoesSalvas = 0;
+      // `concluiu` só vira true quando a ÚLTIMA janela (ou o sweep incremental)
+      // esgota — aí o cursor volta pro modo incremental.
       let concluiu = false;
       const execIniciadaEm = isoAgora();
       // Produtos sem lista de variações embutida — buscamos à parte, com teto.
@@ -427,8 +465,13 @@ export const syncProdutos = inngest.createFunction(
       while (paginasNestaExec < MAX_PAGINAS_PRODUTOS_POR_EXECUCAO) {
         paginasNestaExec++;
         const paginaAtual = pagina;
+        const janelaAtual = janelaIdx;
+        const aPartirDe = aPartirDeAtual(janelaAtual);
 
-        const lote = await step.run(`produtos-r${rede.id}-p${paginaAtual}`, async () => {
+        // step id inclui a janela: página 1 da janela 30d != página 1 da 90d.
+        const lote = await step.run(
+          `produtos-r${rede.id}-w${janelaAtual}-p${paginaAtual}`,
+          async () => {
           const { registros, paginacao } = await listarProdutos({
             redeId: rede.id,
             aPartirDe: aPartirDe,
@@ -522,11 +565,26 @@ export const syncProdutos = inngest.createFunction(
         pagina = paginaAtual + 1;
 
         if (!lote.temProxima) {
+          // Esgotou a janela/sweep atual.
+          if (emBackfill && janelaIdx < JANELAS_BACKFILL_PRODUTOS_DIAS.length - 1) {
+            // Ainda há janelas mais antigas -> passa pra próxima e continua na
+            // MESMA execução (uma janela recente é pequena; cabem várias no
+            // teto de páginas por disparo).
+            janelaIdx++;
+            pagina = 1;
+            await gravarSyncState(chave, { lastSync: null, pagina: 1, janela: janelaIdx });
+            continue;
+          }
+          // Última janela (ou sweep incremental) -> catálogo completo.
           concluiu = true;
           break;
         }
 
-        await gravarSyncState(chave, { lastSync: cursor.lastSync, pagina });
+        await gravarSyncState(chave, {
+          lastSync: cursor.lastSync,
+          pagina,
+          ...(emBackfill ? { janela: janelaIdx } : {}),
+        });
       }
 
       // Fallback: produtos sem variação embutida — busca no endpoint dedicado.
@@ -553,10 +611,15 @@ export const syncProdutos = inngest.createFunction(
         }
       }
 
-      // Atualiza o cursor: se terminou de varrer, volta pro modo incremental
-      // (lastSync = agora, página 1); senão, guarda a página pra retomar.
+      // Atualiza o cursor final:
+      //  - concluiu (última janela ou sweep incremental terminou) -> modo
+      //    incremental (lastSync = agora, página 1, sem janela).
+      //  - ainda no backfill -> guarda janela + página pra retomar.
+      //  - incremental sem terminar -> guarda a página.
       if (concluiu) {
         await gravarSyncState(chave, { lastSync: execIniciadaEm, pagina: 1 });
+      } else if (emBackfill) {
+        await gravarSyncState(chave, { lastSync: null, pagina, janela: janelaIdx });
       } else {
         await gravarSyncState(chave, { lastSync: cursor.lastSync, pagina });
       }
@@ -565,6 +628,9 @@ export const syncProdutos = inngest.createFunction(
         produtosSalvos,
         variacoesSalvas,
         concluiu,
+        modo: emBackfill
+          ? `backfill (janela ${janelaIdx}/${JANELAS_BACKFILL_PRODUTOS_DIAS.length - 1})`
+          : "incremental",
         proximaPagina: concluiu ? 1 : pagina,
       };
     }
@@ -1564,5 +1630,128 @@ export const enriquecerVariacoes = inngest.createFunction(
       variacoesAtualizadas,
       proximoCursor: variacoes.length < ENRIQUECER_VARIACOES_POR_EXECUCAO ? "" : ultimoId,
     };
+  }
+);
+
+// ---------------------------------------------------------------------------
+// reavaliarCadastroNotaItens — 1x por dia (madrugada). O `temCadastro` do
+// NotaItem (achou o produto no catálogo, com preço) é decidido no momento em
+// que o item é criado. Mas o catálogo (VariacaoProduto.ean, Produto,
+// PrecoVariacao) é preenchido aos poucos (syncProdutos + enriquecerVariacoes +
+// syncPrecos), então muitos itens ficam `temCadastro=false` só porque o
+// catálogo ainda não tinha sido sincronizado quando o item foi criado.
+// Esta função re-checa os itens `false` contra o catálogo ATUAL com a MESMA
+// regra de popular-nota-itens.ts (`avaliarCadastroItens`: EAN ou ref+modelo,
+// sempre com preço > 0) e vira `temCadastro=true` nos que agora batem. Não
+// toca nos que já são `true` — uma vez catalogado, continua. Processa em lotes
+// (step.run) até REAVALIAR_NOTA_ITENS_POR_EXECUCAO por disparo; cursor em
+// SyncState pra continuar no dia seguinte se sobrar. Quando varre a lista
+// inteira, o cursor zera e no próximo dia re-checa todos os `false` de novo.
+// ---------------------------------------------------------------------------
+
+const REAVALIAR_NOTA_ITENS_POR_LOTE = 500;
+const REAVALIAR_NOTA_ITENS_POR_EXECUCAO = 2500; // 5 lotes de 500
+
+interface CursorReavaliar {
+  ultimoId: string; // último NotaItem.id processado ("" = começar do início)
+}
+
+export const reavaliarCadastroNotaItens = inngest.createFunction(
+  {
+    id: "reavaliar-cadastro-nota-itens",
+    concurrency: [
+      { scope: "account", key: '"sefaz-pdv-sync"', limit: 4 },
+      { limit: 1 },
+    ],
+    retries: 3,
+  },
+  { cron: "40 3 * * *" }, // 03:40 — madrugada, fora dos picos dos outros syncs
+  async ({ step }) => {
+    const cursor = await step.run("cursor-reavaliar", () =>
+      lerSyncState<CursorReavaliar>("reavaliar-cadastro:cursor", { ultimoId: "" })
+    );
+
+    let ultimoId = cursor.ultimoId;
+    let vistos = 0;
+    let atualizados = 0;
+    let fim = false;
+
+    const LOTES = Math.ceil(
+      REAVALIAR_NOTA_ITENS_POR_EXECUCAO / REAVALIAR_NOTA_ITENS_POR_LOTE
+    );
+    for (let lote = 0; lote < LOTES; lote++) {
+      const r = await step.run(
+        `reavaliar-lote-${cursor.ultimoId || "ini"}-${lote}`,
+        async () => {
+          // Só itens que PODEM virar true: sem cadastro E com algo pra casar
+          // (EAN, ou referência+modelo identificados).
+          const itens = await prisma.notaItem.findMany({
+            where: {
+              temCadastro: false,
+              id: { gt: ultimoId },
+              OR: [
+                { ean: { not: null } },
+                {
+                  AND: [
+                    { referenciaFornecedorIdentificada: { not: null } },
+                    { modeloIdentificado: { not: null } },
+                  ],
+                },
+              ],
+            },
+            orderBy: { id: "asc" },
+            take: REAVALIAR_NOTA_ITENS_POR_LOTE,
+            select: {
+              id: true,
+              ean: true,
+              referenciaFornecedorIdentificada: true,
+              modeloIdentificado: true,
+            },
+          });
+          if (itens.length === 0) {
+            return { vistos: 0, atualizados: 0, ultimoId, fim: true };
+          }
+
+          const flags = await avaliarCadastroItens(
+            itens.map((i) => ({
+              ean: i.ean,
+              referenciaFornecedor: i.referenciaFornecedorIdentificada,
+              modelo: i.modeloIdentificado,
+            }))
+          );
+          const idsQueBatem = itens.filter((_, idx) => flags[idx]).map((i) => i.id);
+
+          if (idsQueBatem.length > 0) {
+            await prisma.notaItem.updateMany({
+              where: { id: { in: idsQueBatem } },
+              data: { temCadastro: true },
+            });
+          }
+
+          return {
+            vistos: itens.length,
+            atualizados: idsQueBatem.length,
+            ultimoId: itens[itens.length - 1].id,
+            fim: itens.length < REAVALIAR_NOTA_ITENS_POR_LOTE,
+          };
+        }
+      );
+
+      vistos += r.vistos;
+      atualizados += r.atualizados;
+      ultimoId = r.ultimoId;
+      await gravarSyncState("reavaliar-cadastro:cursor", { ultimoId });
+      if (r.fim) {
+        fim = true;
+        break;
+      }
+    }
+
+    // Chegou ao fim da lista -> zera o cursor pra re-checar tudo no próximo dia.
+    if (fim) {
+      await gravarSyncState("reavaliar-cadastro:cursor", { ultimoId: "" });
+    }
+
+    return { vistos, atualizados, terminou: fim, proximoCursor: fim ? "" : ultimoId };
   }
 );
