@@ -64,6 +64,27 @@ function igual(a: string, b: string): boolean {
   return a.trim().toLowerCase() === b.trim().toLowerCase();
 }
 
+/**
+ * Grupo "Thug Nine / Dubs" (marcas Thug Nine, Dubs, Brotherhood…). Compartilha
+ * a mesma regra de Modelo (4º dígito do código) e de Referência (código puro).
+ * Também é o grupo que, no cálculo de `temCadastro` (avaliarCadastroItens),
+ * casa a referência por PREFIXO (8 dígitos) em vez de igualdade — a referência
+ * no catálogo é "8dígitos-2dígitos" e na nota só vêm os 8 primeiros.
+ */
+export const EMPRESAS_THUG_DUBS = [
+  "STASH HOUSE LTDA",
+  "MADNESS COMERCIO DE ROUPAS LTDA",
+  "INPU-IND NACIONAL DE POLIURETANOS EIRELI",
+  "SOUTH CENTRAL COMERCIO DE ROUPAS LTDA",
+  "THUG 09 COMERCIO DE ROUPAS LTDA",
+  "UNDERDOG COMPANY LTDA",
+  "MUGSHOT COMERCIO DE ROUPAS LTDA",
+  "STREET FORCE",
+  "THUG NINE COM RP CALC E ACESS LTDA",
+  "URBAN STAR LTDA",
+  "BROTHERHOOD COMERCIO DE ROUPAS LTDA", // razão social real do "BROTHERHOOD" nos NotaItem
+] as const;
+
 // --------------------------------------------------------------------------
 // FÓRMULA 1 — Modelo
 // --------------------------------------------------------------------------
@@ -288,23 +309,19 @@ export function identificarModelo(
   //  cai no fallback null.)
   if (igual(A, "TESS INDUSTRIA E COMERCIO LTDA"))
     return localizar("KENNER", H) > 0 ? "Kenner" : "Redley";
-  if (
-    [
-      "STASH HOUSE LTDA",
-      "MADNESS COMERCIO DE ROUPAS LTDA",
-      "INPU-IND NACIONAL DE POLIURETANOS EIRELI",
-      "SOUTH CENTRAL COMERCIO DE ROUPAS LTDA",
-      "THUG 09 COMERCIO DE ROUPAS LTDA",
-      "UNDERDOG COMPANY LTDA",
-      "MUGSHOT COMERCIO DE ROUPAS LTDA",
-      "STREET FORCE",
-      "THUG NINE COM RP CALC E ACESS LTDA",
-      "URBAN STAR LTDA",
-    ].some((x) => igual(A, x))
-  )
-    // REVISAR: valor literal estranho na planilha original ("ou(THUG NINE|DUBS)").
-    // Mantido como está — parece placeholder/erro do Excel.
-    return "ou(THUG NINE|DUBS)";
+  if (igual(A, "VF FERRARI PRODUTOS LICENCIADOS")) return "CEBOLA";
+  if (EMPRESAS_THUG_DUBS.some((x) => igual(A, x))) {
+    // Grupo Thug Nine / Dubs / Brotherhood: 4º dígito dos 8 primeiros do
+    // código do produto da nota. Ex.: "25097401-01" -> 8 primeiros "25097401"
+    // -> 4º dígito "9".
+    //   8 ou 9 -> "DUBS"
+    //   1 ou 2 -> "THUG NINE"
+    //   qualquer outro -> null (não identificado)
+    const quartoDigito = G.slice(0, 8).replace(/\D/g, "")[3];
+    if (quartoDigito === "8" || quartoDigito === "9") return "DUBS";
+    if (quartoDigito === "1" || quartoDigito === "2") return "THUG NINE";
+    return null;
+  }
 
   return null;
 }
@@ -442,19 +459,14 @@ function referenciaFormula2(A: string, G: string, H: string, P: string): string 
       : esquerda(semPonto, 8);
   }
   if (igual(A, "TESS INDUSTRIA E COMERCIO LTDA")) return esquerda(H, localizar(" ", H) - 1);
+  // Grupo Thug Nine / Dubs / Brotherhood + PCF + VF Ferrari: referência do
+  // fornecedor = o próprio código do produto da nota, sem transformação.
   if (
-    [
-      "STASH HOUSE LTDA",
-      "SOUTH CENTRAL COMERCIO DE ROUPAS LTDA",
-      "THUG 09 COMERCIO DE ROUPAS LTDA",
-      "UNDERDOG COMPANY LTDA",
-      "MUGSHOT COMERCIO DE ROUPAS LTDA",
-      "STREET FORCE",
-      "THUG NINE COM RP CALC E ACESS LTDA",
-      "URBAN STAR LTDA",
-    ].some((x) => igual(A, x))
+    EMPRESAS_THUG_DUBS.some((x) => igual(A, x)) ||
+    igual(A, "PCF IMPORTACAO EXPORTACAO E COMERCIO LTD") ||
+    igual(A, "VF FERRARI PRODUTOS LICENCIADOS")
   )
-    return "%%" + G + "%%";
+    return G;
 
   return null;
 }

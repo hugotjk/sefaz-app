@@ -4,6 +4,7 @@ import { parseNFeXml } from "@/lib/parse-nfe-xml";
 import {
   identificarModelo,
   identificarReferenciaFornecedor,
+  EMPRESAS_THUG_DUBS,
 } from "@/lib/identificar-produto";
 
 export interface ResultadoPopularNota {
@@ -17,15 +18,27 @@ export interface ItemParaAvaliar {
   referenciaFornecedor: string | null | undefined;
   /** = NotaItem.modeloIdentificado (regra 1) */
   modelo: string | null | undefined;
+  /** = Note.emitenteNome — decide igualdade x prefixo na comparação de referência */
+  emitente?: string | null;
 }
+
+// Emitentes cuja referência no catálogo é "8dígitos-2dígitos" (ex "80405235-03")
+// mas na nota só traz os 8 primeiros ("80405235"): a comparação de referência
+// é por PREFIXO (primeiros 8 dígitos), não igualdade. Os 8 dígitos são únicos
+// por produto, então não há ambiguidade.
+const EMPRESAS_REF_PREFIXO = new Set(
+  EMPRESAS_THUG_DUBS.map((n) => n.toUpperCase())
+);
 
 /**
  * Decide `temCadastro` de cada item seguindo o processo manual do cliente:
  *
  *   1. Acha uma `VariacaoProduto` cujo `ean` bate com o EAN do item; se não
  *      achar, acha um `Produto` cujo (`referenciaFornecedor` + `modeloNome`)
- *      bate com (referência do fornecedor identificada + modelo identificado),
- *      comparação case-insensitive (igual ao "=" do Excel usado nas regras).
+ *      bate com (referência do fornecedor identificada + modelo identificado).
+ *      Referência: case-insensitive IGUAL, exceto para o grupo
+ *      EMPRESAS_REF_PREFIXO (Thug Nine/Dubs/Brotherhood), onde casa por
+ *      PREFIXO de 8 dígitos (o catálogo guarda "8díg-2díg" e a nota só os 8).
  *   2. Só conta como CADASTRADO se a variação encontrada (ou alguma variação
  *      do produto encontrado) tiver `PrecoVariacao` com `preco > 0`. Variação
  *      sem preço (ou preço zerado) => NÃO cadastrado.
@@ -56,29 +69,58 @@ export async function avaliarCadastroItens(
       })
     : [];
 
-  // ---- Path B: (referência + modelo) case-insensitive -> Produto ----
+  // ---- Path B: (referência + modelo) -> Produto ----
+  // Regra geral: referência case-insensitive IGUAL. Exceção (grupo
+  // EMPRESAS_REF_PREFIXO): referência casa por PREFIXO de 8 dígitos.
   const norm = (v: string | null | undefined) => v?.trim().toUpperCase() || "";
-  const refsU = [...new Set(itens.map((i) => norm(i.referenciaFornecedor)).filter(Boolean))];
+  const digitos8 = (v: string | null | undefined) => (v ?? "").replace(/\D/g, "").slice(0, 8);
+  const usaPrefixo = (emit: string | null | undefined) =>
+    !!emit && EMPRESAS_REF_PREFIXO.has(emit.trim().toUpperCase());
+
   const modsU = [...new Set(itens.map((i) => norm(i.modelo)).filter(Boolean))];
-  const prods =
-    refsU.length && modsU.length
-      ? await prisma.$queryRaw<{ id: string; ref: string; modelo: string }[]>(Prisma.sql`
-          SELECT id,
-                 upper(trim("referenciaFornecedor")) AS ref,
-                 upper(trim("modeloNome"))           AS modelo
-          FROM "Produto"
-          WHERE upper(trim("referenciaFornecedor")) IN (${Prisma.join(refsU)})
-            AND upper(trim("modeloNome"))           IN (${Prisma.join(modsU)})
-        `)
-      : [];
-  const paresProd = new Map<string, string[]>(); // chave JSON([REF, MODELO]) -> produtoIds
-  for (const p of prods) {
-    const k = JSON.stringify([p.ref, p.modelo]);
-    const arr = paresProd.get(k) ?? [];
-    arr.push(p.id);
-    paresProd.set(k, arr);
+  const refsExato = [
+    ...new Set(
+      itens.filter((i) => !usaPrefixo(i.emitente)).map((i) => norm(i.referenciaFornecedor)).filter(Boolean)
+    ),
+  ];
+  const refsPrefixo = [
+    ...new Set(
+      itens.filter((i) => usaPrefixo(i.emitente)).map((i) => digitos8(i.referenciaFornecedor)).filter(Boolean)
+    ),
+  ];
+
+  // chave = JSON(["EXACT"|"PREFIX", <ref>, <modelo>]) -> produtoIds
+  const paresProd = new Map<string, string[]>();
+  const addPar = (chave: string, id: string) => {
+    const arr = paresProd.get(chave) ?? [];
+    arr.push(id);
+    paresProd.set(chave, arr);
+  };
+
+  if (modsU.length && refsExato.length) {
+    const r = await prisma.$queryRaw<{ id: string; ref: string; modelo: string }[]>(Prisma.sql`
+      SELECT id,
+             upper(trim("referenciaFornecedor")) AS ref,
+             upper(trim("modeloNome"))           AS modelo
+      FROM "Produto"
+      WHERE upper(trim("referenciaFornecedor")) IN (${Prisma.join(refsExato)})
+        AND upper(trim("modeloNome"))           IN (${Prisma.join(modsU)})
+    `);
+    for (const p of r) addPar(JSON.stringify(["EXACT", p.ref, p.modelo]), p.id);
   }
-  const prodIds = prods.map((p) => p.id);
+  if (modsU.length && refsPrefixo.length) {
+    const r = await prisma.$queryRaw<{ id: string; pref: string; modelo: string }[]>(Prisma.sql`
+      SELECT id,
+             left(regexp_replace("referenciaFornecedor", '[^0-9]', '', 'g'), 8) AS pref,
+             upper(trim("modeloNome"))                                          AS modelo
+      FROM "Produto"
+      WHERE left(regexp_replace("referenciaFornecedor", '[^0-9]', '', 'g'), 8) IN (${Prisma.join(refsPrefixo)})
+        AND upper(trim("modeloNome"))                                          IN (${Prisma.join(modsU)})
+    `);
+    for (const p of r) addPar(JSON.stringify(["PREFIX", p.pref, p.modelo]), p.id);
+  }
+
+  const prodIds = [...new Set([...paresProd.values()].flat())];
   const varsPorProd = prodIds.length
     ? await prisma.variacaoProduto.findMany({
         where: { produtoId: { in: prodIds } },
@@ -113,9 +155,14 @@ export async function avaliarCadastroItens(
 
   return itens.map((i) => {
     if (i.ean && eansOk.has(i.ean)) return true;
-    const ref = norm(i.referenciaFornecedor);
     const mod = norm(i.modelo);
-    return !!ref && !!mod && paresOk.has(JSON.stringify([ref, mod]));
+    if (!mod) return false;
+    if (usaPrefixo(i.emitente)) {
+      const pref = digitos8(i.referenciaFornecedor);
+      return !!pref && paresOk.has(JSON.stringify(["PREFIX", pref, mod]));
+    }
+    const ref = norm(i.referenciaFornecedor);
+    return !!ref && paresOk.has(JSON.stringify(["EXACT", ref, mod]));
   });
 }
 
@@ -192,6 +239,7 @@ export async function popularNotaItens(
       ean: d.ean,
       referenciaFornecedor: d.referenciaFornecedorIdentificada,
       modelo: d.modeloIdentificado,
+      emitente,
     }))
   );
   dados.forEach((d, i) => {

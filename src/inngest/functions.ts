@@ -1706,6 +1706,7 @@ export const reavaliarCadastroNotaItens = inngest.createFunction(
               ean: true,
               referenciaFornecedorIdentificada: true,
               modeloIdentificado: true,
+              note: { select: { emitenteNome: true } },
             },
           });
           if (itens.length === 0) {
@@ -1717,6 +1718,7 @@ export const reavaliarCadastroNotaItens = inngest.createFunction(
               ean: i.ean,
               referenciaFornecedor: i.referenciaFornecedorIdentificada,
               modelo: i.modeloIdentificado,
+              emitente: i.note.emitenteNome,
             }))
           );
           const idsQueBatem = itens.filter((_, idx) => flags[idx]).map((i) => i.id);
