@@ -2,20 +2,16 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { NotaModal } from "@/components/NotaModal";
 
 interface Linha {
-  id: string;
-  chaveAcesso: string;
-  numeroNota: string | null;
-  dataEmissao: string | null;
-  emitenteNome: string | null;
-  codigoProduto: string;
+  chave: string;
+  modelo: string | null;
+  referencia: string | null;
   descricao: string;
   ean: string | null;
-  fornecedorIdentificado: string | null;
-  modeloIdentificado: string | null;
+  emitenteNome: string | null;
   comRegraEspecifica: boolean;
+  nNotas: number;
 }
 
 interface FornecedorSemRegra {
@@ -31,32 +27,18 @@ interface Resposta {
   semRegra: FornecedorSemRegra[];
 }
 
-function ymd(d: Date) {
-  return d.toISOString().slice(0, 10);
-}
-function intervaloPadrao() {
-  const fim = new Date();
-  const inicio = new Date(fim.getTime() - 30 * 24 * 60 * 60 * 1000);
-  return { inicio: ymd(inicio), fim: ymd(fim) };
-}
-function formatarData(iso: string | null) {
-  if (!iso) return "-";
-  const d = new Date(iso);
-  return isNaN(d.getTime()) ? "-" : d.toLocaleDateString("pt-BR");
-}
-
 export default function ConferenciaProdutosPage() {
   const [emitente, setEmitente] = useState("");
   const [emitenteAplicado, setEmitenteAplicado] = useState("");
-  const [dataInicial, setDataInicial] = useState(() => intervaloPadrao().inicio);
-  const [dataFinal, setDataFinal] = useState(() => intervaloPadrao().fim);
+  // filtro de data OPCIONAL — vazio = todos os períodos (produto único não tem
+  // data natural, e produtos de meses atrás não devem ficar escondidos).
+  const [dataInicial, setDataInicial] = useState("");
+  const [dataFinal, setDataFinal] = useState("");
   const [pagina, setPagina] = useState(1);
 
   const [dados, setDados] = useState<Resposta | null>(null);
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState<string | null>(null);
-
-  const [chaveAberta, setChaveAberta] = useState<string | null>(null);
 
   // debounce do texto de emitente (400ms), volta pra página 1
   useEffect(() => {
@@ -71,12 +53,10 @@ export default function ConferenciaProdutosPage() {
     setCarregando(true);
     setErro(null);
     try {
-      const qs = new URLSearchParams({
-        pagina: String(pagina),
-        dataInicial,
-        dataFinal,
-      });
+      const qs = new URLSearchParams({ pagina: String(pagina) });
       if (emitenteAplicado.trim()) qs.set("emitente", emitenteAplicado.trim());
+      if (dataInicial) qs.set("dataInicial", dataInicial);
+      if (dataFinal) qs.set("dataFinal", dataFinal);
 
       const res = await fetch(`/api/relatorios/conferencia-produtos?${qs}`);
       const json = await res.json();
@@ -103,9 +83,8 @@ export default function ConferenciaProdutosPage() {
   function limparFiltros() {
     setEmitente("");
     setEmitenteAplicado("");
-    const p = intervaloPadrao();
-    setDataInicial(p.inicio);
-    setDataFinal(p.fim);
+    setDataInicial("");
+    setDataFinal("");
     setPagina(1);
   }
 
@@ -114,10 +93,7 @@ export default function ConferenciaProdutosPage() {
   const totalPaginas = Math.max(1, Math.ceil(total / porPagina));
   const inicio = total === 0 ? 0 : (pagina - 1) * porPagina + 1;
   const fim = Math.min(pagina * porPagina, total);
-  const filtroAtivo =
-    emitenteAplicado.trim() !== "" ||
-    dataInicial !== intervaloPadrao().inicio ||
-    dataFinal !== intervaloPadrao().fim;
+  const filtroAtivo = emitenteAplicado.trim() !== "" || !!dataInicial || !!dataFinal;
 
   return (
     <div>
@@ -141,10 +117,11 @@ export default function ConferenciaProdutosPage() {
             Fornecedores sem regra de identificação ({dados.semRegra.length})
           </strong>
           <p>
-            Itens destes emitentes <b>não aparecem</b> na lista abaixo porque ainda
-            falta ensinar as regras de Modelo / Referência do Fornecedor. Peça as
-            regras para liberar a conferência deles. (Um emitente pode ter regra
-            para alguns produtos e cair aqui só com os que a regra não cobre.)
+            Produtos destes emitentes <b>não aparecem</b> na lista abaixo porque
+            ainda falta ensinar as regras de Modelo / Referência do Fornecedor.
+            Peça as regras para liberar a conferência deles. (Um emitente pode ter
+            regra para alguns produtos e cair aqui só com os que a regra não
+            cobre.)
           </p>
           <ul>
             {dados.semRegra.map((s) => (
@@ -177,7 +154,7 @@ export default function ConferenciaProdutosPage() {
             style={{ gridTemplateColumns: "minmax(150px,190px) minmax(150px,190px)" }}
           >
             <div className="field">
-              <label>Data inicial (emissão)</label>
+              <label>Data inicial (emissão) — opcional</label>
               <input
                 type="date"
                 value={dataInicial}
@@ -186,7 +163,7 @@ export default function ConferenciaProdutosPage() {
               />
             </div>
             <div className="field">
-              <label>Data final (emissão)</label>
+              <label>Data final (emissão) — opcional</label>
               <input
                 type="date"
                 value={dataFinal}
@@ -195,6 +172,9 @@ export default function ConferenciaProdutosPage() {
               />
             </div>
           </div>
+          <p style={{ fontSize: 12, color: "var(--text-dim)", margin: "-2px 0 0" }}>
+            Sem data = todos os períodos.
+          </p>
           {filtroAtivo && (
             <div className="notes-filtros-rodape">
               <button type="button" className="btn-secundario" onClick={limparFiltros}>
@@ -212,13 +192,14 @@ export default function ConferenciaProdutosPage() {
           <p style={{ color: "var(--text-dim)" }}>Carregando…</p>
         ) : total === 0 ? (
           <p style={{ color: "var(--text-dim)" }}>
-            Nenhum item sem cadastro (de fornecedor com regra completa) no
-            período/filtro selecionado.
+            Nenhum produto sem cadastro (de fornecedor com regra completa) no
+            filtro selecionado.
           </p>
         ) : (
           <>
             <p className="notes-pag" style={{ justifyContent: "flex-start", marginTop: 0 }}>
-              {total.toLocaleString("pt-BR")} item{total === 1 ? "" : "s"} sem cadastro
+              {total.toLocaleString("pt-BR")} produto{total === 1 ? "" : "s"} único
+              {total === 1 ? "" : "s"} sem cadastro
               {carregando ? " · atualizando…" : ""}
             </p>
 
@@ -226,37 +207,24 @@ export default function ConferenciaProdutosPage() {
               <table className="notes-table">
                 <thead>
                   <tr>
-                    <th>Nota</th>
-                    <th>Emissão</th>
-                    <th className="col-empresa">Emitente</th>
-                    <th>Cód. produto</th>
+                    <th>Modelo</th>
+                    <th>Referência Fornecedor</th>
                     <th className="col-empresa">Descrição</th>
                     <th>EAN</th>
-                    <th className="col-empresa">Fornecedor identificado</th>
-                    <th>Modelo identificado</th>
+                    <th className="col-empresa">Emitente</th>
+                    <th style={{ textAlign: "right" }}>Em notas</th>
                     <th>Regra</th>
                   </tr>
                 </thead>
                 <tbody>
                   {dados!.linhas.map((l) => (
-                    <tr key={l.id} className="nota-row">
-                      <td>
-                        <button
-                          type="button"
-                          className="nota-link"
-                          onClick={() => setChaveAberta(l.chaveAcesso)}
-                          title={l.chaveAcesso}
-                        >
-                          {l.numeroNota || "ver"}
-                        </button>
-                      </td>
-                      <td>{formatarData(l.dataEmissao)}</td>
-                      <td className="col-empresa">{l.emitenteNome || "-"}</td>
-                      <td>{l.codigoProduto}</td>
+                    <tr key={l.chave} className="nota-row">
+                      <td>{l.modelo || "-"}</td>
+                      <td>{l.referencia || "-"}</td>
                       <td className="col-empresa">{l.descricao}</td>
                       <td>{l.ean || "-"}</td>
-                      <td className="col-empresa">{l.fornecedorIdentificado || "-"}</td>
-                      <td>{l.modeloIdentificado || "-"}</td>
+                      <td className="col-empresa">{l.emitenteNome || "-"}</td>
+                      <td style={{ textAlign: "right" }}>{l.nNotas}</td>
                       <td>
                         {l.comRegraEspecifica ? (
                           <span style={{ color: "var(--text-dim)" }}>—</span>
@@ -302,10 +270,6 @@ export default function ConferenciaProdutosPage() {
           </>
         )}
       </div>
-
-      {chaveAberta && (
-        <NotaModal chave={chaveAberta} onClose={() => setChaveAberta(null)} />
-      )}
     </div>
   );
 }
