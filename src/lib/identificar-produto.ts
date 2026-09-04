@@ -161,7 +161,7 @@ export function identificarModelo(
   // genérico "Flamengo" — que NÃO é mais um Modelo válido e não deve ser
   // retornado por ninguém. Comparação case-insensitive (helper `igual`).
   const MODELOS_POR_EMPRESA: [string, string][] = [
-    ["M WILDNER VESTUARIO", "Arena Couros"],
+    ["M WILDNER ACESSORIOS LTDA", "Arena Couros"],
     ["SPORT BEL LTDA", "Bel Watch"],
     ["JTX COMERCIO DE PRESENTES E ARMARINHOS LTDA", "Brasfoot"],
     ["D L FERRARI PRODUTOS LICENCIADOS LTDA", "Cebola"],
@@ -181,7 +181,7 @@ export function identificarModelo(
     ["MALHARIA RIKAM LTDA", "Rikam"],
     ["VERON PRESENTES LTDA", "Brasfoot"],
     ["Torcida Baby do Brasil Ltda", "Torcida Baby"],
-    ["KRYSTALMIX COM.E DISTR.DE PRODS. UT.DOM", "Allmix"],
+    ["KRYSTALMIX COMERCIO E DISTRIBUIDORA DE PRODUTOS E UTENSILIOS", "Allmix"],
     ["V F FERRARI PRODUTOS LICENCIADOS LTDA", "Cebola"],
     ["Liga dos Mascotes Criacoes Digitais e Licenciamentos Ltda", "Liga dos Mascotes"],
   ];
@@ -202,7 +202,7 @@ export function identificarModelo(
       "PROPARRA - CONFECCAO E COMERCIO DE ARTIGOS DO VESTUARIO LTDA",
       "SF7 COMERCIAL E SERVICOS LTDA",
       "L6 COMERCIAL DO VESTUARIO LTDA",
-      "APPROVE STREET WEAR LTDA",
+      "APPROVE STREET WEAR COMERCIAL LTDA",
     ].some((x) => igual(A, x))
   )
     return eqi(g1, "J") ? "JADE JADE" : "Approve";
@@ -228,14 +228,14 @@ export function identificarModelo(
     if (eqi(g1, "Q") || eqi(h1, "Q")) return "Quiksilver";
     if (eqi(g1, "B")) return "Billabong";
     if (eqi(g1, "R")) return "RVCA";
-    return ""; // SES sem default -> #N/D -> SEERRO externo -> ""
+    return null; // SES sem default -> não identificado
   }
   if (igual(A, "BRAZIL TRADE EIRELI EPP")) return "Bully S";
   if (igual(A, "Casio Brasil Comercio de Produtos Eletronicos Ltda")) {
     if (["A", "M", "W", "C", "F", "B"].some((x) => eqi(g1, x))) return "Casio";
     if (["D", "G"].some((x) => eqi(g1, x))) return "G-Shock";
     if (eqi(g1, "L")) return "Casio";
-    return "";
+    return null;
   }
   if (
     igual(A, "COOPERSHOES COOP.TRAB.IND.CAL.JOANETENSE LTDA") ||
@@ -263,7 +263,7 @@ export function identificarModelo(
     if (eqi(g1, "2")) return "Lost";
     if (eqi(g1, "M")) return "MCD";
     if (eqi(g1, "L")) return "Lost";
-    return "";
+    return null;
   }
   if (igual(A, "High Company LTDA")) return "High";
   if (
@@ -285,7 +285,7 @@ export function identificarModelo(
     if (localizar("HU0", H) > 0) return "Hurley";
     if (localizar("HANG LOOSE", H) > 0) return "Hang Loose";
     if (localizar("COCA COLA", H) > 0) return "Coca-Cola";
-    return "";
+    return null;
   }
   if (igual(A, "NTK CONFECCOES LTDA")) {
     const h2p = esquerda(H, 2);
@@ -296,7 +296,7 @@ export function identificarModelo(
     if (eqi(h2p, "HD")) return "HD";
     return "Starter Fla";
   }
-  if (igual(A, "Parcel Sports Eireli")) return "";
+  if (igual(A, "Parcel Sports Eireli")) return null;
   if (igual(A, "PUMA SPORTS LTDA")) return "Puma";
   if (igual(A, "RAZAO IMPORTADORA E DISTRIBUIDORA DE BIKE EIRELI - ME")) return "Two Dogs";
   if (igual(A, "RC BRAZIL LTDA")) return "Rip Curl";
@@ -307,7 +307,7 @@ export function identificarModelo(
     if (eqi(g2p, "VL")) return "Volcom";
     if (eqi(g2p, "02")) return "Volcom";
     if (eqi(g2p, "HY")) return "Hurley";
-    return "";
+    return null;
   }
   if (igual(A, "SurfRio Brasil Comercio de Roupas e Acessorios Esportivos Lt"))
     return "STICK BUMPS";
@@ -361,7 +361,8 @@ function referenciaFormula2(A: string, G: string, H: string, P: string): string 
   if (igual(A, "RGA IMPORTACAO EXPORTACAO E COMERCIO LTDA")) return G;
   if (igual(A, "CIDADE MARAVILHOSA INDUSTRIA E COMERCIO DE ROUPAS SA")) return G;
   if (igual(A, "AGK DESENVOLVIMENTO DE PRODUTOS LTDA")) return G;
-  if (igual(A, "ADIDAS DO BRASIL LTDA")) return G; // maiúsculo — distinto de "adidas do Brasil Ltda"
+  // adidas do Brasil (as duas grafias — `igual` é case-insensitive): código puro.
+  if (igual(A, "adidas do Brasil Ltda")) return G;
   if (igual(A, "STAR FLEX CALCADOS LTDA")) {
     // REVISAR: ramo muito ambíguo. Original:
     //   ESQUERDA(DIREITA($H2; LEN($H2)-LOCALIZAR("REF:";$H2)-3); 4)
@@ -445,8 +446,9 @@ function referenciaFormula2(A: string, G: string, H: string, P: string): string 
     }
     return ultimoNome(H) + "." + esquerda(substituir(G, ultimoNome(H), ""), 3);
   }
-  if (igual(A, "INPU-IND NACIONAL DE POLIURETANOS EIRELI"))
-    return esquerda(G, G.length - ultimoNome(H).length - 1);
+  // INPU-IND: código puro, igual às outras do grupo Thug/Dubs (tratado no
+  // ramo EMPRESAS_THUG_DUBS mais abaixo). Antes transformava o código, o que
+  // era inconsistente com a correspondência por prefixo do temCadastro.
   if (igual(A, "NTK CONFECCOES EIRELI")) {
     const h2p = esquerda(H, 2);
     if (eqi(h2p, "ON")) return esquerda(direita(G, 5), 4);
@@ -512,7 +514,10 @@ function referenciaFormula3(A: string, G: string, H: string, P: string): string 
   if (igual(A, "MALHARIA RIKAM LTDA")) return substituir(substituir(G, ".JV", ""), ".", "");
   if (igual(A, "Torcida Baby do Brasil Ltda")) return esquerda(G, localizar(".", G) - 1);
   if (igual(A, "BRAZILINE INDUSTRIA E COMERCIO LTDA")) return esquerda(G, 11);
-  if (igual(A, "V F FERRARI PRODUTOS LICENCIADOS LTDA") || igual(A, "I T F FERRARI BRINDES")) {
+  if (
+    igual(A, "V F FERRARI PRODUTOS LICENCIADOS LTDA") ||
+    igual(A, "ITF FERRARI PRODUTOS LICENCIADOS LTDA")
+  ) {
     if (eqi(g2, "00")) return direita(G, 4);
     // REVISAR: ESQUERDA($G2;2)="0" compara 2 chars com "0" (1 char) — no Excel
     // só seria verdadeiro se G tiver exatamente 1 caractere.
@@ -526,7 +531,7 @@ function referenciaFormula3(A: string, G: string, H: string, P: string): string 
       "PROPARRA - CONFECCAO E COMERCIO DE ARTIGOS DO VESTUARIO LTDA",
       "SF7 COMERCIAL E SERVICOS LTDA",
       "L6 COMERCIAL DO VESTUARIO LTDA",
-      "APPROVE STREET WEAR LTDA",
+      "APPROVE STREET WEAR COMERCIAL LTDA",
     ].some((x) => igual(A, x))
   ) {
     if (eqi(g1, "J")) return G + cor3(P);

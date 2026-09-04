@@ -24,7 +24,8 @@ interface Resposta {
   total: number;
   pagina: number;
   porPagina: number;
-  semRegra: FornecedorSemRegra[];
+  semRegraModelo: FornecedorSemRegra[];
+  semRegraReferencia: FornecedorSemRegra[];
 }
 
 export default function ConferenciaProdutosPage() {
@@ -111,28 +112,50 @@ export default function ConferenciaProdutosPage() {
         </Link>
       </div>
 
-      {dados?.semRegra && dados.semRegra.length > 0 && (
-        <div className="card aviso-sem-regra">
-          <strong>
-            Fornecedores sem regra de identificação ({dados.semRegra.length})
-          </strong>
-          <p>
-            Produtos destes emitentes <b>não aparecem</b> na lista abaixo porque
-            ainda falta ensinar as regras de Modelo / Referência do Fornecedor.
-            Peça as regras para liberar a conferência deles. (Um emitente pode ter
-            regra para alguns produtos e cair aqui só com os que a regra não
-            cobre.)
-          </p>
-          <ul>
-            {dados.semRegra.map((s) => (
-              <li key={s.emitente}>
-                {s.emitente}{" "}
-                <span className="cnt">
-                  — {s.itens} {s.itens === 1 ? "item" : "itens"}
-                </span>
-              </li>
-            ))}
-          </ul>
+      {(dados?.semRegraModelo?.length || dados?.semRegraReferencia?.length) && (
+        <div className="avisos-sem-regra">
+          {dados!.semRegraModelo.length > 0 && (
+            <div className="card aviso-sem-regra">
+              <strong>Sem regra de Modelo ({dados!.semRegraModelo.length})</strong>
+              <p>
+                Fornecedores com itens cujo <b>Modelo</b> não foi identificado
+                (nenhuma regra cobre). Peça a regra de Modelo para liberá-los na
+                conferência.
+              </p>
+              <ul>
+                {dados!.semRegraModelo.map((s) => (
+                  <li key={s.emitente}>
+                    {s.emitente}{" "}
+                    <span className="cnt">
+                      — {s.itens} {s.itens === 1 ? "item" : "itens"}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {dados!.semRegraReferencia.length > 0 && (
+            <div className="card aviso-sem-regra">
+              <strong>
+                Sem regra de Referência ({dados!.semRegraReferencia.length})
+              </strong>
+              <p>
+                Fornecedores com itens cuja <b>Referência do Fornecedor</b> caiu
+                no fallback (código puro, sem regra própria) — mesmo que o Modelo
+                já esteja OK.
+              </p>
+              <ul>
+                {dados!.semRegraReferencia.map((s) => (
+                  <li key={s.emitente}>
+                    {s.emitente}{" "}
+                    <span className="cnt">
+                      — {s.itens} {s.itens === 1 ? "item" : "itens"}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
         </div>
       )}
 

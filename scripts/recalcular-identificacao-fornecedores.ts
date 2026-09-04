@@ -5,9 +5,10 @@
  * identificação nova/corrigida entra e os itens antigos precisam ser
  * reprocessados (eles foram calculados antes da regra existir).
  *
- * Escopo: só os emitentes da lista ALVOS abaixo. As regras desses fornecedores
- * NÃO usam `informacoesComplementares`, então recomputamos com infCpl = "" sem
- * risco.
+ * Escopo: só os emitentes da lista ALVOS abaixo. `informacoesComplementares`
+ * é lido do XML da nota (Note.xmlCompleto), memoizado por nota — assim
+ * recompomos exatamente como o popularNotaItens faria, mesmo pras regras que
+ * usam infocompl (grupo Approve/R3, Outside/Core).
  *
  *   Dry-run (só conta):  npx tsx --env-file=.env scripts/recalcular-identificacao-fornecedores.ts
  *   Aplicar:             npx tsx --env-file=.env scripts/recalcular-identificacao-fornecedores.ts --apply
@@ -19,13 +20,14 @@ import {
   EMPRESAS_THUG_DUBS,
 } from "../src/lib/identificar-produto";
 import { avaliarCadastroItens } from "../src/lib/popular-nota-itens";
+import { parseNFeXml } from "../src/lib/parse-nfe-xml";
 
 const APLICAR = process.argv.includes("--apply");
 
 // Empresas que antes retornavam o Modelo genérico "Flamengo" e agora têm
 // Modelo específico (ou null explícito). Reprocessadas junto.
 const EMPRESAS_EX_FLAMENGO = [
-  "M WILDNER VESTUARIO",
+  "M WILDNER ACESSORIOS LTDA",
   "SPORT BEL LTDA",
   "JTX COMERCIO DE PRESENTES E ARMARINHOS LTDA",
   "D L FERRARI PRODUTOS LICENCIADOS LTDA",
@@ -45,11 +47,31 @@ const EMPRESAS_EX_FLAMENGO = [
   "MALHARIA RIKAM LTDA",
   "VERON PRESENTES LTDA",
   "Torcida Baby do Brasil Ltda",
-  "KRYSTALMIX COM.E DISTR.DE PRODS. UT.DOM",
+  "KRYSTALMIX COMERCIO E DISTRIBUIDORA DE PRODUTOS E UTENSILIOS",
   "V F FERRARI PRODUTOS LICENCIADOS LTDA",
   "Liga dos Mascotes Criacoes Digitais e Licenciamentos Ltda",
   "B. U. INDUSTRIA E COMERCIO DE VESTUARIO LTDA", // -> null
   "ROMANOS MALHARIA LTDA", // -> null
+];
+
+// Correções técnicas da auditoria (item 1: "" -> null; item 3: grafias;
+// item 4: adidas as duas grafias).
+const EMPRESAS_CORRECOES = [
+  // "" -> null (regra de Modelo só) — casos onde a fonte antes gravava ""
+  "BOARDRIDERS DO BRASIL COMERCIO DE ARTIGOS ESPORTIVOS LTDA",
+  "Casio Brasil Comercio de Produtos Eletronicos Ltda",
+  "CORE BRANDS MODA LTDA",
+  "OUTSIDE CO LTDA",
+  "NEORUBBER INDUSTRIA DE SANDALIAS LTDA",
+  "SURF CO LTDA",
+  "Parcel Sports Eireli",
+  // grafias corrigidas (nome real no banco)
+  "APPROVE STREET WEAR COMERCIAL LTDA",
+  "ITF FERRARI PRODUTOS LICENCIADOS LTDA",
+  // adidas — as duas grafias (só a minúscula existe no banco hoje, mas
+  // deixamos as duas por garantia)
+  "adidas do Brasil Ltda",
+  "ADIDAS DO BRASIL LTDA",
 ];
 
 const ALVOS = [
@@ -57,6 +79,7 @@ const ALVOS = [
   "PCF IMPORTACAO EXPORTACAO E COMERCIO LTD",
   "VF FERRARI PRODUTOS LICENCIADOS",
   ...EMPRESAS_EX_FLAMENGO,
+  ...EMPRESAS_CORRECOES,
 ];
 
 async function main() {
@@ -64,6 +87,7 @@ async function main() {
     where: { note: { emitenteNome: { in: ALVOS } } },
     select: {
       id: true,
+      noteId: true,
       codigoProduto: true,
       descricao: true,
       ean: true,
@@ -71,15 +95,35 @@ async function main() {
       referenciaFornecedorIdentificada: true,
       referenciaComRegraEspecifica: true,
       temCadastro: true,
-      note: { select: { emitenteNome: true } },
+      note: { select: { emitenteNome: true, xmlCompleto: true } },
     },
   });
   console.log(`NotaItem dos fornecedores alvo: ${itens.length}\n`);
 
+  // infocompl por nota (memoizado) — lido do XML como o popularNotaItens faz.
+  const infCplPorNota = new Map<string, string>();
+  const infCpl = (noteId: string, xml: string): string => {
+    let v = infCplPorNota.get(noteId);
+    if (v === undefined) {
+      try {
+        v = parseNFeXml(xml || "").informacoesComplementares || "";
+      } catch {
+        v = "";
+      }
+      infCplPorNota.set(noteId, v);
+    }
+    return v;
+  };
+
   const recalc = itens.map((it) => {
     const emit = it.note.emitenteNome ?? "";
     const modelo = identificarModelo(emit, it.codigoProduto, it.descricao);
-    const ref = identificarReferenciaFornecedor(emit, it.codigoProduto, it.descricao, "");
+    const ref = identificarReferenciaFornecedor(
+      emit,
+      it.codigoProduto,
+      it.descricao,
+      infCpl(it.noteId, it.note.xmlCompleto)
+    );
     return {
       it,
       emit,

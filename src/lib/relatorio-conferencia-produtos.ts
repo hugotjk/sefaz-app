@@ -37,7 +37,9 @@ export interface ResultadoConferenciaProdutos {
   total: number; // total de PRODUTOS ÚNICOS (não de NotaItem)
   pagina: number;
   porPagina: number;
-  semRegra: FornecedorSemRegra[];
+  // Dois avisos independentes (um fornecedor pode aparecer nos dois):
+  semRegraModelo: FornecedorSemRegra[]; // itens com modeloIdentificado nulo/vazio
+  semRegraReferencia: FornecedorSemRegra[]; // itens com referenciaComRegraEspecifica = false
 }
 
 export function parseFiltrosConferenciaProdutos(
@@ -78,28 +80,30 @@ export async function montarConferenciaProdutos(
     .map((r) => r.emitente)
     .filter((e): e is string => !!e);
 
-  // 3. Aviso "fornecedores sem regra": emitentes com itens de regra incompleta
-  //    (modelo nulo OU sem regra própria) que NÃO estão na lista de "com regra
-  //    completa". Respeita o intervalo de data; ignora o filtro de texto.
-  const excluirComRegra = emitentesComRegra.length
-    ? Prisma.sql`AND COALESCE(n."emitenteNome", '(sem emitente)') NOT IN (${Prisma.join(
-        emitentesComRegra
-      )})`
-    : Prisma.empty;
-  const semRegraRows = await prisma.$queryRaw<{ emitente: string; itens: number }[]>(Prisma.sql`
-    SELECT COALESCE(n."emitenteNome", '(sem emitente)') AS emitente,
-           COUNT(*)::int AS itens
-    FROM "NotaItem" i
-    JOIN "Note" n ON n.id = i."noteId"
-    WHERE (i."modeloIdentificado" IS NULL OR i."referenciaComRegraEspecifica" = false)
-      ${filtroGte} ${filtroLte} ${excluirComRegra}
-    GROUP BY 1
-    ORDER BY itens DESC, emitente ASC
-  `);
-  const semRegra = semRegraRows.map((r) => ({
-    emitente: r.emitente,
-    itens: Number(r.itens),
-  }));
+  // 3. Dois avisos independentes, cada um agrupado pelo seu critério.
+  //    Respeitam o intervalo de data; ignoram o filtro de texto. `modelo`
+  //    vazio ('') conta como sem modelo (algumas regras retornam '' quando o
+  //    SES do Excel não tinha default).
+  const agruparSemRegra = async (criterio: Prisma.Sql) =>
+    (
+      await prisma.$queryRaw<{ emitente: string; itens: number }[]>(Prisma.sql`
+        SELECT COALESCE(n."emitenteNome", '(sem emitente)') AS emitente,
+               COUNT(*)::int AS itens
+        FROM "NotaItem" i
+        JOIN "Note" n ON n.id = i."noteId"
+        WHERE ${criterio}
+          ${filtroGte} ${filtroLte}
+        GROUP BY 1
+        ORDER BY itens DESC, emitente ASC
+      `)
+    ).map((r) => ({ emitente: r.emitente, itens: Number(r.itens) }));
+
+  const semRegraModelo = await agruparSemRegra(
+    Prisma.sql`(i."modeloIdentificado" IS NULL OR i."modeloIdentificado" = '')`
+  );
+  const semRegraReferencia = await agruparSemRegra(
+    Prisma.sql`i."referenciaComRegraEspecifica" = false`
+  );
 
   // Sem nenhum fornecedor com regra -> lista principal vazia.
   if (emitentesComRegra.length === 0) {
@@ -108,7 +112,8 @@ export async function montarConferenciaProdutos(
       total: 0,
       pagina: f.pagina,
       porPagina: CONFERENCIA_PRODUTOS_POR_PAGINA,
-      semRegra,
+      semRegraModelo,
+      semRegraReferencia,
     };
   }
 
@@ -188,6 +193,7 @@ export async function montarConferenciaProdutos(
     total,
     pagina: f.pagina,
     porPagina: CONFERENCIA_PRODUTOS_POR_PAGINA,
-    semRegra,
+    semRegraModelo,
+    semRegraReferencia,
   };
 }

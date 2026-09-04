@@ -430,7 +430,14 @@ h2 { font-size: 16px; margin: 0 0 12px; }
   font-weight: 500;
 }
 
-/* Conferência de Produtos: aviso de fornecedores que precisam de regra */
+/* Conferência de Produtos: avisos de fornecedores que precisam de regra */
+.avisos-sem-regra {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+.avisos-sem-regra .aviso-sem-regra { margin-bottom: 0; }
 .aviso-sem-regra {
   border-color: rgba(245, 158, 11, 0.5);
   background: rgba(245, 158, 11, 0.06);
@@ -447,13 +454,11 @@ h2 { font-size: 16px; margin: 0 0 12px; }
   margin: 0;
   padding-left: 18px;
   font-size: 13px;
-  columns: 2;
-  column-gap: 28px;
 }
-.aviso-sem-regra li { margin-bottom: 3px; break-inside: avoid; }
+.aviso-sem-regra li { margin-bottom: 3px; }
 .aviso-sem-regra .cnt { color: var(--text-dim); }
-@media (max-width: 640px) {
-  .aviso-sem-regra ul { columns: 1; }
+@media (max-width: 760px) {
+  .avisos-sem-regra { grid-template-columns: 1fr; }
 }
 
 .btn {
