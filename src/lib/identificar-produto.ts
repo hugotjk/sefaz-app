@@ -85,6 +85,31 @@ export const EMPRESAS_THUG_DUBS = [
   "BROTHERHOOD COMERCIO DE ROUPAS LTDA", // razão social real do "BROTHERHOOD" nos NotaItem
 ] as const;
 
+/**
+ * Fornecedores "banidos" — não são produto de revenda de verdade (embalagens,
+ * veículos, descartáveis, brindes genéricos…). Ficam FORA da Conferência de
+ * Produtos: nem na lista principal, nem nos avisos de "sem regra". A tela tem
+ * um popup pra revisar quem está aqui. Nomes exatos como aparecem em
+ * `Note.emitenteNome`.
+ */
+export const EMPRESAS_BANIDAS: string[] = [
+  "GLAYCE MENDES DE SOUSA 05687449779",
+  "JAE ILHA DESCARTAVEIS E LIMPEZA LTDA",
+  "TOP CESTA DE ALIMENTOS LTDA",
+  "4MMD COMERCIO DE EMBALAGENS EIRELI",
+  "PRINTMAX TECNOLOGIA LTDA",
+  "WFR Moveis e Estruturas Metalicas Eirele",
+  "PREMIUM RIO VEICULOS LTDA",
+  "E-INFINITE SOLUTIONS CUSTOMIZACAO LTDA",
+  "PRINTBAG EMBALAGENS LTDA",
+  "ZAGAROLLO PAPEIS E EMBALAGENS LTDA - EPP",
+  "CELSO FERREIRA 02377264751",
+  "D D EMBALAGENS LTDA",
+  "45.275.132 LEONARDO CORREA ANDRADE DUARTE",
+  "Almap Mais Fibras E Acessorios Eireli",
+  "ANDRILU COM. E DIST. DE PROD.TEXTIL LTDA-ME",
+];
+
 // --------------------------------------------------------------------------
 // FÓRMULA 1 — Modelo
 // --------------------------------------------------------------------------
@@ -189,6 +214,16 @@ export function identificarModelo(
     ["Maxima Apparel Brasil Importação e Comércio Ltda.", "Pro Standard"],
     ["EMC TRANSFERS IMPRESSOES LTDA", "EMC"],
     ["BB INDUSTRIA E COMERCIO DE ARTIGOS DE USO PESSOAL LTDA", "Go Case"],
+    ["BM SPORT COMÉRCIO E CONFECÇÃO DE ROUPAS LTDA", "beme"],
+    ["ITF FERRARI PRODUTOS LICENCIADOS LTDA", "cebola"], // referência já vem da fórmula 3
+    ["TSC ESTADIOS COMERCIO DE ARTIGOS ESPORTIVOS LTDA", "copos tsc"],
+    ["TSC IDOLOS COMERCIO DE ARTIGOS ESPORTIVOS LTDA", "copos tsc"],
+    ["SEEDER CONFECCOES LTDA", "gavea"],
+    ["NUR DISTRIBUIDORA LTDA", "gluck"],
+    ["KIT CLUB HERMES DISTRIBUIDORA DE ARTIGOS ESPORTIVOS LTDA", "kit club"],
+    ["NATURAL COMPANY CONFECCOES LTDA", "natural company"],
+    ["GENIUS 1 PARTICIPACOES JOIAS E ARTIGOS DE LUXO LTDA", "prata olam"],
+    ["AP OLD SCHOOL COM. ART. ESP. LTDA", "liga retro"],
   ];
   const porEmpresa = MODELOS_POR_EMPRESA.find(([nome]) => igual(A, nome));
   if (porEmpresa) return porEmpresa[1];
@@ -497,7 +532,18 @@ function referenciaFormula2(A: string, G: string, H: string, P: string): string 
     igual(A, "M&L SPORT INNOVATION MARKETING ESPORTIVO LTDA") ||
     igual(A, "NEXT ELEVEN CONFECCOES LTDA") ||
     igual(A, "CROMOTRANSFER INDUSTRIA DE ESTAMPAS EM TRANSFER LTDA") ||
-    igual(A, "EMC TRANSFERS IMPRESSOES LTDA")
+    igual(A, "EMC TRANSFERS IMPRESSOES LTDA") ||
+    // Suposição: "código puro" por padrão (o cliente ainda não definiu regra
+    // específica de referência pra estas).
+    igual(A, "BM SPORT COMÉRCIO E CONFECÇÃO DE ROUPAS LTDA") ||
+    igual(A, "TSC ESTADIOS COMERCIO DE ARTIGOS ESPORTIVOS LTDA") ||
+    igual(A, "TSC IDOLOS COMERCIO DE ARTIGOS ESPORTIVOS LTDA") ||
+    igual(A, "SEEDER CONFECCOES LTDA") ||
+    igual(A, "NUR DISTRIBUIDORA LTDA") ||
+    igual(A, "KIT CLUB HERMES DISTRIBUIDORA DE ARTIGOS ESPORTIVOS LTDA") ||
+    igual(A, "NATURAL COMPANY CONFECCOES LTDA") ||
+    igual(A, "GENIUS 1 PARTICIPACOES JOIAS E ARTIGOS DE LUXO LTDA") ||
+    igual(A, "AP OLD SCHOOL COM. ART. ESP. LTDA")
   )
     return G;
 

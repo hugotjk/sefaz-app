@@ -26,6 +26,7 @@ interface Resposta {
   porPagina: number;
   semRegraModelo: FornecedorSemRegra[];
   semRegraReferencia: FornecedorSemRegra[];
+  banidos: FornecedorSemRegra[];
 }
 
 export default function ConferenciaProdutosPage() {
@@ -40,6 +41,7 @@ export default function ConferenciaProdutosPage() {
   const [dados, setDados] = useState<Resposta | null>(null);
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState<string | null>(null);
+  const [mostrarBanidos, setMostrarBanidos] = useState(false);
 
   // debounce do texto de emitente (400ms), volta pra página 1
   useEffect(() => {
@@ -107,10 +109,62 @@ export default function ConferenciaProdutosPage() {
         }}
       >
         <h1 style={{ margin: 0 }}>Conferência de Produtos Sem Cadastro</h1>
-        <Link href="/relatorios" style={{ fontSize: 13, color: "var(--text-dim)" }}>
-          ← Relatórios
-        </Link>
+        <div style={{ display: "flex", gap: 16, alignItems: "center", fontSize: 13 }}>
+          <button
+            type="button"
+            className="btn-secundario"
+            style={{ padding: "6px 10px", fontSize: 12 }}
+            onClick={() => setMostrarBanidos(true)}
+            disabled={!dados?.banidos?.length}
+          >
+            Ver fornecedores banidos
+            {dados?.banidos?.length ? ` (${dados.banidos.length})` : ""}
+          </button>
+          <Link href="/relatorios" style={{ color: "var(--text-dim)" }}>
+            ← Relatórios
+          </Link>
+        </div>
       </div>
+
+      {mostrarBanidos && dados?.banidos && (
+        <div className="modal-overlay" onClick={() => setMostrarBanidos(false)}>
+          <div
+            className="modal-content"
+            style={{ maxWidth: 560 }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              className="modal-close"
+              onClick={() => setMostrarBanidos(false)}
+              aria-label="Fechar"
+            >
+              ✕
+            </button>
+            <h2 style={{ margin: "0 0 6px" }}>Fornecedores banidos</h2>
+            <p style={{ color: "var(--text-dim)", fontSize: 13, margin: "0 0 14px" }}>
+              Excluídos da Conferência de Produtos (não é produto de revenda:
+              embalagens, veículos, descartáveis, brindes genéricos…). Contagem =
+              total de itens no banco.
+            </p>
+            <table className="notes-table" style={{ width: "100%" }}>
+              <thead>
+                <tr>
+                  <th>Fornecedor</th>
+                  <th style={{ textAlign: "right" }}>Itens</th>
+                </tr>
+              </thead>
+              <tbody>
+                {dados.banidos.map((b) => (
+                  <tr key={b.emitente}>
+                    <td>{b.emitente}</td>
+                    <td style={{ textAlign: "right" }}>{b.itens}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {(dados?.semRegraModelo?.length || dados?.semRegraReferencia?.length) && (
         <div className="avisos-sem-regra">

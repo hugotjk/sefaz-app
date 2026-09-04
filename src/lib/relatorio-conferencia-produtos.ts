@@ -1,5 +1,6 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
+import { EMPRESAS_BANIDAS } from "@/lib/identificar-produto";
 
 export const CONFERENCIA_PRODUTOS_POR_PAGINA = 50;
 
@@ -40,6 +41,8 @@ export interface ResultadoConferenciaProdutos {
   // Dois avisos independentes (um fornecedor pode aparecer nos dois):
   semRegraModelo: FornecedorSemRegra[]; // itens com modeloIdentificado nulo/vazio
   semRegraReferencia: FornecedorSemRegra[]; // itens com referenciaComRegraEspecifica = false
+  // Fornecedores banidos (ocultos do resto da tela) + total de itens de cada.
+  banidos: FornecedorSemRegra[];
 }
 
 export function parseFiltrosConferenciaProdutos(
@@ -65,6 +68,28 @@ export async function montarConferenciaProdutos(
   const temLte = !!lte && !Number.isNaN(lte.getTime());
   const filtroGte = temGte ? Prisma.sql`AND n."dataEmissao" >= ${gte}` : Prisma.empty;
   const filtroLte = temLte ? Prisma.sql`AND n."dataEmissao" <= ${lte}` : Prisma.empty;
+
+  // Exclui fornecedores banidos de TUDO (lista principal + avisos).
+  const filtroBanidos = EMPRESAS_BANIDAS.length
+    ? Prisma.sql`AND (n."emitenteNome" IS NULL OR n."emitenteNome" NOT IN (${Prisma.join(
+        EMPRESAS_BANIDAS
+      )}))`
+    : Prisma.empty;
+
+  // Contagem de itens de cada banido (para o popup "ver banidos"). Global,
+  // sem filtro de data — é "quanto tem no banco".
+  const banidos = EMPRESAS_BANIDAS.length
+    ? (
+        await prisma.$queryRaw<{ emitente: string; itens: number }[]>(Prisma.sql`
+          SELECT n."emitenteNome" AS emitente, COUNT(*)::int AS itens
+          FROM "NotaItem" i
+          JOIN "Note" n ON n.id = i."noteId"
+          WHERE n."emitenteNome" IN (${Prisma.join(EMPRESAS_BANIDAS)})
+          GROUP BY 1
+          ORDER BY itens DESC, emitente ASC
+        `)
+      ).map((r) => ({ emitente: r.emitente, itens: Number(r.itens) }))
+    : [];
 
   // 1. Emitentes que JÁ têm regra COMPLETA ensinada = têm ao menos 1 NotaItem
   //    com modelo identificado E referência com regra própria. Propriedade do
@@ -92,7 +117,7 @@ export async function montarConferenciaProdutos(
         FROM "NotaItem" i
         JOIN "Note" n ON n.id = i."noteId"
         WHERE ${criterio}
-          ${filtroGte} ${filtroLte}
+          ${filtroGte} ${filtroLte} ${filtroBanidos}
         GROUP BY 1
         ORDER BY itens DESC, emitente ASC
       `)
@@ -114,6 +139,7 @@ export async function montarConferenciaProdutos(
       porPagina: CONFERENCIA_PRODUTOS_POR_PAGINA,
       semRegraModelo,
       semRegraReferencia,
+      banidos,
     };
   }
 
@@ -151,7 +177,7 @@ export async function montarConferenciaProdutos(
       JOIN "Note" n ON n.id = i."noteId"
       WHERE i."temCadastro" = false
         AND n."emitenteNome" IN (${Prisma.join(emitentesComRegra)})
-        ${filtroEmitente} ${filtroGte} ${filtroLte}
+        ${filtroEmitente} ${filtroGte} ${filtroLte} ${filtroBanidos}
     ),
     grupos AS (
       SELECT DISTINCT ON (modelo, referencia)
@@ -195,5 +221,6 @@ export async function montarConferenciaProdutos(
     porPagina: CONFERENCIA_PRODUTOS_POR_PAGINA,
     semRegraModelo,
     semRegraReferencia,
+    banidos,
   };
 }
