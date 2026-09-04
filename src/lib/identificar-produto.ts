@@ -157,36 +157,43 @@ export function identificarModelo(
     igual(A, "NIRUT IND E COM CALC EIRELI")
   )
     return "ME LEVA FARM";
+  // Modelo específico por empresa. Antes essas empresas caíam todas num ramo
+  // genérico "Flamengo" — que NÃO é mais um Modelo válido e não deve ser
+  // retornado por ninguém. Comparação case-insensitive (helper `igual`).
+  const MODELOS_POR_EMPRESA: [string, string][] = [
+    ["M WILDNER VESTUARIO", "Arena Couros"],
+    ["SPORT BEL LTDA", "Bel Watch"],
+    ["JTX COMERCIO DE PRESENTES E ARMARINHOS LTDA", "Brasfoot"],
+    ["D L FERRARI PRODUTOS LICENCIADOS LTDA", "Cebola"],
+    ["VIESS CALÇADOS E ARTIGOS ESPORTIVOS LTDA", "Viess Chuteiras"],
+    ["RANC CONFECCOES LTDA ME", "Ranc"],
+    ["G. BLUES INDÚSTRIA E COMÉRCIO LTDA.", "Gilson Martins"],
+    ["CKS IMPORTACAO E EXPORTACAO DE MAQUINAS EIRELI", "Cavalinho Fla"],
+    ["BLUE OCEAN CONFECCOES S.A - FLEXCAP", "Super Cap"],
+    ["MILLED BRASIL DURGA COMERCIAL LTDA", "Milled"],
+    ["TSC MARKETING E LICENCIAMENTO LTDA", "Copos TSC"],
+    ["MYFLAG IND. E CONFEC. EIRELI", "MyFlag"],
+    ["M&L SPORT INNOVATION MARKETING ESPORTIVO LTDA", "Copos M&L"],
+    ["KIT CLUB DISTRIBUIDORA DE ARTIGOS ESPORTIVOS LTDA - ME", "Kit Club"],
+    ["Bel Watch Comercial Importadora e Exportadora Eireli", "Bel Watch"],
+    ["1QA+ Confeccoes Eireli (Torcida Baby)", "Torcida Baby"],
+    ["ARELL IMPORTACAO E COMERCIO LTDA", "Arell"],
+    ["MALHARIA RIKAM LTDA", "Rikam"],
+    ["VERON PRESENTES LTDA", "Brasfoot"],
+    ["Torcida Baby do Brasil Ltda", "Torcida Baby"],
+    ["KRYSTALMIX COM.E DISTR.DE PRODS. UT.DOM", "Allmix"],
+    ["V F FERRARI PRODUTOS LICENCIADOS LTDA", "Cebola"],
+    ["Liga dos Mascotes Criacoes Digitais e Licenciamentos Ltda", "Liga dos Mascotes"],
+  ];
+  const porEmpresa = MODELOS_POR_EMPRESA.find(([nome]) => igual(A, nome));
+  if (porEmpresa) return porEmpresa[1];
+  // Duas empresas do grupo antigo ainda sem informação pra definir o Modelo:
+  // ficam SEM modelo (null) — não caem mais no genérico e não têm valor novo.
   if (
-    [
-      "M WILDNER VESTUARIO",
-      "SPORT BEL LTDA",
-      "JTX COMERCIO DE PRESENTES E ARMARINHOS LTDA",
-      "D L FERRARI PRODUTOS LICENCIADOS LTDA",
-      "VIESS CALÇADOS E ARTIGOS ESPORTIVOS LTDA",
-      "RANC CONFECCOES LTDA ME",
-      "G. BLUES INDÚSTRIA E COMÉRCIO LTDA.",
-      "CKS IMPORTACAO E EXPORTACAO DE MAQUINAS EIRELI",
-      "BLUE OCEAN CONFECCOES S.A - FLEXCAP",
-      "MILLED BRASIL DURGA COMERCIAL LTDA",
-      "TSC MARKETING E LICENCIAMENTO LTDA",
-      "MYFLAG IND. E CONFEC. EIRELI",
-      "M&L SPORT INNOVATION MARKETING ESPORTIVO LTDA",
-      "KIT CLUB DISTRIBUIDORA DE ARTIGOS ESPORTIVOS LTDA - ME",
-      "Bel Watch Comercial Importadora e Exportadora Eireli",
-      "B. U. INDUSTRIA E COMERCIO DE VESTUARIO LTDA",
-      "1QA+ Confeccoes Eireli (Torcida Baby)",
-      "ARELL IMPORTACAO E COMERCIO LTDA",
-      "MALHARIA RIKAM LTDA",
-      "VERON PRESENTES LTDA",
-      "Torcida Baby do Brasil Ltda",
-      "KRYSTALMIX COM.E DISTR.DE PRODS. UT.DOM",
-      "V F FERRARI PRODUTOS LICENCIADOS LTDA",
-      "ROMANOS MALHARIA LTDA",
-      "Liga dos Mascotes Criacoes Digitais e Licenciamentos Ltda",
-    ].some((x) => igual(A, x))
+    igual(A, "B. U. INDUSTRIA E COMERCIO DE VESTUARIO LTDA") ||
+    igual(A, "ROMANOS MALHARIA LTDA")
   )
-    return "Flamengo";
+    return null;
   if (
     [
       "MATMAMAT CONFECCOES LTDA",
@@ -459,12 +466,17 @@ function referenciaFormula2(A: string, G: string, H: string, P: string): string 
       : esquerda(semPonto, 8);
   }
   if (igual(A, "TESS INDUSTRIA E COMERCIO LTDA")) return esquerda(H, localizar(" ", H) - 1);
-  // Grupo Thug Nine / Dubs / Brotherhood + PCF + VF Ferrari: referência do
-  // fornecedor = o próprio código do produto da nota, sem transformação.
+  // Grupo Thug Nine / Dubs / Brotherhood + PCF + VF Ferrari + Blue Ocean /
+  // TSC / M&L Sport: referência do fornecedor = o próprio código do produto da
+  // nota, sem transformação (comparação normal/igual, não prefixo — só o grupo
+  // Thug/Dubs usa prefixo, tratado em avaliarCadastroItens).
   if (
     EMPRESAS_THUG_DUBS.some((x) => igual(A, x)) ||
     igual(A, "PCF IMPORTACAO EXPORTACAO E COMERCIO LTD") ||
-    igual(A, "VF FERRARI PRODUTOS LICENCIADOS")
+    igual(A, "VF FERRARI PRODUTOS LICENCIADOS") ||
+    igual(A, "BLUE OCEAN CONFECCOES S.A - FLEXCAP") ||
+    igual(A, "TSC MARKETING E LICENCIAMENTO LTDA") ||
+    igual(A, "M&L SPORT INNOVATION MARKETING ESPORTIVO LTDA")
   )
     return G;
 

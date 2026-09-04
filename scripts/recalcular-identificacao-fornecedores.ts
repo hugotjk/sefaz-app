@@ -6,8 +6,8 @@
  * reprocessados (eles foram calculados antes da regra existir).
  *
  * Escopo: só os emitentes da lista ALVOS abaixo. As regras desses fornecedores
- * (Thug Nine/Dubs/Brotherhood, PCF, VF Ferrari) NÃO usam
- * `informacoesComplementares`, então recomputamos com infCpl = "" sem risco.
+ * NÃO usam `informacoesComplementares`, então recomputamos com infCpl = "" sem
+ * risco.
  *
  *   Dry-run (só conta):  npx tsx --env-file=.env scripts/recalcular-identificacao-fornecedores.ts
  *   Aplicar:             npx tsx --env-file=.env scripts/recalcular-identificacao-fornecedores.ts --apply
@@ -22,10 +22,41 @@ import { avaliarCadastroItens } from "../src/lib/popular-nota-itens";
 
 const APLICAR = process.argv.includes("--apply");
 
+// Empresas que antes retornavam o Modelo genérico "Flamengo" e agora têm
+// Modelo específico (ou null explícito). Reprocessadas junto.
+const EMPRESAS_EX_FLAMENGO = [
+  "M WILDNER VESTUARIO",
+  "SPORT BEL LTDA",
+  "JTX COMERCIO DE PRESENTES E ARMARINHOS LTDA",
+  "D L FERRARI PRODUTOS LICENCIADOS LTDA",
+  "VIESS CALÇADOS E ARTIGOS ESPORTIVOS LTDA",
+  "RANC CONFECCOES LTDA ME",
+  "G. BLUES INDÚSTRIA E COMÉRCIO LTDA.",
+  "CKS IMPORTACAO E EXPORTACAO DE MAQUINAS EIRELI",
+  "BLUE OCEAN CONFECCOES S.A - FLEXCAP",
+  "MILLED BRASIL DURGA COMERCIAL LTDA",
+  "TSC MARKETING E LICENCIAMENTO LTDA",
+  "MYFLAG IND. E CONFEC. EIRELI",
+  "M&L SPORT INNOVATION MARKETING ESPORTIVO LTDA",
+  "KIT CLUB DISTRIBUIDORA DE ARTIGOS ESPORTIVOS LTDA - ME",
+  "Bel Watch Comercial Importadora e Exportadora Eireli",
+  "1QA+ Confeccoes Eireli (Torcida Baby)",
+  "ARELL IMPORTACAO E COMERCIO LTDA",
+  "MALHARIA RIKAM LTDA",
+  "VERON PRESENTES LTDA",
+  "Torcida Baby do Brasil Ltda",
+  "KRYSTALMIX COM.E DISTR.DE PRODS. UT.DOM",
+  "V F FERRARI PRODUTOS LICENCIADOS LTDA",
+  "Liga dos Mascotes Criacoes Digitais e Licenciamentos Ltda",
+  "B. U. INDUSTRIA E COMERCIO DE VESTUARIO LTDA", // -> null
+  "ROMANOS MALHARIA LTDA", // -> null
+];
+
 const ALVOS = [
   ...EMPRESAS_THUG_DUBS,
   "PCF IMPORTACAO EXPORTACAO E COMERCIO LTD",
   "VF FERRARI PRODUTOS LICENCIADOS",
+  ...EMPRESAS_EX_FLAMENGO,
 ];
 
 async function main() {
