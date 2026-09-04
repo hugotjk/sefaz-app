@@ -224,6 +224,8 @@ export function identificarModelo(
     ["NATURAL COMPANY CONFECCOES LTDA", "natural company"],
     ["GENIUS 1 PARTICIPACOES JOIAS E ARTIGOS DE LUXO LTDA", "prata olam"],
     ["AP OLD SCHOOL COM. ART. ESP. LTDA", "liga retro"],
+    ["TECNOVEX INDUSTRIA DE BANDEIRAS LTDA", "myflag"],
+    ["LOTUS COM IMP, EXP DE ART DO VEST LTDA", "Champion"], // só Modelo; referência = fallback
   ];
   const porEmpresa = MODELOS_POR_EMPRESA.find(([nome]) => igual(A, nome));
   if (porEmpresa) return porEmpresa[1];
@@ -519,10 +521,10 @@ function referenciaFormula2(A: string, G: string, H: string, P: string): string 
   if (igual(A, "BB INDUSTRIA E COMERCIO DE ARTIGOS DE USO PESSOAL LTDA"))
     return G.slice(2);
   // Grupo Thug Nine / Dubs / Brotherhood + PCF + VF Ferrari + Blue Ocean /
-  // TSC / M&L Sport + Next Eleven / Cromotransfer / EMC: referência do
-  // fornecedor = o próprio código do produto da nota, sem transformação
-  // (comparação normal/igual, não prefixo — só o grupo Thug/Dubs usa prefixo,
-  // tratado em avaliarCadastroItens).
+  // TSC / M&L Sport + Next Eleven / Cromotransfer / EMC / Tecnovex:
+  // referência do fornecedor = o próprio código do produto da nota, sem
+  // transformação (comparação normal/igual, não prefixo — só o grupo
+  // Thug/Dubs usa prefixo, tratado em avaliarCadastroItens).
   if (
     EMPRESAS_THUG_DUBS.some((x) => igual(A, x)) ||
     igual(A, "PCF IMPORTACAO EXPORTACAO E COMERCIO LTD") ||
@@ -533,17 +535,7 @@ function referenciaFormula2(A: string, G: string, H: string, P: string): string 
     igual(A, "NEXT ELEVEN CONFECCOES LTDA") ||
     igual(A, "CROMOTRANSFER INDUSTRIA DE ESTAMPAS EM TRANSFER LTDA") ||
     igual(A, "EMC TRANSFERS IMPRESSOES LTDA") ||
-    // Suposição: "código puro" por padrão (o cliente ainda não definiu regra
-    // específica de referência pra estas).
-    igual(A, "BM SPORT COMÉRCIO E CONFECÇÃO DE ROUPAS LTDA") ||
-    igual(A, "TSC ESTADIOS COMERCIO DE ARTIGOS ESPORTIVOS LTDA") ||
-    igual(A, "TSC IDOLOS COMERCIO DE ARTIGOS ESPORTIVOS LTDA") ||
-    igual(A, "SEEDER CONFECCOES LTDA") ||
-    igual(A, "NUR DISTRIBUIDORA LTDA") ||
-    igual(A, "KIT CLUB HERMES DISTRIBUIDORA DE ARTIGOS ESPORTIVOS LTDA") ||
-    igual(A, "NATURAL COMPANY CONFECCOES LTDA") ||
-    igual(A, "GENIUS 1 PARTICIPACOES JOIAS E ARTIGOS DE LUXO LTDA") ||
-    igual(A, "AP OLD SCHOOL COM. ART. ESP. LTDA")
+    igual(A, "TECNOVEX INDUSTRIA DE BANDEIRAS LTDA")
   )
     return G;
 
