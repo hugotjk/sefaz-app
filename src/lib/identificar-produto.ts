@@ -157,9 +157,9 @@ export function identificarModelo(
     igual(A, "NIRUT IND E COM CALC EIRELI")
   )
     return "ME LEVA FARM";
-  // Modelo específico por empresa. Antes essas empresas caíam todas num ramo
-  // genérico "Flamengo" — que NÃO é mais um Modelo válido e não deve ser
-  // retornado por ninguém. Comparação case-insensitive (helper `igual`).
+  // Modelo fixo por empresa (sempre o mesmo valor). Comparação case-insensitive
+  // (helper `igual`). As 23 primeiras vieram de um ramo genérico "Flamengo"
+  // que foi quebrado em regras específicas.
   const MODELOS_POR_EMPRESA: [string, string][] = [
     ["M WILDNER ACESSORIOS LTDA", "Arena Couros"],
     ["SPORT BEL LTDA", "Bel Watch"],
@@ -184,6 +184,11 @@ export function identificarModelo(
     ["KRYSTALMIX COMERCIO E DISTRIBUIDORA DE PRODUTOS E UTENSILIOS", "Allmix"],
     ["V F FERRARI PRODUTOS LICENCIADOS LTDA", "Cebola"],
     ["Liga dos Mascotes Criacoes Digitais e Licenciamentos Ltda", "Liga dos Mascotes"],
+    ["NEXT ELEVEN CONFECCOES LTDA", "Texneo+"],
+    ["CROMOTRANSFER INDUSTRIA DE ESTAMPAS EM TRANSFER LTDA", "Cromotransfer"],
+    ["Maxima Apparel Brasil Importação e Comércio Ltda.", "Pro Standard"],
+    ["EMC TRANSFERS IMPRESSOES LTDA", "EMC"],
+    ["BB INDUSTRIA E COMERCIO DE ARTIGOS DE USO PESSOAL LTDA", "Go Case"],
   ];
   const porEmpresa = MODELOS_POR_EMPRESA.find(([nome]) => igual(A, nome));
   if (porEmpresa) return porEmpresa[1];
@@ -468,17 +473,31 @@ function referenciaFormula2(A: string, G: string, H: string, P: string): string 
       : esquerda(semPonto, 8);
   }
   if (igual(A, "TESS INDUSTRIA E COMERCIO LTDA")) return esquerda(H, localizar(" ", H) - 1);
+  // Maxima Apparel: código sem o último trecho depois do último "-" (o tamanho).
+  //   "FFL140001-RED-M" -> "FFL140001-RED"
+  if (igual(A, "Maxima Apparel Brasil Importação e Comércio Ltda.")) {
+    const i = G.lastIndexOf("-");
+    return i > 0 ? G.slice(0, i) : G;
+  }
+  // BB Industria: código sem os 2 primeiros caracteres (sempre "00").
+  //   "0087568000006" -> "87568000006"
+  if (igual(A, "BB INDUSTRIA E COMERCIO DE ARTIGOS DE USO PESSOAL LTDA"))
+    return G.slice(2);
   // Grupo Thug Nine / Dubs / Brotherhood + PCF + VF Ferrari + Blue Ocean /
-  // TSC / M&L Sport: referência do fornecedor = o próprio código do produto da
-  // nota, sem transformação (comparação normal/igual, não prefixo — só o grupo
-  // Thug/Dubs usa prefixo, tratado em avaliarCadastroItens).
+  // TSC / M&L Sport + Next Eleven / Cromotransfer / EMC: referência do
+  // fornecedor = o próprio código do produto da nota, sem transformação
+  // (comparação normal/igual, não prefixo — só o grupo Thug/Dubs usa prefixo,
+  // tratado em avaliarCadastroItens).
   if (
     EMPRESAS_THUG_DUBS.some((x) => igual(A, x)) ||
     igual(A, "PCF IMPORTACAO EXPORTACAO E COMERCIO LTD") ||
     igual(A, "VF FERRARI PRODUTOS LICENCIADOS") ||
     igual(A, "BLUE OCEAN CONFECCOES S.A - FLEXCAP") ||
     igual(A, "TSC MARKETING E LICENCIAMENTO LTDA") ||
-    igual(A, "M&L SPORT INNOVATION MARKETING ESPORTIVO LTDA")
+    igual(A, "M&L SPORT INNOVATION MARKETING ESPORTIVO LTDA") ||
+    igual(A, "NEXT ELEVEN CONFECCOES LTDA") ||
+    igual(A, "CROMOTRANSFER INDUSTRIA DE ESTAMPAS EM TRANSFER LTDA") ||
+    igual(A, "EMC TRANSFERS IMPRESSOES LTDA")
   )
     return G;
 
