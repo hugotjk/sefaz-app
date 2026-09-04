@@ -157,7 +157,12 @@ export function identificarModelo(
   if (igual(A, "PMI South America Consumer Goods Ltda")) return "Stanley";
   if (igual(A, "BRUNO SENA XAVIER")) return "Sufgang";
   if (igual(A, "HAF DISTRIBUIDOR LTDA")) return "Jordan";
-  if (igual(A, "BRUNX IND VESTUARIO LTDA")) return "Reef";
+  if (igual(A, "BRUNX IND VESTUARIO LTDA")) {
+    // Modelo = primeira palavra da descrição do produto, dinâmico (na
+    // prática só "Sufgang" ou "Wanted", mas não fixamos o valor).
+    const primeiraPalavra = H.trim().split(/\s+/)[0];
+    return primeiraPalavra || null;
+  }
   if (
     igual(A, "GRUPO INVENTI LTDA") ||
     igual(A, "R DOIS INJETADOS LTDA.") ||
@@ -238,11 +243,11 @@ export function identificarModelo(
     ["AP OLD SCHOOL COM. ART. ESP. LTDA", "liga retro"],
     ["TECNOVEX INDUSTRIA DE BANDEIRAS LTDA", "myflag"],
     ["LOTUS COM IMP, EXP DE ART DO VEST LTDA", "Champion"], // só Modelo; referência = fallback
-    ["DUALT INDUSTRIA DE ARTIGOS ESPORTIVOS LTDA", "dualt"], // só Modelo; referência = fallback
+    ["DUALT INDUSTRIA DE ARTIGOS ESPORTIVOS LTDA", "dualt"],
     ["DBB DISTRIBUIDORA DE PRODUTOS DE BELEZA LTDA", "lacoste"], // só Modelo; referência = fallback
-    ["COMPANHIA FABRIL LEPPER - FILIAL", "lepper"], // só Modelo; referência = fallback
-    ["AURA COMERCIO DE ARTIGOS DO VESTUARIO LTDA", "n1"], // só Modelo; referência = fallback
-    ["TOREL COMERCIO DE ARTIGOS ESPORTIVOS LTDA ME", "torel fla"], // só Modelo; referência = fallback
+    ["COMPANHIA FABRIL LEPPER - FILIAL", "lepper"],
+    ["AURA COMERCIO DE ARTIGOS DO VESTUARIO LTDA", "n1"],
+    ["TOREL COMERCIO DE ARTIGOS ESPORTIVOS LTDA ME", "torel fla"]
   ];
   const porEmpresa = MODELOS_POR_EMPRESA.find(([nome]) => igual(A, nome));
   if (porEmpresa) return porEmpresa[1];
@@ -555,6 +560,44 @@ function referenciaFormula2(A: string, G: string, H: string, P: string): string 
     igual(A, "TECNOVEX INDUSTRIA DE BANDEIRAS LTDA")
   )
     return G;
+  // Leva de 19 empresas com Referência confirmada = código puro, sem
+  // transformação.
+  if (
+    [
+      "KRYSTALMIX COMERCIO E DISTRIBUIDORA DE PRODUTOS E UTENSILIOS",
+      "KIT CLUB DISTRIBUIDORA DE ARTIGOS ESPORTIVOS LTDA - ME",
+      "MALHAS D ESTEFANO LTDA",
+      "SEEDER CONFECCOES LTDA",
+      "TSC IDOLOS COMERCIO DE ARTIGOS ESPORTIVOS LTDA",
+      "NATURAL COMPANY CONFECCOES LTDA",
+      "D L FERRARI PRODUTOS LICENCIADOS LTDA",
+      "NEW BRASIL ARTIGOS ESPORTIVOS LTDA",
+      "NUR DISTRIBUIDORA LTDA",
+      "M WILDNER ACESSORIOS LTDA",
+      "KIT CLUB HERMES DISTRIBUIDORA DE ARTIGOS ESPORTIVOS LTDA",
+      "SPORT BEL LTDA",
+      "BM SPORT COMÉRCIO E CONFECÇÃO DE ROUPAS LTDA",
+      "RANC CONFECCOES LTDA ME",
+      "COMPANHIA FABRIL LEPPER - FILIAL",
+      "Bel Watch Comercial Importadora e Exportadora Eireli",
+      "TOREL COMERCIO DE ARTIGOS ESPORTIVOS LTDA ME",
+      "BC SARTORI ARTIGOS ESPORTIVOS ME",
+      "GENIUS 1 PARTICIPACOES JOIAS E ARTIGOS DE LUXO LTDA",
+    ].some((x) => igual(A, x))
+  )
+    return G;
+  // Premier: código sem o trecho depois do último "-" (tamanho) — mesmo
+  // padrão da Maxima Apparel.
+  if (igual(A, "PREMIER DIST DE VESTUARIOS CALCADOS EQUIPAMENTOS E ACESSORIO")) {
+    const i = G.lastIndexOf("-");
+    return i > 0 ? G.slice(0, i) : G;
+  }
+  // AP Old School: código sem os 2 últimos caracteres.
+  if (igual(A, "AP OLD SCHOOL COM. ART. ESP. LTDA")) return G.slice(0, -2);
+  // Aura: só os 4 primeiros caracteres do código.
+  if (igual(A, "AURA COMERCIO DE ARTIGOS DO VESTUARIO LTDA")) return esquerda(G, 4);
+  // Dualt: código sem os zeros à esquerda (remove enquanto começar com "0").
+  if (igual(A, "DUALT INDUSTRIA DE ARTIGOS ESPORTIVOS LTDA")) return G.replace(/^0+/, "");
 
   return null;
 }
