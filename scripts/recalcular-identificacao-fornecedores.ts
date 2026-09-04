@@ -96,6 +96,12 @@ const EMPRESAS_NOVAS = [
   // leva 4: Tecnovex (Modelo + referência código puro) / Lotus (só Modelo)
   "TECNOVEX INDUSTRIA DE BANDEIRAS LTDA",
   "LOTUS COM IMP, EXP DE ART DO VEST LTDA",
+  // leva 5: só Modelo (referência fica no fallback, não confirmada)
+  "DUALT INDUSTRIA DE ARTIGOS ESPORTIVOS LTDA",
+  "DBB DISTRIBUIDORA DE PRODUTOS DE BELEZA LTDA",
+  "COMPANHIA FABRIL LEPPER - FILIAL",
+  "AURA COMERCIO DE ARTIGOS DO VESTUARIO LTDA",
+  "TOREL COMERCIO DE ARTIGOS ESPORTIVOS LTDA ME",
 ];
 
 const ALVOS = [

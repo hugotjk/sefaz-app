@@ -108,6 +108,18 @@ export const EMPRESAS_BANIDAS: string[] = [
   "45.275.132 LEONARDO CORREA ANDRADE DUARTE",
   "Almap Mais Fibras E Acessorios Eireli",
   "ANDRILU COM. E DIST. DE PROD.TEXTIL LTDA-ME",
+  "AQUARIUS BARRA COM. ELETR. E PURIF. DE AGUA LTDA.",
+  "BIG ETIQUETAS LTDA",
+  "ETIQUEJA COMERCIO DE ETIQUETAS LTDA",
+  "FLORENCA BRINDES LTDA EPP",
+  "GI SIGN COMERCIO DE MATERIAL GRAFICO",
+  "Impallets produtos servicos importacao e exportacao ltd",
+  "MAJ DISPLAYS INDUSTRIA E COMERCIO LTDA",
+  "PH TECNICA COMERCIO E REPRESENTACOES LTDA",
+  "RIQUENA NETO AR CONDICIONADO LTDA",
+  "Sucesso Produtos Promocionais LTDA",
+  "TALENT DISTRIBUIDORA DE MATERIAL DE LIMPEZA LTDA",
+  "TARGET MULTICOISAS COM. IMP. E EXP. LTDA",
 ];
 
 // --------------------------------------------------------------------------
@@ -226,6 +238,11 @@ export function identificarModelo(
     ["AP OLD SCHOOL COM. ART. ESP. LTDA", "liga retro"],
     ["TECNOVEX INDUSTRIA DE BANDEIRAS LTDA", "myflag"],
     ["LOTUS COM IMP, EXP DE ART DO VEST LTDA", "Champion"], // só Modelo; referência = fallback
+    ["DUALT INDUSTRIA DE ARTIGOS ESPORTIVOS LTDA", "dualt"], // só Modelo; referência = fallback
+    ["DBB DISTRIBUIDORA DE PRODUTOS DE BELEZA LTDA", "lacoste"], // só Modelo; referência = fallback
+    ["COMPANHIA FABRIL LEPPER - FILIAL", "lepper"], // só Modelo; referência = fallback
+    ["AURA COMERCIO DE ARTIGOS DO VESTUARIO LTDA", "n1"], // só Modelo; referência = fallback
+    ["TOREL COMERCIO DE ARTIGOS ESPORTIVOS LTDA ME", "torel fla"], // só Modelo; referência = fallback
   ];
   const porEmpresa = MODELOS_POR_EMPRESA.find(([nome]) => igual(A, nome));
   if (porEmpresa) return porEmpresa[1];
