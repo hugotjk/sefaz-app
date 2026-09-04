@@ -273,6 +273,10 @@ h2 { font-size: 16px; margin: 0 0 12px; }
 /* colunas de nome de empresa: nunca quebrar linha (tabela ganha scroll-x) */
 .notes-table td.col-empresa,
 .notes-table th.col-empresa { white-space: nowrap; }
+/* Conferência de Produtos: nome do Modelo exibido em maiúsculas (só
+   visual — o valor salvo e a comparação continuam como estão). */
+.notes-table td.col-modelo,
+.notes-table th.col-modelo { text-transform: uppercase; }
 
 .notes-sort {
   background: none;

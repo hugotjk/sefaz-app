@@ -284,7 +284,7 @@ export default function ConferenciaProdutosPage() {
               <table className="notes-table">
                 <thead>
                   <tr>
-                    <th>Modelo</th>
+                    <th className="col-modelo">Modelo</th>
                     <th>Referência Fornecedor</th>
                     <th className="col-empresa">Descrição</th>
                     <th>EAN</th>
@@ -296,7 +296,7 @@ export default function ConferenciaProdutosPage() {
                 <tbody>
                   {dados!.linhas.map((l) => (
                     <tr key={l.chave} className="nota-row">
-                      <td>{l.modelo || "-"}</td>
+                      <td className="col-modelo">{l.modelo || "-"}</td>
                       <td>{l.referencia || "-"}</td>
                       <td className="col-empresa">{l.descricao}</td>
                       <td>{l.ean || "-"}</td>

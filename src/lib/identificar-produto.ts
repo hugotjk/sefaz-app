@@ -380,11 +380,11 @@ export function identificarModelo(
     // Grupo Thug Nine / Dubs / Brotherhood: 4º dígito dos 8 primeiros do
     // código do produto da nota. Ex.: "25097401-01" -> 8 primeiros "25097401"
     // -> 4º dígito "9".
-    //   8 ou 9 -> "DUBS"
+    //   7, 8 ou 9 -> "DUBS"
     //   1 ou 2 -> "THUG NINE"
     //   qualquer outro -> null (não identificado)
     const quartoDigito = G.slice(0, 8).replace(/\D/g, "")[3];
-    if (quartoDigito === "8" || quartoDigito === "9") return "DUBS";
+    if (quartoDigito === "7" || quartoDigito === "8" || quartoDigito === "9") return "DUBS";
     if (quartoDigito === "1" || quartoDigito === "2") return "THUG NINE";
     return null;
   }
