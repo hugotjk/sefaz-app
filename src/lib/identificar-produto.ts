@@ -159,9 +159,12 @@ export function identificarModelo(
   if (igual(A, "HAF DISTRIBUIDOR LTDA")) return "Jordan";
   if (igual(A, "BRUNX IND VESTUARIO LTDA")) {
     // Modelo = primeira palavra da descrição do produto, dinâmico (na
-    // prática só "Sufgang" ou "Wanted", mas não fixamos o valor).
+    // prática só "SUFGANG" ou "WANTED", mas não fixamos o valor).
+    // "SUFGAN" (sem o G) é truncamento na descrição da nota -> normaliza.
     const primeiraPalavra = H.trim().split(/\s+/)[0];
-    return primeiraPalavra || null;
+    if (!primeiraPalavra) return null;
+    if (eqi(primeiraPalavra, "SUFGAN")) return "SUFGANG";
+    return primeiraPalavra;
   }
   if (
     igual(A, "GRUPO INVENTI LTDA") ||
