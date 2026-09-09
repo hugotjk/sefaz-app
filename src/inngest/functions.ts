@@ -403,13 +403,13 @@ interface CursorProdutos {
 export const syncProdutos = inngest.createFunction(
   {
     id: "pdv-sync-produtos",
-    concurrency: [
-      { scope: "account", key: '"sefaz-pdv-sync"', limit: 4 },
-      { limit: 1 },
-    ],
+    // Balde de concorrência PRÓPRIO (mesmo padrão do completarXmlNotas): não
+    // disputa mais as 4 vagas do pool "sefaz-pdv-sync" com sincronizar-certificado.
+    // Aproveitando a suspensão de Venda/Estoque pra acelerar o catálogo.
+    concurrency: [{ scope: "account", key: '"sync-produtos"', limit: 1 }],
     retries: 3,
   },
-  { cron: "30 */2 * * *" },
+  { cron: "*/30 * * * *" }, // a cada 30 min (era "30 */2 * * *" — de 2 em 2h)
   async ({ step }) => {
     const redes = await step.run("listar-redes-ativas", async () => {
       const todas = await listarRedes();
@@ -1553,7 +1553,12 @@ export const completarXmlNotas = inngest.createFunction(
 // e salva. Cursor em SyncState "enriquecer-variacoes:cursor".
 // ---------------------------------------------------------------------------
 
-const ENRIQUECER_VARIACOES_POR_EXECUCAO = 90;
+// Subiu de 90 -> 300 aproveitando a suspensão de Venda/Estoque: cada lote de
+// ENRIQUECER_PRODUTOS_POR_LOTE produtos é um step.run separado (~10-15s cada),
+// então 300 variações ≈ 30 steps — folga larga abaixo do teto de 1000 steps
+// da Inngest e dos 300s por step. É o gargalo nº 1 do "temCadastro" da
+// Conferência de Produtos (cobertura de EAN estava em ~0,2%).
+const ENRIQUECER_VARIACOES_POR_EXECUCAO = 300;
 const ENRIQUECER_PRODUTOS_POR_LOTE = 10;
 
 interface CursorEnriquecer {
@@ -1563,13 +1568,11 @@ interface CursorEnriquecer {
 export const enriquecerVariacoes = inngest.createFunction(
   {
     id: "pdv-enriquecer-variacoes",
-    concurrency: [
-      { scope: "account", key: '"sefaz-pdv-sync"', limit: 4 },
-      { limit: 1 },
-    ],
+    // Balde de concorrência PRÓPRIO — não disputa o pool "sefaz-pdv-sync".
+    concurrency: [{ scope: "account", key: '"enriquecer-variacoes"', limit: 1 }],
     retries: 3,
   },
-  { cron: "0 */3 * * *" },
+  { cron: "10,40 * * * *" }, // a cada 30 min, deslocado de syncProdutos (era "0 */3 * * *")
   async ({ step }) => {
     const cursor = await step.run("cursor-enriquecer", () =>
       lerSyncState<CursorEnriquecer>("enriquecer-variacoes:cursor", { ultimoId: "" })
