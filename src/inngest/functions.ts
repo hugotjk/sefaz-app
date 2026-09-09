@@ -392,6 +392,36 @@ interface CursorProdutos {
 }
 
 /**
+ * "Posição" do cursor de produtos como tupla comparável lexicograficamente:
+ *   [fase, marco, pagina]
+ *   - fase: 0 = backfill (por janelas), 1 = incremental (1º backfill já
+ *     terminou). Incremental está sempre à frente de qualquer backfill.
+ *   - marco: índice da janela (no backfill) ou timestamp do lastSync (no
+ *     incremental) — nos dois casos, "maior" = mais adiantado.
+ *   - pagina: página em andamento dentro da fase/marco.
+ */
+function rankCursorProdutos(c: CursorProdutos): [number, number, number] {
+  if (c.lastSync === null) return [0, c.janela ?? 0, c.pagina ?? 1];
+  return [1, Date.parse(c.lastSync) || 0, c.pagina ?? 1];
+}
+
+/**
+ * Grava o cursor de produtos SÓ se ele avançar. Relê o valor salvo primeiro e
+ * ignora regravações que fiquem "atrás" ou iguais — blindagem contra um run
+ * atrasado ou um replay que tente reescrever uma página antiga e fazer o
+ * cursor regredir (o sintoma que víamos no MULTI). O `singleton` da função já
+ * evita a sobreposição; isto é o cinto de segurança da gravação em si.
+ */
+async function gravarCursorProdutos(chave: string, valor: CursorProdutos): Promise<void> {
+  const atual = await lerSyncState<CursorProdutos>(chave, { lastSync: null, pagina: 1 });
+  const [fa, ma, pa] = rankCursorProdutos(valor);
+  const [fb, mb, pb] = rankCursorProdutos(atual);
+  const avancou = fa !== fb ? fa > fb : ma !== mb ? ma > mb : pa > pb;
+  if (!avancou) return;
+  await gravarSyncState(chave, valor);
+}
+
+/**
  * syncProdutos — 1x por dia (produtos mudam pouco).
  * Para cada rede ativa: pagina `listarProdutos({ redeId, aPartirDe })` a partir
  * do cursor salvo, faz upsert em Produto e salva as variações. As variações já
@@ -407,9 +437,19 @@ export const syncProdutos = inngest.createFunction(
     // disputa mais as 4 vagas do pool "sefaz-pdv-sync" com sincronizar-certificado.
     // Aproveitando a suspensão de Venda/Estoque pra acelerar o catálogo.
     concurrency: [{ scope: "account", key: '"sync-produtos"', limit: 1 }],
+    // `concurrency: limit 1` só ENFILEIRA o disparo sobreposto — ele ainda
+    // entra, relê o cursor no meio e faz a página regredir (o que estávamos
+    // vendo no MULTI). `singleton` DESCARTA o disparo novo enquanto um run já
+    // está ativo (mode "skip"): uma execução leva ~55min e nunca pode haver
+    // duas mexendo no mesmo cursor. Exige Apps → Resync no painel do Inngest
+    // pra valer.
+    singleton: { mode: "skip" },
     retries: 3,
   },
-  { cron: "*/30 * * * *" }, // a cada 30 min (era "30 */2 * * *" — de 2 em 2h)
+  // De hora em hora. Uma execução completa leva ~55min; com o `singleton`
+  // acima, se ainda estiver rodando quando o cron dispara de novo, o disparo é
+  // descartado em vez de enfileirado. (Era "*/30 * * * *"; antes, "30 */2 * * *".)
+  { cron: "0 * * * *" },
   async ({ step }) => {
     const redes = await step.run("listar-redes-ativas", async () => {
       const todas = await listarRedes();
@@ -572,7 +612,7 @@ export const syncProdutos = inngest.createFunction(
             // teto de páginas por disparo).
             janelaIdx++;
             pagina = 1;
-            await gravarSyncState(chave, { lastSync: null, pagina: 1, janela: janelaIdx });
+            await gravarCursorProdutos(chave, { lastSync: null, pagina: 1, janela: janelaIdx });
             continue;
           }
           // Última janela (ou sweep incremental) -> catálogo completo.
@@ -580,7 +620,7 @@ export const syncProdutos = inngest.createFunction(
           break;
         }
 
-        await gravarSyncState(chave, {
+        await gravarCursorProdutos(chave, {
           lastSync: cursor.lastSync,
           pagina,
           ...(emBackfill ? { janela: janelaIdx } : {}),
@@ -617,11 +657,11 @@ export const syncProdutos = inngest.createFunction(
       //  - ainda no backfill -> guarda janela + página pra retomar.
       //  - incremental sem terminar -> guarda a página.
       if (concluiu) {
-        await gravarSyncState(chave, { lastSync: execIniciadaEm, pagina: 1 });
+        await gravarCursorProdutos(chave, { lastSync: execIniciadaEm, pagina: 1 });
       } else if (emBackfill) {
-        await gravarSyncState(chave, { lastSync: null, pagina, janela: janelaIdx });
+        await gravarCursorProdutos(chave, { lastSync: null, pagina, janela: janelaIdx });
       } else {
-        await gravarSyncState(chave, { lastSync: cursor.lastSync, pagina });
+        await gravarCursorProdutos(chave, { lastSync: cursor.lastSync, pagina });
       }
 
       resumo[rede.nome || `rede ${rede.id}`] = {
