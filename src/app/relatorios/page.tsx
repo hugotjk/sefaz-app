@@ -9,14 +9,8 @@ interface CardRelatorio {
 }
 
 const RELATORIOS: CardRelatorio[] = [
-  {
-    href: "/relatorios/movimentacao-resumida",
-    titulo: "Movimentação Resumida",
-    descricao:
-      "Compara vendas e estoque por gestor ou loja, com filtros por rede, coleção, grupo e mais.",
-    etiqueta: "Vendas & Estoque",
-    tag: "Em construção",
-  },
+  // "Movimentação Resumida" removida da lista (rota /relatorios/movimentacao-resumida
+  // continua existindo — é só ocultar o card; reativar = readicionar aqui).
   {
     href: "/relatorios/conferencia-prazo",
     titulo: "Conferência de Prazo",
