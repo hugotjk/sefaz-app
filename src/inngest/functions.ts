@@ -659,7 +659,10 @@ export const syncVendas = inngest.createFunction(
     ],
     retries: 3,
   },
-  { cron: "5 * * * *" },
+  // SUSPENSO em 2026-09-09 — sincronização de Venda pausada. Para reativar,
+  // troque a linha abaixo de volta por: { cron: "5 * * * *" }
+  // e faça Apps → Resync no painel do Inngest.
+  { event: "pdv/suspenso" },
   async ({ step }) => {
     const agora = new Date();
     const desdePadrao = new Date(
@@ -787,7 +790,10 @@ export const syncEstoque = inngest.createFunction(
     ],
     retries: 3,
   },
-  { cron: "15 * * * *" },
+  // SUSPENSO em 2026-09-09 — sincronização de Estoque pausada. Para reativar,
+  // troque a linha abaixo de volta por: { cron: "15 * * * *" }
+  // e faça Apps → Resync no painel do Inngest.
+  { event: "pdv/suspenso" },
   async ({ step }) => {
     const cursor = await step.run("cursor-estoque", () =>
       lerSyncState<CursorEstoque>("estoque:cursor", { ultimoId: "" })
@@ -1088,7 +1094,10 @@ export const consolidarVendasAntigas = inngest.createFunction(
     ],
     retries: 3,
   },
-  { cron: "20 3 * * *" },
+  // SUSPENSO em 2026-09-09 — consolidação de vendas antigas pausada (só faz
+  // sentido com a sync de Venda rodando). Para reativar, troque a linha abaixo
+  // de volta por: { cron: "20 3 * * *" } e faça Apps → Resync no Inngest.
+  { event: "pdv/suspenso" },
   async ({ step }) => {
     const corte = anoMesCorteDetalhe(); // meses < corte viram resumo
     const limiteData = primeiroInstanteDoMes(corte);
@@ -1197,7 +1206,10 @@ export const backfillVendasHistorico = inngest.createFunction(
     ],
     retries: 3,
   },
-  { cron: "0 */2 * * *" },
+  // SUSPENSO em 2026-09-09 — backfill do histórico de vendas pausado. Para
+  // reativar, troque a linha abaixo de volta por: { cron: "0 */2 * * *" }
+  // e faça Apps → Resync no painel do Inngest.
+  { event: "pdv/suspenso" },
   async ({ step }) => {
     const cursor = await step.run("cursor-backfill", () =>
       lerSyncState<CursorBackfillVendas>("vendas-backfill:cursor", { mes: null, done: false })
