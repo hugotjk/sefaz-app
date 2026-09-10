@@ -31,17 +31,20 @@ const EMPRESAS_REF_PREFIXO = new Set(
 );
 
 /**
- * Decide `temCadastro` de cada item seguindo o processo manual do cliente:
+ * Decide `temCadastro` de cada item seguindo o processo manual do cliente.
+ * NÃO exige preço: o produto pode já existir no sistema do cliente e o
+ * `PrecoVariacao` chegar só depois (sync de preços é um processo à parte, bem
+ * mais lento). Não achar preço NUNCA indica "sem cadastro".
  *
- *   1. Acha uma `VariacaoProduto` cujo `ean` bate com o EAN do item; se não
- *      achar, acha um `Produto` cujo (`referenciaFornecedor` + `modeloNome`)
- *      bate com (referência do fornecedor identificada + modelo identificado).
+ *   Path A (atalho): existe uma `VariacaoProduto` cujo `ean` bate com o EAN do
+ *      item? => Cadastrado.
+ *   Path B (critério principal): existe um `Produto` cujo `referenciaFornecedor`
+ *      bate (case-insensitive/trim) com a referência do fornecedor identificada
+ *      E cujo `modeloNome` bate com o modelo identificado? => Cadastrado.
  *      Referência: case-insensitive IGUAL, exceto para o grupo
  *      EMPRESAS_REF_PREFIXO (Thug Nine/Dubs/Brotherhood), onde casa por
  *      PREFIXO de 8 dígitos (o catálogo guarda "8díg-2díg" e a nota só os 8).
- *   2. Só conta como CADASTRADO se a variação encontrada (ou alguma variação
- *      do produto encontrado) tiver `PrecoVariacao` com `preco > 0`. Variação
- *      sem preço (ou preço zerado) => NÃO cadastrado.
+ *   Nenhum dos dois achou => Sem Cadastro.
  *
  * SIMPLIFICAÇÃO TEMPORÁRIA: a busca por referência+modelo NÃO filtra por Rede.
  * O cliente cruza Referência+Modelo+Rede no Excel dele, mas não há hoje uma
@@ -60,14 +63,20 @@ const EMPRESAS_REF_PREFIXO = new Set(
 export async function avaliarCadastroItens(
   itens: ItemParaAvaliar[]
 ): Promise<boolean[]> {
-  // ---- Path A: EAN -> VariacaoProduto ----
+  // ---- Path A: EAN -> VariacaoProduto (basta EXISTIR; preço é processo à parte) ----
   const eans = [...new Set(itens.map((i) => i.ean).filter((e): e is string => !!e))];
-  const varsPorEan = eans.length
-    ? await prisma.variacaoProduto.findMany({
-        where: { ean: { in: eans } },
-        select: { id: true, ean: true },
-      })
-    : [];
+  const eansOk = new Set(
+    eans.length
+      ? (
+          await prisma.variacaoProduto.findMany({
+            where: { ean: { in: eans } },
+            select: { ean: true },
+          })
+        )
+          .map((v) => v.ean!)
+          .filter(Boolean)
+      : []
+  );
 
   // ---- Path B: (referência + modelo) -> Produto ----
   // Regra geral: referência case-insensitive IGUAL. Exceção (grupo
@@ -89,69 +98,32 @@ export async function avaliarCadastroItens(
     ),
   ];
 
-  // chave = JSON(["EXACT"|"PREFIX", <ref>, <modelo>]) -> produtoIds
-  const paresProd = new Map<string, string[]>();
-  const addPar = (chave: string, id: string) => {
-    const arr = paresProd.get(chave) ?? [];
-    arr.push(id);
-    paresProd.set(chave, arr);
-  };
+  // chave = JSON(["EXACT"|"PREFIX", <ref>, <modelo>]) dos pares que existem no
+  // catálogo (Produto). Basta existir o Produto — sem checagem de preço.
+  const paresOk = new Set<string>();
 
   if (modsU.length && refsExato.length) {
-    const r = await prisma.$queryRaw<{ id: string; ref: string; modelo: string }[]>(Prisma.sql`
-      SELECT id,
+    const r = await prisma.$queryRaw<{ ref: string; modelo: string }[]>(Prisma.sql`
+      SELECT DISTINCT
              upper(trim("referenciaFornecedor")) AS ref,
              upper(trim("modeloNome"))           AS modelo
       FROM "Produto"
       WHERE upper(trim("referenciaFornecedor")) IN (${Prisma.join(refsExato)})
         AND upper(trim("modeloNome"))           IN (${Prisma.join(modsU)})
     `);
-    for (const p of r) addPar(JSON.stringify(["EXACT", p.ref, p.modelo]), p.id);
+    for (const p of r) paresOk.add(JSON.stringify(["EXACT", p.ref, p.modelo]));
   }
   if (modsU.length && refsPrefixo.length) {
-    const r = await prisma.$queryRaw<{ id: string; pref: string; modelo: string }[]>(Prisma.sql`
-      SELECT id,
+    const r = await prisma.$queryRaw<{ pref: string; modelo: string }[]>(Prisma.sql`
+      SELECT DISTINCT
              left(regexp_replace("referenciaFornecedor", '[^0-9]', '', 'g'), 8) AS pref,
              upper(trim("modeloNome"))                                          AS modelo
       FROM "Produto"
       WHERE left(regexp_replace("referenciaFornecedor", '[^0-9]', '', 'g'), 8) IN (${Prisma.join(refsPrefixo)})
         AND upper(trim("modeloNome"))                                          IN (${Prisma.join(modsU)})
     `);
-    for (const p of r) addPar(JSON.stringify(["PREFIX", p.pref, p.modelo]), p.id);
+    for (const p of r) paresOk.add(JSON.stringify(["PREFIX", p.pref, p.modelo]));
   }
-
-  const prodIds = [...new Set([...paresProd.values()].flat())];
-  const varsPorProd = prodIds.length
-    ? await prisma.variacaoProduto.findMany({
-        where: { produtoId: { in: prodIds } },
-        select: { id: true, produtoId: true },
-      })
-    : [];
-
-  // ---- Preço > 0 das variações candidatas dos dois paths ----
-  const varIds = [...new Set([...varsPorEan.map((v) => v.id), ...varsPorProd.map((v) => v.id)])];
-  const comPreco = varIds.length
-    ? new Set(
-        (
-          await prisma.precoVariacao.findMany({
-            where: { variacaoId: { in: varIds }, preco: { gt: 0 } },
-            select: { variacaoId: true },
-          })
-        ).map((p) => p.variacaoId)
-      )
-    : new Set<string>();
-
-  const eansOk = new Set(
-    varsPorEan.filter((v) => comPreco.has(v.id)).map((v) => v.ean!).filter(Boolean)
-  );
-  const prodComPreco = new Set(
-    varsPorProd.filter((v) => comPreco.has(v.id)).map((v) => v.produtoId)
-  );
-  const paresOk = new Set(
-    [...paresProd.entries()]
-      .filter(([, ids]) => ids.some((id) => prodComPreco.has(id)))
-      .map(([k]) => k)
-  );
 
   return itens.map((i) => {
     if (i.ean && eansOk.has(i.ean)) return true;
@@ -229,11 +201,11 @@ export async function popularNotaItens(
       modeloIdentificado: modelo,
       referenciaFornecedorIdentificada: ref.valor,
       referenciaComRegraEspecifica: ref.comRegraEspecifica,
-      temCadastro: false, // preenchido logo abaixo (EAN ou ref+modelo, + preço)
+      temCadastro: false, // preenchido logo abaixo (EAN ou ref+modelo, sem preço)
     };
   });
 
-  // temCadastro: EAN OU (referência + modelo), sempre com preço > 0.
+  // temCadastro: EAN OU (referência + modelo). Sem checagem de preço.
   const flags = await avaliarCadastroItens(
     dados.map((d) => ({
       ean: d.ean,

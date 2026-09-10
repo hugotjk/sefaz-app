@@ -2,7 +2,9 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { EMPRESAS_BANIDAS } from "@/lib/identificar-produto";
 
-export const CONFERENCIA_PRODUTOS_POR_PAGINA = 50;
+// Paginação por MODELO: cada página traz N grupos de Modelo, cada grupo com
+// TODAS as suas referências (nunca corta um Modelo no meio da página).
+export const CONFERENCIA_PRODUTOS_MODELOS_POR_PAGINA = 25;
 
 export interface FiltrosConferenciaProdutos {
   emitente: string; // texto livre (contains, case-insensitive) — filtra a lista principal
@@ -14,10 +16,10 @@ export interface FiltrosConferenciaProdutos {
   pagina: number;
 }
 
-export interface LinhaConferenciaProduto {
-  // identidade única do produto = (modelo, referência do fornecedor)
-  chave: string;
-  modelo: string | null;
+// Uma referência do fornecedor única dentro de um Modelo. Identidade do produto
+// = (modelo, referência do fornecedor) — a mesma regra de agrupamento de antes.
+export interface ProdutoSemCadastro {
+  chave: string; // JSON([modelo, referencia])
   referencia: string | null;
   // do NotaItem mais recente do grupo:
   descricao: string;
@@ -28,16 +30,22 @@ export interface LinhaConferenciaProduto {
   nNotas: number;
 }
 
+export interface GrupoModeloSemCadastro {
+  modelo: string | null;
+  produtos: ProdutoSemCadastro[];
+}
+
 export interface FornecedorSemRegra {
   emitente: string;
   itens: number;
 }
 
 export interface ResultadoConferenciaProdutos {
-  linhas: LinhaConferenciaProduto[];
-  total: number; // total de PRODUTOS ÚNICOS (não de NotaItem)
+  grupos: GrupoModeloSemCadastro[]; // só os Modelos da página atual
+  totalModelos: number; // total de Modelos (base da paginação)
+  totalProdutos: number; // total de produtos únicos em TODOS os Modelos (não só a página)
   pagina: number;
-  porPagina: number;
+  porPagina: number; // Modelos por página
   // Dois avisos independentes (um fornecedor pode aparecer nos dois):
   semRegraModelo: FornecedorSemRegra[]; // itens com modeloIdentificado nulo/vazio
   semRegraReferencia: FornecedorSemRegra[]; // itens com referenciaComRegraEspecifica = false
@@ -59,7 +67,7 @@ export function parseFiltrosConferenciaProdutos(
 export async function montarConferenciaProdutos(
   f: FiltrosConferenciaProdutos
 ): Promise<ResultadoConferenciaProdutos> {
-  const offset = (f.pagina - 1) * CONFERENCIA_PRODUTOS_POR_PAGINA;
+  const offsetModelos = (f.pagina - 1) * CONFERENCIA_PRODUTOS_MODELOS_POR_PAGINA;
 
   // Intervalo de data de emissão (opcional). Datas inválidas são ignoradas.
   const gte = f.dataInicial ? new Date(`${f.dataInicial}T00:00:00.000Z`) : null;
@@ -133,10 +141,11 @@ export async function montarConferenciaProdutos(
   // Sem nenhum fornecedor com regra -> lista principal vazia.
   if (emitentesComRegra.length === 0) {
     return {
-      linhas: [],
-      total: 0,
+      grupos: [],
+      totalModelos: 0,
+      totalProdutos: 0,
       pagina: f.pagina,
-      porPagina: CONFERENCIA_PRODUTOS_POR_PAGINA,
+      porPagina: CONFERENCIA_PRODUTOS_MODELOS_POR_PAGINA,
       semRegraModelo,
       semRegraReferencia,
       banidos,
@@ -147,10 +156,12 @@ export async function montarConferenciaProdutos(
     ? Prisma.sql`AND n."emitenteNome" ILIKE ${"%" + f.emitente + "%"}`
     : Prisma.empty;
 
-  // 2. Lista principal: 1 linha por produto único (modelo, referência do
-  //    fornecedor). Descrição/EAN/emitente do NotaItem mais recente do grupo;
-  //    contador de notas distintas. Só itens sem cadastro, de emitentes com
-  //    regra completa.
+  // Lista principal: 1 linha por produto único (modelo, referência do
+  // fornecedor). Descrição/EAN/emitente do NotaItem mais recente do grupo;
+  // contador de notas distintas. Só itens sem cadastro, de emitentes com regra
+  // completa. Sem LIMIT: o conjunto é pequeno (alguns milhares de produtos no
+  // pior caso) — a paginação por Modelo é feita em memória logo abaixo, pra não
+  // cortar um Modelo no meio de uma página.
   const rows = await prisma.$queryRaw<
     {
       modelo: string | null;
@@ -160,7 +171,6 @@ export async function montarConferenciaProdutos(
       com_regra: boolean;
       emitente: string | null;
       n_notas: number;
-      total_rows: number | bigint;
     }[]
   >(Prisma.sql`
     WITH base AS (
@@ -191,34 +201,46 @@ export async function montarConferenciaProdutos(
       GROUP BY modelo, referencia
     )
     SELECT g.modelo, g.referencia, g.descricao, g.ean, g.com_regra, g.emitente,
-           c.n_notas,
-           COUNT(*) OVER () AS total_rows
+           c.n_notas
     FROM grupos g
     JOIN cont c
       ON c.modelo IS NOT DISTINCT FROM g.modelo
      AND c.referencia IS NOT DISTINCT FROM g.referencia
     ORDER BY lower(g.modelo) ASC NULLS LAST, lower(g.referencia) ASC NULLS LAST
-    LIMIT ${CONFERENCIA_PRODUTOS_POR_PAGINA} OFFSET ${offset}
   `);
 
-  const total = rows.length ? Number(rows[0].total_rows) : 0;
+  // Agrupa por Modelo, preservando a ordem alfabética já vinda do SQL.
+  const porModelo = new Map<string, GrupoModeloSemCadastro>();
+  for (const r of rows) {
+    const chaveModelo = r.modelo ?? " "; // null vira uma chave estável
+    let g = porModelo.get(chaveModelo);
+    if (!g) {
+      g = { modelo: r.modelo, produtos: [] };
+      porModelo.set(chaveModelo, g);
+    }
+    g.produtos.push({
+      chave: JSON.stringify([r.modelo, r.referencia]),
+      referencia: r.referencia,
+      descricao: r.descricao,
+      ean: r.ean,
+      emitenteNome: r.emitente,
+      comRegraEspecifica: r.com_regra,
+      nNotas: Number(r.n_notas),
+    });
+  }
 
-  const linhas: LinhaConferenciaProduto[] = rows.map((r) => ({
-    chave: JSON.stringify([r.modelo, r.referencia]),
-    modelo: r.modelo,
-    referencia: r.referencia,
-    descricao: r.descricao,
-    ean: r.ean,
-    emitenteNome: r.emitente,
-    comRegraEspecifica: r.com_regra,
-    nNotas: Number(r.n_notas),
-  }));
+  const todosGrupos = [...porModelo.values()];
+  const grupos = todosGrupos.slice(
+    offsetModelos,
+    offsetModelos + CONFERENCIA_PRODUTOS_MODELOS_POR_PAGINA
+  );
 
   return {
-    linhas,
-    total,
+    grupos,
+    totalModelos: todosGrupos.length,
+    totalProdutos: rows.length,
     pagina: f.pagina,
-    porPagina: CONFERENCIA_PRODUTOS_POR_PAGINA,
+    porPagina: CONFERENCIA_PRODUTOS_MODELOS_POR_PAGINA,
     semRegraModelo,
     semRegraReferencia,
     banidos,

@@ -1690,14 +1690,14 @@ export const enriquecerVariacoes = inngest.createFunction(
 
 // ---------------------------------------------------------------------------
 // reavaliarCadastroNotaItens — 1x por dia (madrugada). O `temCadastro` do
-// NotaItem (achou o produto no catálogo, com preço) é decidido no momento em
-// que o item é criado. Mas o catálogo (VariacaoProduto.ean, Produto,
-// PrecoVariacao) é preenchido aos poucos (syncProdutos + enriquecerVariacoes +
-// syncPrecos), então muitos itens ficam `temCadastro=false` só porque o
-// catálogo ainda não tinha sido sincronizado quando o item foi criado.
+// NotaItem (achou o produto no catálogo) é decidido no momento em
+// que o item é criado. Mas o catálogo (VariacaoProduto.ean, Produto) é
+// preenchido aos poucos (syncProdutos + enriquecerVariacoes), então muitos
+// itens ficam `temCadastro=false` só porque o catálogo ainda não tinha sido
+// sincronizado quando o item foi criado.
 // Esta função re-checa os itens `false` contra o catálogo ATUAL com a MESMA
 // regra de popular-nota-itens.ts (`avaliarCadastroItens`: EAN ou ref+modelo,
-// sempre com preço > 0) e vira `temCadastro=true` nos que agora batem. Não
+// SEM checagem de preço) e vira `temCadastro=true` nos que agora batem. Não
 // toca nos que já são `true` — uma vez catalogado, continua. Processa em lotes
 // (step.run) até REAVALIAR_NOTA_ITENS_POR_EXECUCAO por disparo; cursor em
 // SyncState pra continuar no dia seguinte se sobrar. Quando varre a lista

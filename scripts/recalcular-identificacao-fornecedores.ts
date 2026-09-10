@@ -170,7 +170,7 @@ async function main() {
     };
   });
 
-  // temCadastro com a lógica nova (EAN / ref+modelo + preço, com exceção de prefixo)
+  // temCadastro com a lógica nova (EAN / ref+modelo, sem preço, com exceção de prefixo)
   const flags = await avaliarCadastroItens(
     recalc.map((r) => ({
       ean: r.it.ean,
