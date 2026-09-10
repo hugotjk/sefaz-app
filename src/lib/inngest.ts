@@ -4,6 +4,13 @@ type Events = {
   "sefaz/certificate.sync": {
     data: { certificateId: string };
   };
+  // Sincronização em LOTE: um evento processa vários certificados numa única
+  // execução do Inngest (reduz drasticamente o nº de runs/executions). O
+  // caminho antigo ("sefaz/certificate.sync", 1 evento por certificado)
+  // continua existindo pra rollback via flag SEFAZ_CERT_SYNC_EM_LOTE=0.
+  "sefaz/certificate.sync.batch": {
+    data: { batchId: string; certificateIds: string[] };
+  };
   "sefaz/certificate.uploaded": {
     data: { certificateId: string };
   };

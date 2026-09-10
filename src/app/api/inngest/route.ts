@@ -3,6 +3,7 @@ import { inngest } from "@/lib/inngest";
 import {
   cronHorario,
   sincronizarCertificado,
+  sincronizarCertificadoBatch,
   iniciarBackfillAoValidar,
   completarXmlNotas,
   syncProdutos,
@@ -26,6 +27,7 @@ export const { GET, POST, PUT } = serve({
   functions: [
     cronHorario,
     sincronizarCertificado,
+    sincronizarCertificadoBatch,
     iniciarBackfillAoValidar,
     completarXmlNotas,
     syncProdutos,

@@ -25,20 +25,303 @@ import {
 // tomar bloqueio da SEFAZ (cStat 656 - "Rejeição: Consumo Indevido"). Ajuste
 // se o manual da sua UF/ambiente nacional recomendar outro valor.
 const INTERVALO_ENTRE_CHAMADAS_MS = 25_000;
-// Limite de segurança de iterações por execução (o loop continua na próxima
-// chamada horária caso não termine - graças ao ultNSU salvo no banco).
+// Limite de segurança de iterações por execução PARA UM CERTIFICADO (o loop
+// continua na próxima chamada do cron caso não termine - graças ao ultNSU
+// salvo no banco).
 const MAX_ITERACOES_POR_EXECUCAO = 40;
 
+// ---------------------------------------------------------------------------
+// Sincronização de certificados EM LOTE (reduz nº de runs/executions do Inngest)
+//
+// Antes: cronHorario mandava 1 evento por certificado -> 1 run por certificado
+// por hora (~98k runs/mês, 76% do consumo). Agora: cronHorario agrupa os
+// certificados ACTIVE em lotes determinísticos e manda 1 evento por LOTE;
+// `sincronizarCertificadoBatch` processa o lote inteiro numa run só, isolando
+// erro por certificado com try/catch e mantendo a durabilidade via `step.run`
+// namespaced por certificateId.
+//
+// O caminho antigo (`sincronizarCertificado`, 1 evento por certificado) continua
+// registrado e funcional; a flag SEFAZ_CERT_SYNC_EM_LOTE controla qual o
+// cronHorario usa. Rollback = setar SEFAZ_CERT_SYNC_EM_LOTE=0 e redeploy.
+// ---------------------------------------------------------------------------
+
+// Lote dos certificados JÁ com backfill concluído (caminho comum: 1 página só
+// por certificado, ~1 step cada). 10 -> ~14 lotes.
+const TAMANHO_LOTE_CERT = 10;
+// Lote dos certificados AINDA em backfill: menor, porque cada um pode paginar
+// muitas vezes (até MAX_ITERACOES_POR_EXECUCAO) e isso multiplica os steps.
+// 3 certificados * 40 iterações * (1 step + 1 sleep) = 240 steps, longe do
+// teto de ~1000 steps/run do Inngest.
+const TAMANHO_LOTE_CERT_BACKFILL = 3;
+// Orçamento de iterações (páginas SEFAZ) compartilhado por TODOS os
+// certificados de um lote. Impede que um lote com vários certificados "com
+// fome" (muita nota nova acumulada) estoure o teto de steps do Inngest. O que
+// não couber neste ciclo continua no próximo (ultNSU salvo no banco).
+const ORCAMENTO_ITERACOES_LOTE = 250;
+
+/** Flag de rollout: `false` volta ao caminho antigo (1 evento por certificado). */
+function certSyncEmLote(): boolean {
+  return process.env.SEFAZ_CERT_SYNC_EM_LOTE !== "0";
+}
+
 /**
- * 1) Roda de hora em hora (cron nativo do Inngest, funciona no plano free).
- *    Dispara um evento de sincronização para cada certificado ativo.
+ * Particiona os certificados ACTIVE em lotes DETERMINÍSTICOS: separa os que
+ * ainda estão em backfill (lotes menores) dos incrementais, ordena por id e
+ * fatia. Ordem estável => um certificado cai sempre no mesmo lote, então o
+ * `concurrency` por `batchId` já garante que ele nunca roda 2x em paralelo.
+ */
+export function montarLotesCertificados(
+  certs: { id: string; backfillDone: boolean }[]
+): { batchId: string; certificateIds: string[] }[] {
+  const incrementais = certs.filter((c) => c.backfillDone).map((c) => c.id).sort();
+  const emBackfill = certs.filter((c) => !c.backfillDone).map((c) => c.id).sort();
+
+  const fatiar = (ids: string[], tam: number, prefixo: string) => {
+    const lotes: { batchId: string; certificateIds: string[] }[] = [];
+    for (let i = 0; i < ids.length; i += tam) {
+      lotes.push({
+        batchId: `${prefixo}-${Math.floor(i / tam)}`,
+        certificateIds: ids.slice(i, i + tam),
+      });
+    }
+    return lotes;
+  };
+
+  return [
+    ...fatiar(incrementais, TAMANHO_LOTE_CERT, "inc"),
+    ...fatiar(emBackfill, TAMANHO_LOTE_CERT_BACKFILL, "bf"),
+  ];
+}
+
+interface ResultadoProcessarCertificado {
+  pulado?: boolean;
+  motivo?: string;
+  iteracoes?: number;
+  notasSalvas?: number;
+  eventosSalvos?: number;
+  ultNSU?: string;
+  ultimoStatus?: string;
+  ultimoMotivo?: string;
+}
+
+/**
+ * NÚCLEO da sincronização de UM certificado. Compartilhado entre o caminho
+ * antigo (`sincronizarCertificado`, 1 evento por certificado) e o novo em lote
+ * (`sincronizarCertificadoBatch`). Cada página da SEFAZ é UM `step.run` durável
+ * — consulta + gravação do lote + avanço do ultNSU MESCLADOS num único step
+ * (antes eram 3), o que corta ~3x os "executions" no caminho comum. O `step`
+ * é o do run atual; os ids de step são namespaced por `certificateId` pra não
+ * colidir quando vários certificados rodam no mesmo run.
+ *
+ * `orcamento.restante` é decrementado a cada página; ao zerar, o certificado
+ * para e retoma no próximo ciclo do cron.
+ */
+async function processarCertificado(
+  certificateId: string,
+  step: any,
+  orcamento: { restante: number }
+): Promise<ResultadoProcessarCertificado> {
+  // Carrega o certificado FORA de um step (economiza 1 execution/certificado).
+  // Em retry do run isso re-executa, mas é um findUnique barato e idempotente;
+  // as páginas já processadas continuam memoizadas nos step.run abaixo.
+  const certificado = await prisma.certificate.findUniqueOrThrow({
+    where: { id: certificateId },
+  });
+
+  if (certificado.status !== "ACTIVE") {
+    return { pulado: true, motivo: `status = ${certificado.status}` };
+  }
+
+  if (certificado.validUntil && new Date(certificado.validUntil) < new Date()) {
+    await step.run(`cert-${certificateId}-marcar-vencido`, async () => {
+      await prisma.certificate.update({
+        where: { id: certificateId },
+        data: {
+          status: "EXPIRED",
+          lastError: "Certificado venceu (data de validade ultrapassada).",
+        },
+      });
+    });
+    return { pulado: true, motivo: "certificado vencido" };
+  }
+
+  let ultNSU = certificado.ultNSU;
+  let iteracoes = 0;
+  let notasSalvas = 0;
+  let eventosSalvos = 0;
+  let ultimoStatus = "";
+  let ultimoMotivo = "";
+
+  while (iteracoes < MAX_ITERACOES_POR_EXECUCAO && orcamento.restante > 0) {
+    iteracoes++;
+    orcamento.restante--;
+    const nsuAtual = ultNSU;
+
+    // 1 step = consultar SEFAZ + gravar o lote + avançar ultNSU + (talvez)
+    // marcar backfill concluído. Idempotente: consultar com um ultNSU fixo
+    // devolve sempre a mesma página, e as gravações são upsert.
+    const r: {
+      respostaOk: boolean;
+      statusCode: string;
+      motivo: string;
+      notasSalvas: number;
+      eventosSalvos: number;
+      novoUltNSU: string;
+      semDocumentosNovos: boolean;
+    } = await step.run(`cert-${certificateId}-pagina-${iteracoes}`, async () => {
+      const { pfxBase64, password } = decryptCertificate(certificado);
+      const pfxBuffer = Buffer.from(pfxBase64, "base64");
+
+      let resultado;
+      try {
+        resultado = await consultarDistribuicaoDFe({
+          cnpj: certificado.cnpj,
+          ultNSU: nsuAtual,
+          pfxBuffer,
+          senha: password,
+        });
+      } catch (err: any) {
+        if (err?.message?.includes("SSL") || err?.message?.includes("decrypt")) {
+          await prisma.certificate.update({
+            where: { id: certificateId },
+            data: { status: "PASSWORD_ERROR", lastError: "Falha ao abrir o certificado (TLS)." },
+          });
+        } else if (err?.message?.includes("HTTP 403")) {
+          await prisma.certificate.update({
+            where: { id: certificateId },
+            data: {
+              status: "EXPIRED",
+              lastError:
+                "SEFAZ recusou o certificado (HTTP 403). Verifique se está vencido, revogado, ou se o CNPJ está credenciado para distribuição de NFe.",
+            },
+          });
+        }
+        throw err;
+      }
+
+      // cStat de SUCESSO: 138 (veio lote) / 137 (nenhum documento). Qualquer
+      // outro (ex.: 656 rate limit da SEFAZ) chega DENTRO de um HTTP 200: é
+      // recuperável, não tocamos em ultNSU/maxNSU/backfillDone e paramos aqui.
+      const respostaOk =
+        resultado.statusCode === "138" || resultado.statusCode === "137";
+      if (!respostaOk) {
+        return {
+          respostaOk: false,
+          statusCode: resultado.statusCode,
+          motivo: resultado.motivo,
+          notasSalvas: 0,
+          eventosSalvos: 0,
+          novoUltNSU: nsuAtual,
+          semDocumentosNovos: false,
+        };
+      }
+
+      let ns = 0;
+      let es = 0;
+      for (const doc of resultado.documentos) {
+        const item = parseDocumento(doc);
+        if (!item) continue;
+
+        if (item.tipo === "nota") {
+          await prisma.note.upsert({
+            where: { chaveAcesso: item.chaveAcesso },
+            create: {
+              chaveAcesso: item.chaveAcesso,
+              cnpjDestino: certificado.cnpj,
+              certificateId: certificado.id,
+              numero: item.numero,
+              serie: item.serie,
+              tipoOperacao: item.tipoOperacao,
+              emitenteCnpj: item.emitenteCnpj,
+              emitenteNome: item.emitenteNome,
+              valorTotal: item.valorTotal,
+              dataEmissao: new Date(item.dataEmissao),
+              status: item.status,
+              xmlCompleto: "",
+              nsu: item.nsu,
+            },
+            update: { status: item.status },
+          });
+          ns++;
+        } else {
+          const nota = await prisma.note.findUnique({
+            where: { chaveAcesso: item.chaveAcesso },
+          });
+          if (!nota) continue;
+
+          await prisma.noteEvent.create({
+            data: {
+              noteId: nota.id,
+              tipo: item.tipoEvento as any,
+              descricao: item.descricao,
+              xmlEvento: "",
+              nsu: item.nsu,
+              dataEvento: item.dataEvento ? new Date(item.dataEvento) : null,
+            },
+          });
+
+          if (item.tipoEvento === "CANCELAMENTO") {
+            await prisma.note.update({ where: { id: nota.id }, data: { status: "CANCELADA" } });
+          }
+          es++;
+        }
+      }
+
+      await prisma.certificate.update({
+        where: { id: certificateId },
+        data: { ultNSU: resultado.ultNSU, maxNSU: resultado.maxNSU },
+      });
+
+      if (resultado.semDocumentosNovos && !certificado.backfillDone) {
+        await prisma.certificate.update({
+          where: { id: certificateId },
+          data: { backfillDone: true },
+        });
+      }
+
+      return {
+        respostaOk: true,
+        statusCode: resultado.statusCode,
+        motivo: resultado.motivo,
+        notasSalvas: ns,
+        eventosSalvos: es,
+        novoUltNSU: resultado.ultNSU,
+        semDocumentosNovos: resultado.semDocumentosNovos,
+      };
+    });
+
+    ultimoStatus = r.statusCode;
+    ultimoMotivo = r.motivo;
+    if (!r.respostaOk) break;
+
+    notasSalvas += r.notasSalvas;
+    eventosSalvos += r.eventosSalvos;
+    ultNSU = r.novoUltNSU;
+    if (r.semDocumentosNovos) break;
+
+    // Respeita o intervalo mínimo entre chamadas ao MESMO certificado.
+    await step.sleep(
+      `cert-${certificateId}-aguardar-${iteracoes}`,
+      INTERVALO_ENTRE_CHAMADAS_MS
+    );
+  }
+
+  return { iteracoes, notasSalvas, eventosSalvos, ultNSU, ultimoStatus, ultimoMotivo };
+}
+
+/**
+ * 1) Cron principal da sincronização SEFAZ. Roda a CADA 2 HORAS (era de hora em
+ *    hora — metade das execuções). Agrupa os certificados ACTIVE em lotes
+ *    determinísticos e dispara 1 evento POR LOTE (`sefaz/certificate.sync.batch`).
+ *    Com a flag SEFAZ_CERT_SYNC_EM_LOTE=0 volta ao comportamento antigo (1
+ *    evento por certificado) — só pra rollback.
  */
 export const cronHorario = inngest.createFunction(
   {
     id: "cron-sincronizacao-horaria",
-    concurrency: [{ scope: "account", key: '"sefaz-pdv-sync"', limit: 4 }],
+    concurrency: [{ scope: "account", key: '"sefaz-pdv-sync"', limit: 3 }],
   },
-  { cron: "0 * * * *" }, // todo início de hora
+  { cron: "0 */2 * * *" }, // a cada 2h (era "0 * * * *")
   async ({ step }) => {
     // Marca como EXPIRED quem passou da validade — evita gastar uma chamada
     // na SEFAZ pra um certificado que já sabemos que vai ser rejeitado.
@@ -52,218 +335,148 @@ export const cronHorario = inngest.createFunction(
     const certificados = await step.run("buscar-certificados-ativos", async () => {
       return prisma.certificate.findMany({
         where: { status: "ACTIVE" },
-        select: { id: true },
+        select: { id: true, backfillDone: true },
       });
     });
 
     if (certificados.length === 0) return { disparados: 0 };
 
+    if (!certSyncEmLote()) {
+      // Caminho ANTIGO (rollback): 1 evento por certificado.
+      await step.sendEvent(
+        "disparar-sync-por-certificado",
+        certificados.map((c) => ({
+          name: "sefaz/certificate.sync" as const,
+          data: { certificateId: c.id },
+        }))
+      );
+      return { modo: "individual", disparados: certificados.length };
+    }
+
+    // Caminho NOVO: 1 evento por LOTE determinístico.
+    const lotes = montarLotesCertificados(certificados);
     await step.sendEvent(
-      "disparar-sync-por-certificado",
-      certificados.map((c: { id: string }) => ({
-        name: "sefaz/certificate.sync" as const,
-        data: { certificateId: c.id },
+      "disparar-sync-em-lote",
+      lotes.map((l) => ({
+        name: "sefaz/certificate.sync.batch" as const,
+        data: { batchId: l.batchId, certificateIds: l.certificateIds },
       }))
     );
 
-    return { disparados: certificados.length };
+    return { modo: "lote", lotes: lotes.length, certificados: certificados.length };
   }
 );
 
 /**
- * 2) Sincroniza UM certificado: consulta a SEFAZ em loop paginado por NSU.
- *    - Na primeira vez (backfillDone = false), varre tudo que existe.
- *    - Depois, cada execução horária só busca o que é novo (ultNSU salvo).
- *    Cada chamada à SEFAZ é um `step.run` isolado e durável: se cair no meio
- *    de um backfill grande, retoma exatamente de onde parou.
+ * 2a) Caminho ANTIGO — 1 evento = 1 certificado. Mantido REGISTRADO e funcional
+ *     só para rollback (a flag SEFAZ_CERT_SYNC_EM_LOTE=0 faz o cronHorario
+ *     voltar a disparar `sefaz/certificate.sync`). Hoje é um wrapper fino sobre
+ *     `processarCertificado` — o núcleo é o mesmo do caminho em lote, pra não
+ *     divergir a lógica crítica.
  */
 export const sincronizarCertificado = inngest.createFunction(
   {
     id: "sincronizar-certificado",
     concurrency: [
-      { scope: "account", key: '"sefaz-pdv-sync"', limit: 4 },
+      { scope: "account", key: '"sefaz-pdv-sync"', limit: 3 },
       { limit: 1, key: "event.data.certificateId" }, // nunca 2 sync do mesmo cert em paralelo
     ],
     retries: 3,
   },
   { event: "sefaz/certificate.sync" },
   async ({ event, step }) => {
-    const { certificateId } = event.data;
-
-    const certificado = await step.run("carregar-certificado", async () => {
-      return prisma.certificate.findUniqueOrThrow({ where: { id: certificateId } });
-    });
-
-    if (certificado.status !== "ACTIVE") {
-      return { pulado: true, motivo: `status = ${certificado.status}` };
-    }
-
-    if (certificado.validUntil && new Date(certificado.validUntil) < new Date()) {
-      await step.run("marcar-vencido", async () => {
-        await prisma.certificate.update({
-          where: { id: certificateId },
-          data: { status: "EXPIRED", lastError: "Certificado venceu (data de validade ultrapassada)." },
-        });
-      });
-      return { pulado: true, motivo: "certificado vencido" };
-    }
-
-    let ultNSU = certificado.ultNSU;
-    let iteracoes = 0;
-    let notasSalvas = 0;
-    let eventosSalvos = 0;
-    let ultimoStatus = "";
-    let ultimoMotivo = "";
-
-    while (iteracoes < MAX_ITERACOES_POR_EXECUCAO) {
-      iteracoes++;
-
-      const resultado = await step.run(`consultar-sefaz-${iteracoes}`, async () => {
-        const { pfxBase64, password } = decryptCertificate(certificado);
-        const pfxBuffer = Buffer.from(pfxBase64, "base64");
-
-        try {
-          return await consultarDistribuicaoDFe({
-            cnpj: certificado.cnpj,
-            ultNSU,
-            pfxBuffer,
-            senha: password,
-          });
-        } catch (err: any) {
-          if (err?.message?.includes("SSL") || err?.message?.includes("decrypt")) {
-            await prisma.certificate.update({
-              where: { id: certificateId },
-              data: { status: "PASSWORD_ERROR", lastError: "Falha ao abrir o certificado (TLS)." },
-            });
-          } else if (err?.message?.includes("HTTP 403")) {
-            // 403 nesse ponto normalmente significa que a SEFAZ rejeitou o
-            // certificado na conexão (vencido, não credenciado, ou revogado).
-            await prisma.certificate.update({
-              where: { id: certificateId },
-              data: {
-                status: "EXPIRED",
-                lastError:
-                  "SEFAZ recusou o certificado (HTTP 403). Verifique se está vencido, revogado, ou se o CNPJ está credenciado para distribuição de NFe.",
-              },
-            });
-          }
-          throw err;
-        }
-      });
-
-      ultimoStatus = resultado.statusCode;
-      ultimoMotivo = resultado.motivo;
-
-      // cStat de SUCESSO conhecidos da distribuição DFe:
-      //   138 = "Documento(s) localizado(s)" (veio lote)
-      //   137 = "Nenhum documento localizado" (fim real da paginação)
-      // Qualquer outro (ex.: 656 "Rejeição: Consumo Indevido" — rate limit da
-      // SEFAZ) chega DENTRO de um HTTP 200, então NÃO cai no catch acima.
-      // É rejeição recuperável: não tocamos em ultNSU/maxNSU/backfillDone
-      // (os valores ecoados numa rejeição — no 656 vêm ultNSU real + maxNSU 0 —
-      // corromperiam o ponteiro e marcariam o backfill como concluído) e
-      // paramos aqui; a próxima execução horária tenta de novo.
-      const respostaOk =
-        resultado.statusCode === "138" || resultado.statusCode === "137";
-      if (!respostaOk) break;
-
-      // Salva os documentos deste lote (nota a nota / evento a evento)
-      await step.run(`salvar-lote-${iteracoes}`, async () => {
-        for (const doc of resultado.documentos) {
-          const item = parseDocumento(doc);
-          if (!item) continue;
-
-          if (item.tipo === "nota") {
-            await prisma.note.upsert({
-              where: { chaveAcesso: item.chaveAcesso },
-              create: {
-                chaveAcesso: item.chaveAcesso,
-                cnpjDestino: certificado.cnpj,
-                certificateId: certificado.id,
-                numero: item.numero,
-                serie: item.serie,
-                tipoOperacao: item.tipoOperacao,
-                emitenteCnpj: item.emitenteCnpj,
-                emitenteNome: item.emitenteNome,
-                valorTotal: item.valorTotal,
-                dataEmissao: new Date(item.dataEmissao),
-                status: item.status,
-                xmlCompleto: "", // preenchido sob demanda (ver rota /api/notas/[id]/xml)
-                nsu: item.nsu,
-              },
-              update: {
-                status: item.status,
-              },
-            });
-            notasSalvas++;
-          } else {
-            const nota = await prisma.note.findUnique({ where: { chaveAcesso: item.chaveAcesso } });
-            if (!nota) continue; // evento de uma nota que ainda não vimos - ignora por ora
-
-            await prisma.noteEvent.create({
-              data: {
-                noteId: nota.id,
-                tipo: item.tipoEvento as any,
-                descricao: item.descricao,
-                xmlEvento: "",
-                nsu: item.nsu,
-                dataEvento: item.dataEvento ? new Date(item.dataEvento) : null,
-              },
-            });
-
-            if (item.tipoEvento === "CANCELAMENTO") {
-              await prisma.note.update({ where: { id: nota.id }, data: { status: "CANCELADA" } });
-            }
-            eventosSalvos++;
-          }
-        }
-      });
-
-      ultNSU = resultado.ultNSU;
-
-      await step.run(`atualizar-ultnsu-${iteracoes}`, async () => {
-        await prisma.certificate.update({
-          where: { id: certificateId },
-          data: { ultNSU, maxNSU: resultado.maxNSU },
-        });
-      });
-
-      // "Chegou ao fim" só quando a SEFAZ diz explicitamente cStat 137 (nenhum
-      // documento localizado). NÃO usamos `ultNSU >= maxNSU` como atalho: o
-      // maxNSU vem 0/inconsistente em várias respostas e era justamente o que
-      // fazia o backfill ser marcado como concluído cedo demais.
-      if (resultado.semDocumentosNovos) {
-        if (!certificado.backfillDone) {
-          await step.run("marcar-backfill-concluido", async () => {
-            await prisma.certificate.update({
-              where: { id: certificateId },
-              data: { backfillDone: true },
-            });
-          });
-        }
-        break;
-      }
-
-      // Respeita o intervalo mínimo entre chamadas antes da próxima página
-      await step.sleep(`aguardar-proxima-pagina-${iteracoes}`, INTERVALO_ENTRE_CHAMADAS_MS);
-    }
-
-    return { iteracoes, notasSalvas, eventosSalvos, ultNSU, ultimoStatus, ultimoMotivo };
+    const orcamento = { restante: MAX_ITERACOES_POR_EXECUCAO };
+    return processarCertificado(event.data.certificateId, step, orcamento);
   }
 );
 
-/** Disparado assim que um certificado novo é validado, pra já começar o backfill. */
+/**
+ * 2b) Caminho NOVO — 1 evento = 1 LOTE de certificados, processados numa run só.
+ *     - Cada certificado roda dentro de um try/catch: se o 3º de 10 estourar
+ *       (ex.: TLS/403), os outros 9 continuam.
+ *     - Durabilidade preservada: `processarCertificado` usa `step.run`
+ *       namespaced por certificateId, então retry do run re-executa só o step
+ *       que falhou, do certificado que falhou.
+ *     - `orcamento` de páginas é COMPARTILHADO pelo lote inteiro pra não
+ *       estourar o teto de ~1000 steps/run do Inngest. O que não couber
+ *       continua no próximo ciclo do cron.
+ *     - Concorrência: `limit 1` por `batchId` (um lote nunca roda sobreposto a
+ *       si mesmo) + teto global 3 do balde "sefaz-pdv-sync". Como o
+ *       particionamento é determinístico, um certificado cai sempre no mesmo
+ *       lote => nunca roda 2x em paralelo.
+ */
+export const sincronizarCertificadoBatch = inngest.createFunction(
+  {
+    id: "sincronizar-certificado-lote",
+    concurrency: [
+      { scope: "account", key: '"sefaz-pdv-sync"', limit: 3 },
+      { limit: 1, key: "event.data.batchId" },
+    ],
+    retries: 2,
+  },
+  { event: "sefaz/certificate.sync.batch" },
+  async ({ event, step }) => {
+    const { batchId, certificateIds } = event.data;
+    const orcamento = { restante: ORCAMENTO_ITERACOES_LOTE };
+    const resultados: Array<Record<string, unknown>> = [];
+
+    let comErro = 0;
+    for (const certificateId of certificateIds) {
+      try {
+        const r = await processarCertificado(certificateId, step, orcamento);
+        resultados.push({ certificateId, ok: true, ...r });
+      } catch (err: any) {
+        comErro++;
+        const msg = String(err?.message ?? err);
+        console.error(`[sync-cert-lote ${batchId}] certificado ${certificateId} falhou: ${msg}`);
+        resultados.push({ certificateId, ok: false, erro: msg });
+      }
+      if (orcamento.restante <= 0) {
+        // Estourou o orçamento de páginas do lote: o resto dos certificados
+        // fica pro próximo ciclo do cron (ultNSU salvo garante a retomada).
+        break;
+      }
+    }
+
+    return {
+      batchId,
+      certificados: certificateIds.length,
+      processados: resultados.length,
+      comErro,
+      orcamentoRestante: orcamento.restante,
+      resultados,
+    };
+  }
+);
+
+/**
+ * Disparado assim que um certificado novo é validado.
+ *
+ * - Modo LOTE (padrão): NÃO dispara nada. O próximo ciclo do `cronHorario`
+ *   (até 2h) inclui o certificado novo no lote determinístico dele. Isso
+ *   elimina de vez qualquer janela de corrida (o mesmo certificado nunca
+ *   roda por dois caminhos ao mesmo tempo), ao custo de até 2h de latência
+ *   no 1º sync — aceitável pra um certificado recém-cadastrado.
+ * - Modo ROLLBACK (SEFAZ_CERT_SYNC_EM_LOTE=0): comportamento antigo, dispara
+ *   `sefaz/certificate.sync` na hora (esse caminho tem o lock por
+ *   `event.data.certificateId` que serializa com o cron).
+ */
 export const iniciarBackfillAoValidar = inngest.createFunction(
   {
     id: "iniciar-backfill-ao-validar",
-    concurrency: [{ scope: "account", key: '"sefaz-pdv-sync"', limit: 4 }],
+    concurrency: [{ scope: "account", key: '"sefaz-pdv-sync"', limit: 3 }],
   },
   { event: "sefaz/certificate.uploaded" },
   async ({ event, step }) => {
+    if (certSyncEmLote()) {
+      // Sem disparo imediato — o cronHorario pega no próximo ciclo.
+      return { agendado: "proximo-cron" };
+    }
     await step.sendEvent("disparar-primeira-sync", {
       name: "sefaz/certificate.sync",
       data: { certificateId: event.data.certificateId },
     });
+    return { agendado: "imediato" };
   }
 );
 
@@ -446,10 +659,10 @@ export const syncProdutos = inngest.createFunction(
     singleton: { mode: "skip" },
     retries: 3,
   },
-  // De hora em hora. Uma execução completa leva ~55min; com o `singleton`
-  // acima, se ainda estiver rodando quando o cron dispara de novo, o disparo é
-  // descartado em vez de enfileirado. (Era "*/30 * * * *"; antes, "30 */2 * * *".)
-  { cron: "0 * * * *" },
+  // A cada 2h (era "0 * * * *"; antes "*/30 * * * *"). Uma execução completa
+  // leva ~55min; com o `singleton` acima, se ainda estiver rodando quando o
+  // cron dispara de novo, o disparo é descartado em vez de enfileirado.
+  { cron: "0 */2 * * *" },
   async ({ step }) => {
     const redes = await step.run("listar-redes-ativas", async () => {
       const todas = await listarRedes();
