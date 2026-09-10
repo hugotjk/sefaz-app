@@ -416,6 +416,20 @@ function cor3(P: string): string {
 }
 
 /**
+ * Regra ANTIGA do grupo R3/Approve para o ramo não-"J": 4 chars a partir da 3ª
+ * posição do código + "_" + os 3 chars da cor lida em "... Cor" das informações
+ * complementares. Continua valendo para R3/JUST BRANDS/PROPARRA/SF7/L6 e para a
+ * Approve quando o código NÃO é do formato REF-COR-TAM.
+ */
+function refGrupoR3ComCor(G: string, P: string): string {
+  return (
+    direita(esquerda(G, 6), 4) +
+    "_" +
+    direita(esquerda(P, localizar(" Cor", P) + 8), 3)
+  );
+}
+
+/**
  * Fórmula 2. Retorna a string calculada se a empresa casar com algum ramo,
  * ou `null` se nenhum ramo casar (aí tenta-se a Fórmula 3).
  */
@@ -644,6 +658,20 @@ function referenciaFormula3(A: string, G: string, H: string, P: string): string 
     if (eqi(g2, "0")) return direita(G, 5);
     return G;
   }
+  // Approve Street Wear: só ela e só no ramo "Approve" (código NÃO começa com
+  // "J"). Códigos no formato REF-COR-TAM (>= 2 hifens) viram "REF_COR": pega
+  // tudo antes do último "-" (descarta o tamanho) e troca os hifens restantes
+  // por "_" — "7779-PPP-P" -> "7779_PPP". Sem esse formato, cai na regra antiga
+  // do grupo R3 (usa a cor das informações complementares). O ramo "J" (JADE
+  // JADE) e as demais empresas do grupo seguem inalterados.
+  if (igual(A, "APPROVE STREET WEAR COMERCIAL LTDA")) {
+    if (eqi(g1, "J")) return G + cor3(P);
+    const nHifens = (G.match(/-/g) ?? []).length;
+    if (nHifens >= 2) {
+      return substituir(G.slice(0, G.lastIndexOf("-")), "-", "_");
+    }
+    return refGrupoR3ComCor(G, P);
+  }
   if (
     [
       "R3 TECIDOS E CONFECCOES LTDA",
@@ -651,15 +679,10 @@ function referenciaFormula3(A: string, G: string, H: string, P: string): string 
       "PROPARRA - CONFECCAO E COMERCIO DE ARTIGOS DO VESTUARIO LTDA",
       "SF7 COMERCIAL E SERVICOS LTDA",
       "L6 COMERCIAL DO VESTUARIO LTDA",
-      "APPROVE STREET WEAR COMERCIAL LTDA",
     ].some((x) => igual(A, x))
   ) {
     if (eqi(g1, "J")) return G + cor3(P);
-    return (
-      direita(esquerda(G, 6), 4) +
-      "_" +
-      direita(esquerda(P, localizar(" Cor", P) + 8), 3)
-    );
+    return refGrupoR3ComCor(G, P);
   }
   if (igual(A, "NB BRASIL COMERCIO DE CALCADOS LTDA")) return esquerda(G, G.length - 3);
   if (igual(A, "FILA BRASIL LTDA")) return esquerda(H, localizar("-", H) - 1) + G;
