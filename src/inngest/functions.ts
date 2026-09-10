@@ -310,18 +310,21 @@ async function processarCertificado(
 }
 
 /**
- * 1) Cron principal da sincronização SEFAZ. Roda a CADA 2 HORAS (era de hora em
- *    hora — metade das execuções). Agrupa os certificados ACTIVE em lotes
- *    determinísticos e dispara 1 evento POR LOTE (`sefaz/certificate.sync.batch`).
- *    Com a flag SEFAZ_CERT_SYNC_EM_LOTE=0 volta ao comportamento antigo (1
- *    evento por certificado) — só pra rollback.
+ * 1) Cron principal da sincronização SEFAZ. Roda a cada 2h SÓ das 6h às 20h de
+ *    Brasília (pausa 20h–6h — o Brasil não tem mais horário de verão desde
+ *    2019, então America/Sao_Paulo = UTC-3 fixo; equivale a "0 9-23/2 * * *"
+ *    em UTC). Agrupa os certificados ACTIVE em lotes determinísticos e dispara
+ *    1 evento POR LOTE (`sefaz/certificate.sync.batch`). Com a flag
+ *    SEFAZ_CERT_SYNC_EM_LOTE=0 volta ao comportamento antigo (1 evento por
+ *    certificado) — só pra rollback.
  */
 export const cronHorario = inngest.createFunction(
   {
     id: "cron-sincronizacao-horaria",
     concurrency: [{ scope: "account", key: '"sefaz-pdv-sync"', limit: 3 }],
   },
-  { cron: "0 */2 * * *" }, // a cada 2h (era "0 * * * *")
+  // 06,08,10,12,14,16,18,20 BRT (8x/dia). Era "0 */2 * * *" (o dia todo, 12x).
+  { cron: "TZ=America/Sao_Paulo 0 6-20/2 * * *" },
   async ({ step }) => {
     // Marca como EXPIRED quem passou da validade — evita gastar uma chamada
     // na SEFAZ pra um certificado que já sabemos que vai ser rejeitado.
@@ -659,10 +662,12 @@ export const syncProdutos = inngest.createFunction(
     singleton: { mode: "skip" },
     retries: 3,
   },
-  // A cada 2h (era "0 * * * *"; antes "*/30 * * * *"). Uma execução completa
-  // leva ~55min; com o `singleton` acima, se ainda estiver rodando quando o
-  // cron dispara de novo, o disparo é descartado em vez de enfileirado.
-  { cron: "0 */2 * * *" },
+  // A cada 2h SÓ das 6h às 20h de Brasília (pausa à noite) — 06,08,…,20 BRT,
+  // 8x/dia. Era "0 */2 * * *" (o dia todo). Brasil sem horário de verão desde
+  // 2019 => America/Sao_Paulo = UTC-3 fixo (equivale a "0 9-23/2 * * *" UTC).
+  // Uma execução leva ~55min; com o `singleton` acima, disparo sobreposto é
+  // descartado em vez de enfileirado.
+  { cron: "TZ=America/Sao_Paulo 0 6-20/2 * * *" },
   async ({ step }) => {
     const redes = await step.run("listar-redes-ativas", async () => {
       const todas = await listarRedes();
