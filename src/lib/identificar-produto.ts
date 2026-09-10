@@ -64,6 +64,53 @@ function igual(a: string, b: string): boolean {
   return a.trim().toLowerCase() === b.trim().toLowerCase();
 }
 
+// Palavras do nome do Modelo que NÃO seguem Title Case simples (siglas /
+// grafias de marca). chave = forma minúscula; valor = grafia canônica.
+const MODELO_PALAVRA_ESPECIAL: Record<string, string> = {
+  tsc: "TSC",
+  "m&l": "M&L",
+  emc: "EMC",
+  hd: "HD",
+  rvca: "RVCA",
+  mcd: "MCD",
+  myflag: "MyFlag",
+};
+
+// Conectivos que ficam em minúsculo quando NÃO são a primeira palavra
+// (ex.: "Liga dos Mascotes", não "Liga Dos Mascotes").
+const MODELO_CONECTIVO = new Set(["de", "do", "da", "dos", "das", "e"]);
+
+/**
+ * Padroniza o nome do Modelo para Title Case (primeira letra de cada palavra
+ * em maiúscula, resto em minúscula), tratando hífens ("g-shock" -> "G-Shock"),
+ * preservando siglas/grafias de marca (TSC, M&L, EMC, HD, RVCA, MCD, MyFlag) e
+ * mantendo conectivos em minúsculo quando não são a 1ª palavra
+ * ("Liga dos Mascotes").
+ *
+ * Aplicado no VALOR ARMAZENADO (não só na exibição): o mesmo Modelo vindo de
+ * fornecedores diferentes ("cebola" / "CEBOLA" / "Cebola") passa a colapsar
+ * num único grupo na Conferência de Produtos.
+ */
+export function normalizarNomeModelo(nome: string | null): string | null {
+  if (nome == null) return null;
+  const limpo = nome.trim().replace(/\s+/g, " ");
+  if (limpo === "") return null;
+  const titleCasePalavra = (w: string) =>
+    w
+      .split("-")
+      .map((seg) => (seg === "" ? seg : seg[0].toUpperCase() + seg.slice(1).toLowerCase()))
+      .join("-");
+  return limpo
+    .split(" ")
+    .map((w, idx) => {
+      const lower = w.toLowerCase();
+      if (MODELO_PALAVRA_ESPECIAL[lower]) return MODELO_PALAVRA_ESPECIAL[lower];
+      if (idx > 0 && MODELO_CONECTIVO.has(lower)) return lower;
+      return titleCasePalavra(w);
+    })
+    .join(" ");
+}
+
 /**
  * Grupo "Thug Nine / Dubs" (marcas Thug Nine, Dubs, Brotherhood…). Compartilha
  * a mesma regra de Modelo (4º dígito do código) e de Referência (código puro).
@@ -126,7 +173,23 @@ export const EMPRESAS_BANIDAS: string[] = [
 // FÓRMULA 1 — Modelo
 // --------------------------------------------------------------------------
 
+/**
+ * Wrapper público: calcula o Modelo bruto (dezenas de ramos, cada um com sua
+ * grafia própria) e devolve SEMPRE normalizado em Title Case via
+ * `normalizarNomeModelo` — inclusive os valores dinâmicos (ex.: BRUNX =
+ * primeira palavra da descrição). É o valor que vai pro banco.
+ */
 export function identificarModelo(
+  razaoSocialEmitente: string,
+  codigoProduto: string,
+  descricaoProduto: string
+): string | null {
+  return normalizarNomeModelo(
+    identificarModeloRaw(razaoSocialEmitente, codigoProduto, descricaoProduto)
+  );
+}
+
+function identificarModeloRaw(
   razaoSocialEmitente: string,
   codigoProduto: string,
   descricaoProduto: string
@@ -444,6 +507,18 @@ function referenciaFormula2(A: string, G: string, H: string, P: string): string 
   if (igual(A, "AGK DESENVOLVIMENTO DE PRODUTOS LTDA")) return G;
   // adidas do Brasil (as duas grafias — `igual` é case-insensitive): código puro.
   if (igual(A, "adidas do Brasil Ltda")) return G;
+  // Grupo Cebola (Ferrari): referência = código do produto SEM os zeros à
+  // esquerda. "004011" -> "4011"; "004018" -> "4018". Unifica as 3 empresas
+  // (D L / V F / VF Ferrari) nessa mesma lógica. NÃO inclui a ITF Ferrari, que
+  // segue na fórmula 3. Código só de zeros -> mantém o código (cai no fallback).
+  if (
+    igual(A, "D L FERRARI PRODUTOS LICENCIADOS LTDA") ||
+    igual(A, "V F FERRARI PRODUTOS LICENCIADOS LTDA") ||
+    igual(A, "VF FERRARI PRODUTOS LICENCIADOS")
+  ) {
+    const semZeros = G.replace(/^0+/, "");
+    return semZeros !== "" ? semZeros : G;
+  }
   if (igual(A, "STAR FLEX CALCADOS LTDA")) {
     // REVISAR: ramo muito ambíguo. Original:
     //   ESQUERDA(DIREITA($H2; LEN($H2)-LOCALIZAR("REF:";$H2)-3); 4)
@@ -541,8 +616,17 @@ function referenciaFormula2(A: string, G: string, H: string, P: string): string 
     return esquerda(G, G.length - 2);
   if (igual(A, "SURF CO LTDA")) {
     const g2p = esquerda(G, 2);
-    if (["HY", "HL", "VL", "02"].some((x) => eqi(g2p, x)))
-      return esquerda(G, G.length - ultimoNome(H).length);
+    if (["HY", "HL", "VL", "02"].some((x) => eqi(g2p, x))) {
+      // O código é "<base>.<2 dígitos><TAMANHO>" — ex. "HYBM03010302.00P",
+      // "HYTS01096601.00GG", "HYTS010967G02.001X". A referência é a base + os
+      // 2 dígitos: corta o TAMANHO logo depois do ".NN".
+      // A regra antiga cortava LEN(última palavra da descrição), o que
+      // quebrava quando o xProd da nota NÃO terminava no tamanho (ex.
+      // "BERMUDA ELASTICO BLOCK" -> cortava "BLOCK", 5 chars -> lixo).
+      const m = G.match(/^(.*\.\d{2})/);
+      if (m) return m[1];
+      return esquerda(G, G.length - ultimoNome(H).length); // sem ".NN": mantém o antigo
+    }
     const semPonto = substituir(G, ".", "");
     return direita(esquerda(semPonto, 9), 1) === "G"
       ? esquerda(semPonto, 9)
@@ -567,7 +651,6 @@ function referenciaFormula2(A: string, G: string, H: string, P: string): string 
   if (
     EMPRESAS_THUG_DUBS.some((x) => igual(A, x)) ||
     igual(A, "PCF IMPORTACAO EXPORTACAO E COMERCIO LTD") ||
-    igual(A, "VF FERRARI PRODUTOS LICENCIADOS") ||
     igual(A, "BLUE OCEAN CONFECCOES S.A - FLEXCAP") ||
     igual(A, "TSC MARKETING E LICENCIAMENTO LTDA") ||
     igual(A, "M&L SPORT INNOVATION MARKETING ESPORTIVO LTDA") ||
@@ -587,7 +670,6 @@ function referenciaFormula2(A: string, G: string, H: string, P: string): string 
       "SEEDER CONFECCOES LTDA",
       "TSC IDOLOS COMERCIO DE ARTIGOS ESPORTIVOS LTDA",
       "NATURAL COMPANY CONFECCOES LTDA",
-      "D L FERRARI PRODUTOS LICENCIADOS LTDA",
       "NEW BRASIL ARTIGOS ESPORTIVOS LTDA",
       "NUR DISTRIBUIDORA LTDA",
       "M WILDNER ACESSORIOS LTDA",
@@ -633,7 +715,9 @@ function referenciaFormula3(A: string, G: string, H: string, P: string): string 
     const loc2 = localizar("-", after1);
     return G + esquerda(after1, loc2 - 1);
   }
-  if (igual(A, "COIMBRA SP INDUSTRIA E COMERCIO LTDA")) return G;
+  // Coimbra: referência = os 5 primeiros caracteres do código do produto da
+  // nota (antes era o código puro).
+  if (igual(A, "COIMBRA SP INDUSTRIA E COMERCIO LTDA")) return esquerda(G, 5);
   if (igual(A, "MATMAMAT CONFECCOES LTDA"))
     return esquerda(substituir(substituir(G, " - ", "_"), "-", "_"), 8);
   if (igual(A, "WAB COMPANY LTDA")) return esquerda(G, 10);
@@ -648,10 +732,9 @@ function referenciaFormula3(A: string, G: string, H: string, P: string): string 
   if (igual(A, "MALHARIA RIKAM LTDA")) return substituir(substituir(G, ".JV", ""), ".", "");
   if (igual(A, "Torcida Baby do Brasil Ltda")) return esquerda(G, localizar(".", G) - 1);
   if (igual(A, "BRAZILINE INDUSTRIA E COMERCIO LTDA")) return esquerda(G, 11);
-  if (
-    igual(A, "V F FERRARI PRODUTOS LICENCIADOS LTDA") ||
-    igual(A, "ITF FERRARI PRODUTOS LICENCIADOS LTDA")
-  ) {
+  if (igual(A, "ITF FERRARI PRODUTOS LICENCIADOS LTDA")) {
+    // (V F FERRARI saiu daqui: agora entra no grupo Cebola da fórmula 2 —
+    //  referência = código sem zeros à esquerda.)
     if (eqi(g2, "00")) return direita(G, 4);
     // REVISAR: ESQUERDA($G2;2)="0" compara 2 chars com "0" (1 char) — no Excel
     // só seria verdadeiro se G tiver exatamente 1 caractere.

@@ -86,7 +86,23 @@ export async function avaliarCadastroItens(
   const usaPrefixo = (emit: string | null | undefined) =>
     !!emit && EMPRESAS_REF_PREFIXO.has(emit.trim().toUpperCase());
 
-  const modsU = [...new Set(itens.map((i) => norm(i.modelo)).filter(Boolean))];
+  // Modelos (upper/trim) aceitos como match para um item. Normalmente é só o
+  // modelo identificado; a Braziline é a exceção: parte dos produtos dela está
+  // cadastrada no catálogo do cliente sob Modelo "FLAMENGO" (não "Braziline"),
+  // então os dois valem.
+  const modelosAceitos = (i: ItemParaAvaliar): string[] => {
+    const base = norm(i.modelo);
+    if (!base) return [];
+    if (
+      base === "BRAZILINE" &&
+      norm(i.emitente) === "BRAZILINE INDUSTRIA E COMERCIO LTDA"
+    ) {
+      return [base, "FLAMENGO"];
+    }
+    return [base];
+  };
+
+  const modsU = [...new Set(itens.flatMap((i) => modelosAceitos(i)))];
   const refsExato = [
     ...new Set(
       itens.filter((i) => !usaPrefixo(i.emitente)).map((i) => norm(i.referenciaFornecedor)).filter(Boolean)
@@ -127,14 +143,14 @@ export async function avaliarCadastroItens(
 
   return itens.map((i) => {
     if (i.ean && eansOk.has(i.ean)) return true;
-    const mod = norm(i.modelo);
-    if (!mod) return false;
+    const mods = modelosAceitos(i);
+    if (!mods.length) return false;
     if (usaPrefixo(i.emitente)) {
       const pref = digitos8(i.referenciaFornecedor);
-      return !!pref && paresOk.has(JSON.stringify(["PREFIX", pref, mod]));
+      return !!pref && mods.some((m) => paresOk.has(JSON.stringify(["PREFIX", pref, m])));
     }
     const ref = norm(i.referenciaFornecedor);
-    return !!ref && paresOk.has(JSON.stringify(["EXACT", ref, mod]));
+    return !!ref && mods.some((m) => paresOk.has(JSON.stringify(["EXACT", ref, m])));
   });
 }
 
