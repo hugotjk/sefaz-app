@@ -1,34 +1,42 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 
-export type OrdenarPor = "dataEmissao" | "notaFiscal" | "fornecedor" | "modelo" | "loja";
-const ORDENAR_POR: OrdenarPor[] = ["dataEmissao", "notaFiscal", "fornecedor", "modelo", "loja"];
-
-export const CONFERENCIA_POR_PAGINA = 50;
+// Paginação por FORNECEDOR (accordion): cada página traz N fornecedores, cada
+// um com TODAS as suas notas do período (nunca corta um fornecedor no meio
+// da página) — mesmo padrão da Conferência de Produtos (paginação por Modelo).
+export const CONFERENCIA_FORNECEDORES_POR_PAGINA = 20;
 
 export interface FiltrosConferencia {
-  ordenarPor: OrdenarPor;
-  ordem: "asc" | "desc";
+  emitente: string; // texto livre (contains, case-insensitive)
+  dataInicial: string; // YYYY-MM-DD ou "" (todos os períodos)
+  dataFinal: string; // YYYY-MM-DD ou ""
   pagina: number;
 }
 
-export interface LinhaConferencia {
+export interface NotaConferencia {
   id: string;
-  fornecedor: string;
-  modelo: string;
   dataEmissao: string | null;
+  notaFiscal: string; // Note.numero cru — mesmo formato da tela de Notas Fiscais
+  modelo: string;
   loja: string;
   lojaEncontrada: boolean;
-  notaFiscal: string;
   prazoPagamento: string;
   qtdPecas: number;
+  valorTotal: string;
+}
+
+export interface GrupoFornecedorConferencia {
+  fornecedor: string;
+  notas: NotaConferencia[];
+  somaPecas: number;
 }
 
 export interface ResultadoConferencia {
-  linhas: LinhaConferencia[];
-  total: number;
+  grupos: GrupoFornecedorConferencia[]; // só os fornecedores da página atual
+  totalFornecedores: number; // total de fornecedores (base da paginação)
+  totalNotas: number; // total de notas em TODOS os fornecedores (não só a página)
   pagina: number;
-  porPagina: number;
+  porPagina: number; // fornecedores por página
 }
 
 interface LinhaRaw {
@@ -40,16 +48,16 @@ interface LinhaRaw {
   loja_ref: string | null;
   modelo: string | null;
   qtd_pecas: number;
+  valor_total: string | null;
   prazos: string | null;
   loja_encontrada: boolean;
-  total_rows: number | bigint;
 }
 
 export function parseFiltrosConferencia(sp: URLSearchParams): FiltrosConferencia {
-  const op = sp.get("ordenarPor") as OrdenarPor | null;
   return {
-    ordenarPor: op && ORDENAR_POR.includes(op) ? op : "dataEmissao",
-    ordem: sp.get("ordem") === "asc" ? "asc" : "desc",
+    emitente: (sp.get("emitente") ?? "").trim(),
+    dataInicial: (sp.get("dataInicial") ?? "").trim(),
+    dataFinal: (sp.get("dataFinal") ?? "").trim(),
     pagina: Math.max(1, parseInt(sp.get("pagina") ?? "1", 10) || 1),
   };
 }
@@ -59,41 +67,23 @@ function formatarCnpj(v: string): string {
   return `${d.slice(0, 2)}.${d.slice(2, 5)}.${d.slice(5, 8)}/${d.slice(8, 12)}-${d.slice(12)}`;
 }
 
-/** Note.numero -> "000.000.000" (9 dígitos com zeros à esquerda). */
-function formatarNotaFiscal(numero: string | null): string {
-  const d = (numero ?? "").replace(/\D/g, "");
-  if (!d) return "-";
-  const p = d.padStart(9, "0").slice(-9);
-  return `${p.slice(0, 3)}.${p.slice(3, 6)}.${p.slice(6, 9)}`;
-}
-
 export async function montarConferenciaPrazo(
   f: FiltrosConferencia
 ): Promise<ResultadoConferencia> {
-  const dir = f.ordem === "asc" ? Prisma.raw("ASC") : Prisma.raw("DESC");
-  const offset = Math.max(0, (f.pagina - 1) * CONFERENCIA_POR_PAGINA);
+  const offsetFornecedores = (f.pagina - 1) * CONFERENCIA_FORNECEDORES_POR_PAGINA;
 
-  // Ordenação. Fornecedor/Modelo/Loja NÃO ordenam alfabeticamente: ordenam
-  // pela SOMA de peças de TODAS as notas daquele grupo (window function),
-  // maior primeiro por padrão.
-  let orderBy: Prisma.Sql;
-  switch (f.ordenarPor) {
-    case "notaFiscal":
-      orderBy = Prisma.sql`(CASE WHEN numero ~ '^[0-9]+$' THEN numero::bigint END) ${dir} NULLS LAST, b.id`;
-      break;
-    case "fornecedor":
-      orderBy = Prisma.sql`soma_fornecedor ${dir}, lower(coalesce(fornecedor,'')) ASC, b.id`;
-      break;
-    case "modelo":
-      orderBy = Prisma.sql`soma_modelo ${dir}, lower(coalesce(modelo,'')) ASC, b.id`;
-      break;
-    case "loja":
-      orderBy = Prisma.sql`soma_loja ${dir}, lower(coalesce(loja_ref, cnpj_destino)) ASC, b.id`;
-      break;
-    default: // dataEmissao — mais recente primeiro por padrão
-      orderBy = Prisma.sql`data_emissao ${dir} NULLS LAST, b.id`;
-  }
+  const gte = f.dataInicial ? new Date(`${f.dataInicial}T00:00:00.000Z`) : null;
+  const lte = f.dataFinal ? new Date(`${f.dataFinal}T23:59:59.999Z`) : null;
+  const filtroGte = gte && !Number.isNaN(gte.getTime()) ? Prisma.sql`AND n."dataEmissao" >= ${gte}` : Prisma.empty;
+  const filtroLte = lte && !Number.isNaN(lte.getTime()) ? Prisma.sql`AND n."dataEmissao" <= ${lte}` : Prisma.empty;
+  const filtroEmitente = f.emitente
+    ? Prisma.sql`AND n."emitenteNome" ILIKE ${"%" + f.emitente + "%"}`
+    : Prisma.empty;
 
+  // Sem LIMIT: o filtro de data (padrão 30 dias no cliente) mantém o conjunto
+  // pequeno no caso comum; o agrupamento/paginação por fornecedor é feito em
+  // memória (mesmo padrão da Conferência de Produtos), pra nunca cortar um
+  // fornecedor no meio de uma página.
   const rows = await prisma.$queryRaw<LinhaRaw[]>(Prisma.sql`
     WITH item_agg AS (
       SELECT "noteId" AS nid,
@@ -111,48 +101,64 @@ export async function montarConferenciaPrazo(
       FROM "NotaDuplicata" d
       JOIN "Note" n0 ON n0.id = d."noteId" AND n0."dataEmissao" IS NOT NULL
       GROUP BY d."noteId"
-    ),
-    base AS (
-      SELECT
-        n.id,
-        n."emitenteNome"          AS fornecedor,
-        n."dataEmissao"           AS data_emissao,
-        n.numero                  AS numero,
-        n."cnpjDestino"           AS cnpj_destino,
-        lr.loja                   AS loja_ref,
-        NULLIF(ia.modelo_moda, '') AS modelo,
-        COALESCE(ia.qtd_pecas, 0)::float8 AS qtd_pecas,
-        da.prazos                 AS prazos,
-        (lr.cnpj IS NOT NULL)     AS loja_encontrada
-      FROM "Note" n
-      LEFT JOIN item_agg ia ON ia.nid = n.id
-      LEFT JOIN dup_agg  da ON da.nid = n.id
-      LEFT JOIN "LojaReferencia" lr ON lr.cnpj = n."cnpjDestino"
     )
     SELECT
-      b.*,
-      SUM(qtd_pecas) OVER (PARTITION BY COALESCE(fornecedor, '')) AS soma_fornecedor,
-      SUM(qtd_pecas) OVER (PARTITION BY COALESCE(modelo, ''))     AS soma_modelo,
-      SUM(qtd_pecas) OVER (PARTITION BY COALESCE(loja_ref, cnpj_destino)) AS soma_loja,
-      COUNT(*) OVER () AS total_rows
-    FROM base b
-    ORDER BY ${orderBy}
-    LIMIT ${CONFERENCIA_POR_PAGINA} OFFSET ${offset}
+      n.id,
+      n."emitenteNome"          AS fornecedor,
+      n."dataEmissao"           AS data_emissao,
+      n.numero                  AS numero,
+      n."cnpjDestino"           AS cnpj_destino,
+      lr.loja                   AS loja_ref,
+      NULLIF(ia.modelo_moda, '') AS modelo,
+      COALESCE(ia.qtd_pecas, 0)::float8 AS qtd_pecas,
+      n."valorTotal"::text      AS valor_total,
+      da.prazos                 AS prazos,
+      (lr.cnpj IS NOT NULL)     AS loja_encontrada
+    FROM "Note" n
+    LEFT JOIN item_agg ia ON ia.nid = n.id
+    LEFT JOIN dup_agg  da ON da.nid = n.id
+    LEFT JOIN "LojaReferencia" lr ON lr.cnpj = n."cnpjDestino"
+    WHERE 1=1 ${filtroEmitente} ${filtroGte} ${filtroLte}
+    ORDER BY n."dataEmissao" DESC NULLS LAST, n.id DESC
   `);
 
-  const total = rows.length ? Number(rows[0].total_rows) : 0;
+  const porFornecedor = new Map<string, GrupoFornecedorConferencia>();
+  for (const r of rows) {
+    const nome = r.fornecedor?.trim() || "(sem fornecedor)";
+    let g = porFornecedor.get(nome);
+    if (!g) {
+      g = { fornecedor: nome, notas: [], somaPecas: 0 };
+      porFornecedor.set(nome, g);
+    }
+    const qtd = Number(r.qtd_pecas ?? 0);
+    g.somaPecas += qtd;
+    g.notas.push({
+      id: r.id,
+      dataEmissao: r.data_emissao ? r.data_emissao.toISOString() : null,
+      notaFiscal: r.numero?.trim() || "-",
+      modelo: r.modelo?.trim() || "-",
+      loja: r.loja_encontrada ? r.loja_ref?.trim() || "-" : formatarCnpj(r.cnpj_destino),
+      lojaEncontrada: !!r.loja_encontrada,
+      prazoPagamento: r.prazos?.trim() || "-",
+      qtdPecas: qtd,
+      valorTotal: r.valor_total ?? "0",
+    });
+  }
 
-  const linhas: LinhaConferencia[] = rows.map((r) => ({
-    id: r.id,
-    fornecedor: r.fornecedor?.trim() || "-",
-    modelo: r.modelo?.trim() || "-",
-    dataEmissao: r.data_emissao ? r.data_emissao.toISOString() : null,
-    loja: r.loja_encontrada ? r.loja_ref?.trim() || "-" : formatarCnpj(r.cnpj_destino),
-    lojaEncontrada: !!r.loja_encontrada,
-    notaFiscal: formatarNotaFiscal(r.numero),
-    prazoPagamento: r.prazos?.trim() || "-",
-    qtdPecas: Number(r.qtd_pecas ?? 0),
-  }));
+  // Grupos ordenados pelo fornecedor com MAIS peças faturadas no período primeiro.
+  const todosGrupos = [...porFornecedor.values()].sort(
+    (a, b) => b.somaPecas - a.somaPecas || a.fornecedor.localeCompare(b.fornecedor, "pt-BR")
+  );
+  const grupos = todosGrupos.slice(
+    offsetFornecedores,
+    offsetFornecedores + CONFERENCIA_FORNECEDORES_POR_PAGINA
+  );
 
-  return { linhas, total, pagina: f.pagina, porPagina: CONFERENCIA_POR_PAGINA };
+  return {
+    grupos,
+    totalFornecedores: todosGrupos.length,
+    totalNotas: rows.length,
+    pagina: f.pagina,
+    porPagina: CONFERENCIA_FORNECEDORES_POR_PAGINA,
+  };
 }

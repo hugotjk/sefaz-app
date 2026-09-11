@@ -16,6 +16,8 @@ import {
   backfillVendasHistorico,
   enriquecerVariacoes,
   reavaliarCadastroNotaItens,
+  importarHistoricoQive,
+  importarHistoricoQivePorJanela,
 } from "@/inngest/functions";
 
 // Vercel: dá mais folga pras funções serverless que servem os steps do Inngest.
@@ -40,5 +42,7 @@ export const { GET, POST, PUT } = serve({
     backfillVendasHistorico,
     enriquecerVariacoes,
     reavaliarCadastroNotaItens,
+    importarHistoricoQive,
+    importarHistoricoQivePorJanela,
   ],
 });

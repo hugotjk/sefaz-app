@@ -107,7 +107,11 @@ export async function GET(req: NextRequest) {
     valorTotal: nota.valorTotal?.toString() ?? "0",
     emitenteNome: nota.emitenteNome,
     emitenteCnpj: nota.emitenteCnpj,
-    destinatarioNome: nota.certificate.razaoSocial || nota.certificate.cnpj,
+    // Nota importada do histórico da Qive sem Certificate associado (CNPJ do
+    // cliente ainda sem certificado cadastrado) -> sem "Empresa (Receb.)".
+    destinatarioNome: nota.certificate
+      ? nota.certificate.razaoSocial || nota.certificate.cnpj
+      : null,
     status: nota.status,
     qtdEventos: nota._count.eventos,
     statusXml: statusXmlNota({

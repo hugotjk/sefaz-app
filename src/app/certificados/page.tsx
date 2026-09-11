@@ -21,6 +21,15 @@ interface CertificadoSalvo {
   _count: { notes: number };
 }
 
+interface LojaSemCertificado {
+  cnpj: string;
+  loja: string | null;
+  razaoSocial: string | null;
+  statusLoja: string | null;
+  rede: string | null;
+  notas: number;
+}
+
 function statusLabel(c: CertificadoSalvo) {
   if (c.status === "PASSWORD_ERROR") return { texto: "Senha incorreta — reenvie", classe: "status-erro" };
   if (c.status === "EXPIRED") return { texto: "Expirado", classe: "status-erro" };
@@ -39,6 +48,8 @@ export default function CertificadosPage() {
   const [carregandoLista, setCarregandoLista] = useState(true);
   const [sincronizandoTudo, setSincronizandoTudo] = useState(false);
   const [avisoSync, setAvisoSync] = useState<string | null>(null);
+  const [lojasSemCertificado, setLojasSemCertificado] = useState<LojaSemCertificado[]>([]);
+  const [mostrarLojasSemCertificado, setMostrarLojasSemCertificado] = useState(false);
 
   async function carregarCertificados() {
     setCarregandoLista(true);
@@ -48,8 +59,19 @@ export default function CertificadosPage() {
     setCarregandoLista(false);
   }
 
+  async function carregarLojasSemCertificado() {
+    try {
+      const res = await fetch("/api/certificados/lojas-sem-certificado");
+      const data = await res.json();
+      setLojasSemCertificado(data.lojas ?? []);
+    } catch {
+      setLojasSemCertificado([]);
+    }
+  }
+
   useEffect(() => {
     carregarCertificados();
+    carregarLojasSemCertificado();
   }, []);
 
   async function enviar() {
@@ -181,10 +203,77 @@ export default function CertificadosPage() {
 
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
         <h2 style={{ margin: 0 }}>Certificados cadastrados</h2>
-        <button className="btn" disabled={sincronizandoTudo || !temAtivos} onClick={sincronizarTodos}>
-          {sincronizandoTudo ? "Disparando..." : "🔄 Sincronizar todos agora"}
-        </button>
+        <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+          <button
+            type="button"
+            className="btn-secundario"
+            style={{ padding: "6px 10px", fontSize: 12 }}
+            onClick={() => setMostrarLojasSemCertificado(true)}
+            disabled={lojasSemCertificado.length === 0}
+          >
+            Lojas sem certificado
+            {lojasSemCertificado.length ? ` (${lojasSemCertificado.length})` : ""}
+          </button>
+          <button className="btn" disabled={sincronizandoTudo || !temAtivos} onClick={sincronizarTodos}>
+            {sincronizandoTudo ? "Disparando..." : "🔄 Sincronizar todos agora"}
+          </button>
+        </div>
       </div>
+
+      {mostrarLojasSemCertificado && (
+        <div className="modal-overlay" onClick={() => setMostrarLojasSemCertificado(false)}>
+          <div
+            className="modal-content"
+            style={{ maxWidth: 680 }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              className="modal-close"
+              onClick={() => setMostrarLojasSemCertificado(false)}
+              aria-label="Fechar"
+            >
+              ✕
+            </button>
+            <h2 style={{ margin: "0 0 6px" }}>Lojas sem certificado ({lojasSemCertificado.length})</h2>
+            <p style={{ color: "var(--text-dim)", fontSize: 13, margin: "0 0 14px" }}>
+              CNPJs destinatários de notas importadas do histórico da Qive que ainda
+              não têm certificado digital cadastrado aqui. Providencie o .pfx desses
+              CNPJs pra eles passarem a sincronizar direto com a SEFAZ.
+            </p>
+            <table className="notes-table" style={{ width: "100%" }}>
+              <thead>
+                <tr>
+                  <th>CNPJ</th>
+                  <th>Loja</th>
+                  <th>Rede</th>
+                  <th style={{ textAlign: "right" }}>Notas</th>
+                </tr>
+              </thead>
+              <tbody>
+                {lojasSemCertificado.map((l) => (
+                  <tr key={l.cnpj}>
+                    <td>{l.cnpj}</td>
+                    <td>
+                      {l.loja || l.razaoSocial || (
+                        <span style={{ color: "var(--text-dim)", fontStyle: "italic" }}>
+                          (não está na planilha de lojas)
+                        </span>
+                      )}
+                      {l.statusLoja === "INATIVO" && (
+                        <span className="badge badge-cancelada" style={{ marginLeft: 8 }}>
+                          inativa
+                        </span>
+                      )}
+                    </td>
+                    <td>{l.rede || "-"}</td>
+                    <td style={{ textAlign: "right" }}>{l.notas}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
       {avisoSync && (
         <p style={{ color: "var(--text-dim)", fontSize: 13, marginTop: -6, marginBottom: 12 }}>{avisoSync}</p>
       )}

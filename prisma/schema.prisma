@@ -216,8 +216,12 @@ model Note {
   id            String       @id @default(cuid())
   chaveAcesso   String       @unique // chave de 44 dígitos da NFe
   cnpjDestino   String
-  certificateId String
-  certificate   Certificate  @relation(fields: [certificateId], references: [id])
+  // Opcional: notas importadas do histórico da Qive podem ser de um CNPJ
+  // (loja do cliente) que nunca teve certificado digital cadastrado aqui —
+  // nesse caso fica null (ver src/lib/qive.ts). Notas vindas da SEFAZ sempre
+  // têm certificateId preenchido.
+  certificateId String?
+  certificate   Certificate? @relation(fields: [certificateId], references: [id])
 
   numero        String?
   serie         String?

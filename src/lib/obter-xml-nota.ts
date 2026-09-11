@@ -39,6 +39,18 @@ export async function obterXmlNota(chave: string): Promise<ResultadoXmlNota> {
     await prisma.note.update({ where: { id: nota.id }, data: { xmlCompleto: "" } });
   }
 
+  // Nota importada do histórico da Qive sem Certificate associado: não dá pra
+  // reconsultar a SEFAZ (não temos o .pfx do CNPJ). Na prática não deveria
+  // chegar aqui — o `xmlCompleto` da Qive já vem completo, então o cache acima
+  // já teria retornado — mas cobre o caso defensivamente.
+  if (!nota.certificate) {
+    return {
+      erro:
+        "Esta nota foi importada sem certificado associado — não é possível reconsultar a SEFAZ.",
+      status: 409,
+    };
+  }
+
   try {
     const { pfxBase64, password } = decryptCertificate(nota.certificate);
     const pfxBuffer = Buffer.from(pfxBase64, "base64");

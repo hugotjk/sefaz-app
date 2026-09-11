@@ -13,7 +13,8 @@ interface NotaLinha {
   valorTotal: string;
   emitenteNome: string | null;
   emitenteCnpj: string | null;
-  destinatarioNome: string;
+  // null = nota importada do histórico da Qive sem Certificate associado.
+  destinatarioNome: string | null;
   status: string;
   qtdEventos: number;
   statusXml: StatusXml;
@@ -351,7 +352,7 @@ export function NotasTable() {
                   <th className="col-empresa">Empresa (Emit.)</th>
                   <th className="col-empresa">Empresa (Receb.)</th>
                   <th>Status</th>
-                  <th>Eventos</th>
+                  <th className="col-nowrap">Eventos</th>
                 </tr>
               </thead>
               <tbody>
@@ -412,11 +413,22 @@ export function NotasTable() {
                       <td>{nota.tipoOperacao || "-"}</td>
                       <td>{formatarMoeda(nota.valorTotal)}</td>
                       <td className="col-empresa">{nota.emitenteNome || nota.emitenteCnpj}</td>
-                      <td className="col-empresa">{nota.destinatarioNome}</td>
+                      <td className="col-empresa">
+                        {nota.destinatarioNome || (
+                          <span
+                            style={{ fontStyle: "italic", color: "var(--text-dim)" }}
+                            title="Nota importada do histórico da Qive; o CNPJ destinatário ainda não tem certificado cadastrado aqui"
+                          >
+                            Sem certificado (importado da Qive)
+                          </span>
+                        )}
+                      </td>
                       <td>
                         <span className={badgeClasse(nota.status)}>{nota.status}</span>
                       </td>
-                      <td>{nota.qtdEventos > 0 ? `${nota.qtdEventos} evento(s)` : "-"}</td>
+                      <td className="col-nowrap">
+                        {nota.qtdEventos > 0 ? `${nota.qtdEventos} evento(s)` : "-"}
+                      </td>
                     </tr>
                   );
                 })}

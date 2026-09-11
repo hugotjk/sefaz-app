@@ -229,7 +229,13 @@ export async function montarConferenciaProdutos(
     });
   }
 
-  const todosGrupos = [...porModelo.values()];
+  // Modelos ordenados do que tem MAIS produtos sem cadastro pro que tem MENOS
+  // (não mais alfabética).
+  const todosGrupos = [...porModelo.values()].sort(
+    (a, b) =>
+      b.produtos.length - a.produtos.length ||
+      (a.modelo ?? "").localeCompare(b.modelo ?? "", "pt-BR")
+  );
   const grupos = todosGrupos.slice(
     offsetModelos,
     offsetModelos + CONFERENCIA_PRODUTOS_MODELOS_POR_PAGINA

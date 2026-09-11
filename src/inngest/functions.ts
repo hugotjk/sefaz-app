@@ -10,6 +10,12 @@ import { classificarTipoLoja } from "@/lib/classificar-tipo-loja";
 import { popularNotaItens, avaliarCadastroItens } from "@/lib/popular-nota-itens";
 import { upsertEstoqueBulk } from "@/lib/bulk-upsert-estoque";
 import {
+  buscarNfesRecebidas,
+  buscarNfesRecebidasPorJanela,
+  importarLoteQive,
+  QIVE_LIMIT_PAGINA,
+} from "@/lib/qive";
+import {
   listarRedes,
   listarLojas,
   obterFilial,
@@ -1678,10 +1684,15 @@ export const completarXmlNotas = inngest.createFunction(
     const limite = new Date(Date.now() - COMPLETAR_XML_REPETIR_APOS_H * 3_600_000);
     const trintaDiasAtras = new Date(Date.now() - DIAS_NOTA_RECENTE * 86_400_000);
 
-    const candidatas = await step.run("buscar-notas-pendentes", () =>
+    const candidatasBrutas = await step.run("buscar-notas-pendentes", () =>
       prisma.note.findMany({
         where: {
           xmlCompleto: "",
+          // Nota importada do histórico da Qive (certificateId null) sempre
+          // chega com xmlCompleto já preenchido, então nunca deveria cair
+          // aqui — mas exclui explicitamente: sem Certificate não tem como
+          // reconsultar a SEFAZ.
+          certificateId: { not: null },
           OR: [{ ultimaTentativaXml: null }, { ultimaTentativaXml: { lt: limite } }],
           // Não desistiu ainda: poucas tentativas OU nota ainda recente
           // (sem data de emissão contamos como "ainda pode aparecer").
@@ -1699,6 +1710,10 @@ export const completarXmlNotas = inngest.createFunction(
         take: COMPLETAR_XML_CANDIDATOS,
         select: { chaveAcesso: true, certificateId: true },
       })
+    );
+    // Type narrowing: o `where` acima já garante isso em runtime.
+    const candidatas = candidatasBrutas.filter(
+      (n): n is { chaveAcesso: string; certificateId: string } => n.certificateId != null
     );
 
     if (candidatas.length === 0) return { pendentes: 0 };
@@ -2028,5 +2043,300 @@ export const reavaliarCadastroNotaItens = inngest.createFunction(
     }
 
     return { vistos, atualizados, terminou: fim, proximoCursor: fim ? "" : ultimoId };
+  }
+);
+
+// ---------------------------------------------------------------------------
+// importarHistoricoQive — IMPORTAÇÃO ÚNICA (backfill) do histórico de notas que
+// a Qive (antiga Arquivei) já capturou, pra enriquecer o nosso banco
+// (Note/NotaItem/NotaDuplicata). NÃO tem cron: é disparada MANUALMENTE pelo
+// evento "qive/importar.solicitado". Cada disparo processa um bloco de páginas
+// e salva o cursor da Qive em SyncState ("qive-import:cursor"); reenviar o
+// evento continua de onde parou. `data.reset = true` recomeça do cursor 0.
+//
+// Regras (ver src/lib/qive.ts):
+//  - só notas RECEBIDAS (/v1/nfe/received);
+//  - nota cuja chaveAcesso já existe no nosso banco é PULADA (não sobrescreve);
+//  - `certificateId` casado pelo CNPJ do destinatário; sem Certificate -> a
+//    nota é contabilizada em `semCertificado` e PULADA (ver decisão no PR);
+//  - itens/duplicatas preenchidos por `popularNotaItens`, igual às notas SEFAZ.
+// ---------------------------------------------------------------------------
+
+const QIVE_PAGINAS_POR_EXECUCAO = 8; // 8 * 50 = 400 notas/disparo
+const QIVE_PAUSA_ENTRE_PAGINAS_MS = 1500; // folga p/ o rate limit (300/janela)
+
+interface CursorImportacaoQive {
+  cursor: number;
+  concluido: boolean;
+  // acumulados entre disparos
+  importadas: number;
+  jaExistiam: number;
+  semCertificado: number;
+  erros: number;
+  cnpjsSemCertificado: string[];
+}
+
+const ESTADO_QIVE_INICIAL: CursorImportacaoQive = {
+  cursor: 0,
+  concluido: false,
+  importadas: 0,
+  jaExistiam: 0,
+  semCertificado: 0,
+  erros: 0,
+  cnpjsSemCertificado: [],
+};
+
+export const importarHistoricoQive = inngest.createFunction(
+  {
+    id: "importar-historico-qive",
+    concurrency: [{ limit: 1 }], // uma importação por vez
+    retries: 2,
+  },
+  { event: "qive/importar.solicitado" },
+  async ({ event, step }) => {
+    const estado = await step.run("ler-cursor", () =>
+      lerSyncState<CursorImportacaoQive>("qive-import:cursor", ESTADO_QIVE_INICIAL)
+    );
+
+    if (event.data?.reset) {
+      Object.assign(estado, ESTADO_QIVE_INICIAL, { cnpjsSemCertificado: [] });
+      await step.run("resetar-cursor", () =>
+        gravarSyncState("qive-import:cursor", estado)
+      );
+    }
+
+    if (estado.concluido) {
+      return {
+        jaConcluido: true,
+        dica: 'dispare com { "reset": true } pra reimportar do zero',
+        totais: estado,
+      };
+    }
+
+    let cursor = estado.cursor;
+    let paginasNesteDisparo = 0;
+    let notasVistasNesteDisparo = 0;
+    let importadasNesteDisparo = 0;
+    let fim = false;
+
+    while (paginasNesteDisparo < QIVE_PAGINAS_POR_EXECUCAO && !fim) {
+      const r = await step.run(`pagina-${cursor}`, async () => {
+        const pag = await buscarNfesRecebidas(cursor, QIVE_LIMIT_PAGINA);
+        const res = await importarLoteQive(pag.notas);
+        return { ...res, proximoCursor: pag.proximoCursor };
+      });
+
+      estado.importadas += r.importadas;
+      estado.jaExistiam += r.jaExistiam;
+      estado.semCertificado += r.semCertificado;
+      estado.erros += r.erros;
+      for (const c of r.cnpjsSemCertificado) {
+        if (!estado.cnpjsSemCertificado.includes(c) && estado.cnpjsSemCertificado.length < 200) {
+          estado.cnpjsSemCertificado.push(c);
+        }
+      }
+      paginasNesteDisparo++;
+      notasVistasNesteDisparo += r.recebidas;
+      importadasNesteDisparo += r.importadas;
+
+      // Fim do histórico: página vazia, sem próximo cursor, ou cursor não andou.
+      if (r.recebidas === 0 || r.proximoCursor == null || r.proximoCursor === cursor) {
+        fim = true;
+        estado.concluido = true;
+      } else {
+        cursor = r.proximoCursor;
+        estado.cursor = cursor;
+      }
+
+      await step.run(`salvar-cursor-${cursor}`, () =>
+        gravarSyncState("qive-import:cursor", estado)
+      );
+
+      if (!fim) {
+        await step.sleep(`pausa-${cursor}`, QIVE_PAUSA_ENTRE_PAGINAS_MS);
+      }
+    }
+
+    return {
+      concluido: estado.concluido,
+      cursorAtual: estado.cursor,
+      disparo: {
+        paginas: paginasNesteDisparo,
+        notasVistas: notasVistasNesteDisparo,
+        importadas: importadasNesteDisparo,
+      },
+      totaisAcumulados: {
+        importadas: estado.importadas,
+        jaExistiam: estado.jaExistiam,
+        semCertificado: estado.semCertificado,
+        erros: estado.erros,
+        cnpjsSemCertificado: estado.cnpjsSemCertificado.length,
+      },
+      dica: estado.concluido
+        ? "histórico da Qive todo varrido"
+        : "dispare qive/importar.solicitado de novo pra continuar",
+    };
+  }
+);
+
+// ---------------------------------------------------------------------------
+// importarHistoricoQivePorJanela — MESMO objetivo do importarHistoricoQive
+// acima (backfill único, disparo manual), mas prioriza as notas MAIS RECENTES
+// primeiro. Caminho SEPARADO e coexistente: não mexe no cursor nem no
+// SyncState do importarHistoricoQive original, que continua funcionando como
+// fallback/rollback (mesmo padrão de coexistência usado pra sincronizarCertificado).
+//
+// A API v1 da Qive não tem filtro por data de EMISSÃO da nota — só por
+// `created_at` (data em que a Qive ingeriu o registro). Testado empiricamente
+// pra esta conta: `created_at` acompanha de perto a emissão (ver
+// src/lib/qive.ts), então serve como proxy pra varrer do mais recente pro
+// mais antigo em JANELAS, mesmo padrão do backfill de Produtos (30/90/180/365
+// dias, depois o resto). O cursor é ESCOPADO por janela — cada uma tem seu
+// próprio cursor, guardado junto no mesmo estado.
+// ---------------------------------------------------------------------------
+
+interface JanelaQive {
+  chave: string; // só pra log/observabilidade
+  desde: string; // created_at[from], "AAAA-MM-DD"
+  ate: string; // created_at[to], "AAAA-MM-DD"
+}
+
+/** Janelas calculadas em relação a HOJE, da mais recente pra mais antiga. */
+function calcularJanelasQive(): JanelaQive[] {
+  const hoje = new Date();
+  const menosDias = (dias: number) =>
+    new Date(hoje.getTime() - dias * 86_400_000).toISOString().slice(0, 10);
+  return [
+    { chave: "0-30d", desde: menosDias(30), ate: menosDias(0) },
+    { chave: "30-90d", desde: menosDias(90), ate: menosDias(30) },
+    { chave: "90-180d", desde: menosDias(180), ate: menosDias(90) },
+    { chave: "180-365d", desde: menosDias(365), ate: menosDias(180) },
+    // sentinela bem antiga pra cobrir "tudo antes de 365 dias atrás" — a API
+    // exige created_at[from] sempre que created_at[to] é usado.
+    { chave: "365d-tudo", desde: "2000-01-01", ate: menosDias(365) },
+  ];
+}
+
+interface CursorImportacaoQivePorJanela {
+  janelaIndex: number; // índice em calcularJanelasQive() da janela atual
+  cursor: number; // cursor DENTRO da janela atual
+  concluido: boolean; // varreu todas as janelas
+  importadas: number;
+  jaExistiam: number;
+  semCertificado: number;
+  erros: number;
+  cnpjsSemCertificado: string[];
+}
+
+const ESTADO_QIVE_JANELA_INICIAL: CursorImportacaoQivePorJanela = {
+  janelaIndex: 0,
+  cursor: 0,
+  concluido: false,
+  importadas: 0,
+  jaExistiam: 0,
+  semCertificado: 0,
+  erros: 0,
+  cnpjsSemCertificado: [],
+};
+
+export const importarHistoricoQivePorJanela = inngest.createFunction(
+  {
+    id: "importar-historico-qive-por-janela",
+    concurrency: [{ limit: 1 }],
+    retries: 2,
+  },
+  { event: "qive/importar-por-janela.solicitado" },
+  async ({ event, step }) => {
+    const CHAVE_ESTADO = "qive-import-janela:cursor";
+    const janelas = calcularJanelasQive();
+
+    const estado = await step.run("ler-cursor-janela", () =>
+      lerSyncState<CursorImportacaoQivePorJanela>(CHAVE_ESTADO, ESTADO_QIVE_JANELA_INICIAL)
+    );
+
+    if (event.data?.reset) {
+      Object.assign(estado, ESTADO_QIVE_JANELA_INICIAL, { cnpjsSemCertificado: [] });
+      await step.run("resetar-cursor-janela", () => gravarSyncState(CHAVE_ESTADO, estado));
+    }
+
+    if (estado.concluido) {
+      return {
+        jaConcluido: true,
+        dica: 'dispare com { "reset": true } pra reimportar do zero',
+        totais: estado,
+      };
+    }
+
+    let paginasNesteDisparo = 0;
+    let notasVistasNesteDisparo = 0;
+    let importadasNesteDisparo = 0;
+
+    while (paginasNesteDisparo < QIVE_PAGINAS_POR_EXECUCAO && !estado.concluido) {
+      const janela = janelas[estado.janelaIndex];
+
+      const r = await step.run(
+        `janela-${janela.chave}-pagina-${estado.cursor}`,
+        async () => {
+          const pag = await buscarNfesRecebidasPorJanela(
+            janela.desde,
+            janela.ate,
+            estado.cursor,
+            QIVE_LIMIT_PAGINA
+          );
+          const res = await importarLoteQive(pag.notas);
+          return { ...res, proximoCursor: pag.proximoCursor };
+        }
+      );
+
+      estado.importadas += r.importadas;
+      estado.jaExistiam += r.jaExistiam;
+      estado.semCertificado += r.semCertificado;
+      estado.erros += r.erros;
+      for (const c of r.cnpjsSemCertificado) {
+        if (!estado.cnpjsSemCertificado.includes(c) && estado.cnpjsSemCertificado.length < 200) {
+          estado.cnpjsSemCertificado.push(c);
+        }
+      }
+      paginasNesteDisparo++;
+      notasVistasNesteDisparo += r.recebidas;
+      importadasNesteDisparo += r.importadas;
+
+      if (r.recebidas === 0 || r.proximoCursor == null || r.proximoCursor === estado.cursor) {
+        // Esgotou esta janela -> avança pra próxima (ou termina, se era a última).
+        if (estado.janelaIndex + 1 >= janelas.length) {
+          estado.concluido = true;
+        } else {
+          estado.janelaIndex++;
+          estado.cursor = 0;
+        }
+      } else {
+        estado.cursor = r.proximoCursor;
+      }
+
+      await step.run(`salvar-cursor-janela-${janela.chave}-${estado.cursor}`, () =>
+        gravarSyncState(CHAVE_ESTADO, estado)
+      );
+    }
+
+    return {
+      concluido: estado.concluido,
+      janelaAtual: janelas[Math.min(estado.janelaIndex, janelas.length - 1)].chave,
+      cursorAtual: estado.cursor,
+      disparo: {
+        paginas: paginasNesteDisparo,
+        notasVistas: notasVistasNesteDisparo,
+        importadas: importadasNesteDisparo,
+      },
+      totaisAcumulados: {
+        importadas: estado.importadas,
+        jaExistiam: estado.jaExistiam,
+        semCertificado: estado.semCertificado,
+        erros: estado.erros,
+        cnpjsSemCertificado: estado.cnpjsSemCertificado.length,
+      },
+      dica: estado.concluido
+        ? "histórico da Qive todo varrido (por janela)"
+        : "dispare qive/importar-por-janela.solicitado de novo pra continuar",
+    };
   }
 );

@@ -273,6 +273,10 @@ h2 { font-size: 16px; margin: 0 0 12px; }
 /* colunas de nome de empresa: nunca quebrar linha (tabela ganha scroll-x) */
 .notes-table td.col-empresa,
 .notes-table th.col-empresa { white-space: nowrap; }
+/* idem pra qualquer outra coluna que possa quebrar linha e desalinhar a
+   altura das linhas (ex.: "Eventos" da tela de Notas Fiscais) */
+.notes-table td.col-nowrap,
+.notes-table th.col-nowrap { white-space: nowrap; }
 /* Conferência de Produtos: nome do Modelo exibido em maiúsculas (só
    visual — o valor salvo e a comparação continuam como estão). */
 .notes-table td.col-modelo,
@@ -461,6 +465,26 @@ h2 { font-size: 16px; margin: 0 0 12px; }
 }
 .aviso-sem-regra li { margin-bottom: 3px; }
 .aviso-sem-regra .cnt { color: var(--text-dim); }
+/* cabeçalho clicável (expandir/recolher) — por padrão só o título aparece */
+.aviso-sem-regra-cab {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+.aviso-sem-regra-cab .cp-chevron {
+  color: var(--yellow);
+  font-size: 11px;
+  transition: transform 0.15s ease;
+  flex: none;
+}
+.aviso-sem-regra.aberto .aviso-sem-regra-cab .cp-chevron { transform: rotate(90deg); }
 @media (max-width: 760px) {
   .avisos-sem-regra { grid-template-columns: 1fr; }
 }
@@ -494,17 +518,28 @@ h2 { font-size: 16px; margin: 0 0 12px; }
   flex: none;
 }
 .cp-grupo.aberto .cp-grupo-cab .cp-chevron { transform: rotate(90deg); }
-.cp-grupo-modelo { font-weight: 600; font-size: 14px; flex: 1; }
+/* nome do Modelo / Fornecedor (accordion reutilizado entre relatórios):
+   nunca quebra linha — corta com reticências se for muito comprido. */
+.cp-grupo-modelo {
+  font-weight: 600;
+  font-size: 14px;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .cp-grupo-modelo .cp-sem-modelo { color: var(--yellow); font-style: italic; font-weight: 500; }
 .cp-grupo-cont {
   color: var(--text-dim);
   font-size: 12px;
   white-space: nowrap;
+  flex: none;
 }
 .cp-refs { border-top: 1px solid var(--border); }
 .cp-ref {
   display: grid;
-  grid-template-columns: minmax(120px, 200px) 1fr minmax(120px, 170px);
+  grid-template-columns: minmax(120px, 200px) 1fr;
   gap: 8px 18px;
   padding: 11px 16px 11px 40px;
   font-size: 13px;
@@ -515,25 +550,28 @@ h2 { font-size: 16px; margin: 0 0 12px; }
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-weight: 600;
   color: var(--text);
-  word-break: break-word;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.cp-ref-desc { color: var(--text); }
+.cp-ref-desc { color: var(--text); min-width: 0; }
+.cp-ref-desc-txt {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .cp-ref-desc .cp-ref-meta {
   display: block;
   margin-top: 3px;
   color: var(--text-dim);
   font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.cp-ref-ean {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  color: var(--text-dim);
-  font-size: 12px;
-  text-align: right;
-}
-.cp-ref-ean.vazio { font-style: italic; opacity: 0.7; }
 @media (max-width: 720px) {
   .cp-ref { grid-template-columns: 1fr; padding-left: 24px; gap: 4px; }
-  .cp-ref-ean { text-align: left; }
 }
 
 .btn {
