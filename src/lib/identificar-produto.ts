@@ -424,6 +424,7 @@ function identificarModeloRaw(
     if (eqi(h2p, "ON")) return "Oneill";
     if (eqi(h2p, "EK")) return "Ecko";
     if (eqi(h2p, "HD")) return "HD";
+    if (eqi(h2p, "MT")) return "Mitchell & Ness";
     return "Starter Fla";
   }
   if (igual(A, "Parcel Sports Eireli")) return null;
