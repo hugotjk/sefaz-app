@@ -215,7 +215,7 @@ function identificarModeloRaw(
   if (igual(A, "RIDE GROUP CALCADOS LTDA")) return "Ecko";
   if (igual(A, "STAR FLEX CALCADOS LTDA")) return "Ecko";
   if (igual(A, "WAB COMPANY LTDA")) return "Baw";
-  if (igual(A, "DMF DISTRIBUIDORA LTDA")) return "Fuel Flamengo";
+  if (igual(A, "DMF DISTRIBUIDORA LTDA")) return "Fuel";
   // NOTA: "BRAZILINE INDUSTRIA E COMERCIO LTDA" aparece 2x na fórmula; o
   // primeiro ramo (este) sempre vence -> o 2º ramo (SES FLA/FLU) é inalcançável.
   if (igual(A, "BRAZILINE INDUSTRIA E COMERCIO LTDA")) return "Braziline";
