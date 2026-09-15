@@ -203,7 +203,13 @@ export async function popularNotaItens(
 
   const dados = itens.map((it) => {
     const modelo = identificarModelo(emitente, it.codigo, it.descricao);
-    const ref = identificarReferenciaFornecedor(emitente, it.codigo, it.descricao, infCpl);
+    const ref = identificarReferenciaFornecedor(
+      emitente,
+      it.codigo,
+      it.descricao,
+      infCpl,
+      it.infAdProd
+    );
     return {
       noteId,
       codigoProduto: it.codigo,
@@ -211,6 +217,7 @@ export async function popularNotaItens(
       ean: it.ean || null,
       ncm: it.ncm || null,
       cfop: it.cfop || null,
+      infAdProd: it.infAdProd || null,
       quantidade: it.quantidade || "0",
       valorUnitario: it.valorUnitario || "0",
       valorTotal: it.valorTotal || "0",

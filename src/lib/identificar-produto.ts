@@ -485,24 +485,34 @@ function cor3(P: string): string {
 }
 
 /**
- * Regra ANTIGA do grupo R3/Approve para o ramo não-"J": 4 chars a partir da 3ª
- * posição do código + "_" + os 3 chars da cor lida em "... Cor" das informações
- * complementares. Continua valendo para R3/JUST BRANDS/PROPARRA/SF7/L6 e para a
- * Approve quando o código NÃO é do formato REF-COR-TAM.
+ * Extrai o código de cor (2-6 letras) do padrão "COR: XXX -" dentro de
+ * `infAdProd` (det/infAdProd — info adicional DO ITEM, ex.: "EAN13:
+ * 7908607724769 / COR: PPP - PRETO / TAM.: G"). "" se o padrão não existir.
  */
-function refGrupoR3ComCor(G: string, P: string): string {
-  return (
-    direita(esquerda(G, 6), 4) +
-    "_" +
-    direita(esquerda(P, localizar(" Cor", P) + 8), 3)
-  );
+function corDeInfAdProd(Q: string): string {
+  const m = /COR:\s*([A-Za-z]{2,6})\s*-/.exec(Q);
+  return m ? m[1].toUpperCase() : "";
+}
+
+/**
+ * Regra do grupo R3/Approve para o ramo não-"J": 4 chars a partir da 3ª
+ * posição do código + "_" + a cor lida em infAdProd (info DO ITEM, padrão
+ * "COR: XXX -"). Continua valendo para R3/JUST BRANDS/PROPARRA/SF7/L6 e para
+ * a Approve quando o código NÃO é do formato REF-COR-TAM.
+ *
+ * Antes lia " Cor" em informacoesComplementares (info da NOTA inteira, não
+ * do item) -- gerava o mesmo sufixo fixo/errado ("_O D") pra toda nota,
+ * porque infAdic/infCpl não tem relação nenhuma com a cor de cada item.
+ */
+function refGrupoR3ComCor(G: string, Q: string): string {
+  return direita(esquerda(G, 6), 4) + "_" + corDeInfAdProd(Q);
 }
 
 /**
  * Fórmula 2. Retorna a string calculada se a empresa casar com algum ramo,
  * ou `null` se nenhum ramo casar (aí tenta-se a Fórmula 3).
  */
-function referenciaFormula2(A: string, G: string, H: string, P: string): string | null {
+function referenciaFormula2(A: string, G: string, H: string, P: string, Q: string): string | null {
   const g1 = esquerda(G, 1);
 
   if (igual(A, "RIDE GROUP CALCADOS LTDA")) return esquerda(G, 8);
@@ -541,8 +551,25 @@ function referenciaFormula2(A: string, G: string, H: string, P: string): string 
     return parte1 + "_" + parte2;
   }
   if (igual(A, "GRUPO INVENTI LTDA")) return esquerda(G, 9);
-  if (igual(A, "DMF DISTRIBUIDORA LTDA"))
-    return substituir(substituir(esquerda(H, 20), "FLAMENGO ", ""), ".K ", "-");
+  if (igual(A, "DMF DISTRIBUIDORA LTDA")) {
+    // Fluminense/genérico (código começa "9"): referência = código puro
+    // (confirmado batendo com o cadastro real: 91429, 91521, 91536...).
+    if (eqi(g1, "9")) return G;
+    // Flamengo (código começa "8"): referência = "<base>-<Cn>".
+    // Descrição ESTRUTURADA traz os dois juntos: "FLA001.K C1 OCULOS...".
+    // Descrição NÃO-ESTRUTURADA ("OCULOS ... G C1") não tem o <base> --
+    // ele só existe em infAdProd, no formato "... Ref. FLA001.K"; o <Cn>
+    // nesse caso é sempre o último token da descrição.
+    if (eqi(g1, "8")) {
+      const estruturado = /([A-Z0-9]+)\.K\s+(C\d+)/i.exec(H);
+      if (estruturado) return `${estruturado[1].toUpperCase()}-${estruturado[2].toUpperCase()}`;
+      const base = /Ref\.\s*([A-Z0-9]+)\.K/i.exec(Q);
+      const corFinal = /\s(C\d+)\s*$/i.exec(H.trim());
+      if (base && corFinal) return `${base[1].toUpperCase()}-${corFinal[1].toUpperCase()}`;
+      return null; // sem info suficiente em nenhum lugar -> fallback genérico
+    }
+    return null;
+  }
   if (igual(A, "Avacy Distribuidora e Comercio de Calcados Ltda")) return esquerda(G, 11);
   if (igual(A, "BR8 COMERCIO IMPORTACAO E EXPORTACAO LTDA")) return G;
   if (igual(A, "DILLY NORDESTE INDUSTRIA DE CALCADOS LTDA"))
@@ -560,8 +587,15 @@ function referenciaFormula2(A: string, G: string, H: string, P: string): string 
   if (igual(A, "VEST SURF IND COM IMP E EXP DE ROUPAS LTDA."))
     return esquerda(H, localizar(" ", H) - 1);
   if (igual(A, "NIRUT IND E COM CALC LTDA")) return esquerda(G, localizar("-", G) - 1);
-  if (igual(A, "OUTSIDE CO LTDA")) return G + cor3(P);
-  if (igual(A, "CORE BRANDS MODA LTDA")) return G + cor3(P);
+  if (igual(A, "OUTSIDE CO LTDA") || igual(A, "CORE BRANDS MODA LTDA")) {
+    // Cor de 3-4 letras extraída de infAdProd ("COR: PPP - PRETO..."), não
+    // de informacoesComplementares (que nunca tem "COR: " nessas notas --
+    // era o que gerava o sufixo fixo/errado "GO " antes). Sem o padrão,
+    // cai no código puro (confirma bater com o cadastro em ~83% dos casos
+    // testados).
+    const cor = corDeInfAdProd(Q);
+    return cor ? G + cor : G;
+  }
   if (
     igual(A, "VULCABRAS DISTRIBUIDORA DE ARTIGOS ESPORTIVOS LTDA") ||
     igual(A, "VULCABRAS BA CALCADOS E ARTIGOS ESPORTIVOS S.A.") ||
@@ -710,7 +744,7 @@ function referenciaFormula2(A: string, G: string, H: string, P: string): string 
 /**
  * Fórmula 3. Tentada só se a Fórmula 2 não casou. `null` = nenhum ramo casou.
  */
-function referenciaFormula3(A: string, G: string, H: string, P: string): string | null {
+function referenciaFormula3(A: string, G: string, H: string, P: string, Q: string): string | null {
   const g1 = esquerda(G, 1);
   const g2 = esquerda(G, 2);
 
@@ -781,7 +815,7 @@ function referenciaFormula3(A: string, G: string, H: string, P: string): string 
     if (nHifens >= 2) {
       return substituir(G.slice(0, G.lastIndexOf("-")), "-", "_");
     }
-    return refGrupoR3ComCor(G, P);
+    return refGrupoR3ComCor(G, Q);
   }
   if (
     [
@@ -793,7 +827,7 @@ function referenciaFormula3(A: string, G: string, H: string, P: string): string 
     ].some((x) => igual(A, x))
   ) {
     if (eqi(g1, "J")) return G + cor3(P);
-    return refGrupoR3ComCor(G, P);
+    return refGrupoR3ComCor(G, Q);
   }
   if (igual(A, "NB BRASIL COMERCIO DE CALCADOS LTDA")) return esquerda(G, G.length - 3);
   if (igual(A, "FILA BRASIL LTDA")) return esquerda(H, localizar("-", H) - 1) + G;
@@ -853,18 +887,20 @@ export function identificarReferenciaFornecedor(
   razaoSocialEmitente: string,
   codigoProduto: string,
   descricaoProduto: string,
-  informacoesComplementares: string
+  informacoesComplementares: string,
+  infAdProd?: string
 ): ResultadoReferencia {
   const A = razaoSocialEmitente;
   const G = s(codigoProduto);
   const H = s(descricaoProduto);
   const P = s(informacoesComplementares);
+  const Q = s(infAdProd ?? ""); // det/infAdProd — info adicional DO ITEM (não da nota)
 
   // Tenta Fórmula 2; se a empresa não casou lá, tenta Fórmula 3.
   for (const fn of [referenciaFormula2, referenciaFormula3]) {
     let v: string | null;
     try {
-      v = fn(A, G, H, P);
+      v = fn(A, G, H, P, Q);
     } catch {
       v = null; // ramo com erro no cálculo -> como se não existisse
     }

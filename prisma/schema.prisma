@@ -294,6 +294,7 @@ model NotaItem {
   ean           String?
   ncm           String?
   cfop          String?
+  infAdProd     String? // det/infAdProd — informações adicionais do item (por produto, livre)
   quantidade    Decimal @db.Decimal(14, 3)
   valorUnitario Decimal @db.Decimal(14, 2)
   valorTotal    Decimal @db.Decimal(14, 2)

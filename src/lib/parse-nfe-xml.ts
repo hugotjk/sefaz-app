@@ -86,6 +86,9 @@ export interface ItemNFe {
   valorIpi: string;
   aliqIcms: string;
   aliqIpi: string;
+  /** det/infAdProd — informações adicionais DO ITEM (livre, por produto).
+   * Diferente de informacoesComplementares, que é da nota inteira. */
+  infAdProd: string;
 }
 
 export interface DuplicataNFe {
@@ -235,6 +238,7 @@ function extrairCampos(infNFe: any, protNFe: any): NFeParaExibir {
       valorIpi: n(ipiGrupo.vIPI),
       aliqIcms: n(icmsGrupo.pICMS),
       aliqIpi: n(ipiGrupo.pIPI),
+      infAdProd: n(det.infAdProd),
     };
   });
 
