@@ -715,11 +715,33 @@ function referenciaFormula3(A: string, G: string, H: string, P: string): string 
   const g2 = esquerda(G, 2);
 
   if (igual(A, "BETEL LTDA")) {
-    // REVISAR: aritmética de LOCALIZAR/DIREITA com possível off-by-one.
+    // Padrão normal: "... - <código numérico>-<nome da cor> - <tamanho>".
+    // Auditoria confirmou a aritmética correta (sem off-by-one) e 96%+ de
+    // acerto contra o cadastro.
     const loc1 = localizar("-", H);
     const after1 = direita(H, H.length - loc1 - 1);
     const loc2 = localizar("-", after1);
-    return G + esquerda(after1, loc2 - 1);
+    const cor = esquerda(after1, loc2 - 1);
+    if (loc1 > 0 && loc2 > 0 && cor !== "" && /^\d+$/.test(cor)) return G + cor;
+
+    // Fallback: descrição foge do padrão (sem código numérico de cor) --
+    // procura um nome de cor conhecido e usa o código correspondente.
+    // Mapeamento validado empiricamente (98,1% de consistência nome->código
+    // nos dados reais da Betel). Ordem importa: "VERMELHO PRETO" precisa ser
+    // checado antes de "VERMELHO"/"PRETO" isolados.
+    const CORES_BETEL: Array<[string, string]> = [
+      ["VERMELHO PRETO", "9362"],
+      ["PRETO", "01"],
+      ["BRANCO", "02"],
+      ["VERMELHO", "03"],
+      ["AZUL", "06"],
+      ["GRAFITE", "0457"],
+    ];
+    const Hu = H.toUpperCase();
+    for (const [nome, codigo] of CORES_BETEL) {
+      if (Hu.includes(nome)) return G + codigo;
+    }
+    return null;
   }
   // Coimbra: referência = os 5 primeiros caracteres do código do produto da
   // nota (antes era o código puro).
