@@ -14,6 +14,10 @@ interface ResultadoArquivo {
   erro?: string;
 }
 
+function formatarData(d: Date): string {
+  return d.toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo" });
+}
+
 export async function POST(req: NextRequest) {
   const formData = await req.formData();
   const senha = formData.get("senha");
@@ -48,6 +52,28 @@ export async function POST(req: NextRequest) {
           fileName,
           ok: false,
           erro: "Não foi possível identificar o CNPJ no certificado.",
+        });
+        continue;
+      }
+
+      // Não substitui um certificado já cadastrado por uma versão MAIS ANTIGA
+      // (validUntil menor) do mesmo CNPJ -- só aceita igual ou mais recente.
+      const existente = await prisma.certificate.findUnique({
+        where: { cnpj: info.cnpj },
+        select: { validUntil: true },
+      });
+      if (
+        existente?.validUntil &&
+        info.validUntil &&
+        info.validUntil.getTime() < existente.validUntil.getTime()
+      ) {
+        resultados.push({
+          fileName,
+          ok: false,
+          cnpj: info.cnpj,
+          erro: `Já existe um certificado mais recente pra esse CNPJ (vence em ${formatarData(
+            existente.validUntil
+          )}) -- esse upload foi ignorado por ser mais antigo.`,
         });
         continue;
       }
