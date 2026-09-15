@@ -27,6 +27,11 @@ export function ultimoNome(texto: string): string {
   return partes[partes.length - 1] ?? "";
 }
 
+/** 2ª palavra do texto (separado por espaço) — token logo após a 1ª palavra. */
+function segundaPalavra(texto: string): string {
+  return texto.trim().split(/\s+/)[1] ?? "";
+}
+
 const s = (v: unknown): string => (v == null ? "" : String(v));
 
 /** ESQUERDA / LEFT */
@@ -777,7 +782,12 @@ function referenciaFormula3(A: string, G: string, H: string, P: string): string 
     igual(A, "COOPERSHOES COOP.TRAB.IND.CAL.JOANETENSE LTDA") ||
     igual(A, "COOPERSHOES COOP.TRAB.IND.CAL.JOANETENSE LTD")
   )
-    return direita(esquerda(H, 16), 10);
+    // 2ª palavra da descrição = o código do produto (1ª palavra é o tipo:
+    // TENIS/CHINELO/MOCHILAS/BAG/BONES/MEIAS...). Sem corte de tamanho — o
+    // código varia de ~7 a 15+ caracteres, às vezes com hífen. Era um corte de
+    // posição fixa (chars 7-16) que só acertava quando a 1ª palavra tinha
+    // exatamente 5 letras E o código tinha exatamente ~10 chars.
+    return segundaPalavra(H);
   if (
     [
       "ARELL IMPORTACAO E COMERCIO LTDA",
