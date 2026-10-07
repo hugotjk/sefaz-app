@@ -176,6 +176,7 @@ export const EMPRESAS_BANIDAS: string[] = [
   "RTT COMERCIO E SERVICOS LTDA",
   "SUPERPEL COMERCIO DE PAPEIS EIRELI EPP",
   "MERITO COMERCIO DE EQUIPAMENTOS LIMITADA",
+  "Talent Distribuidora de Material de Limpeza Ltda", // grafia em minúsculas/mistas no banco (o filtro é exato)
 ];
 
 // --------------------------------------------------------------------------
