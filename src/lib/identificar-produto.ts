@@ -260,7 +260,7 @@ function identificarModeloRaw(
     return eqi(h3, "REF") ? "Reef" : "Redley";
   if (igual(A, "DASS NORDESTE CALCADOS E ARTIGOS ESPORTIVOS S.A.")) return "Umbro";
   if (igual(A, "XERYUS IMP. DISTRIB. DE ARTIGOS P/ VESTUARIO LTDA")) return "Xeryus Fla";
-  if (igual(A, "ALPAR  DO BRASIL IND.COM.LTDA")) return "NIKE"; // dois espaços em "ALPAR  DO"
+  if (igual(A, "ALPAR  DO BRASIL IND.COM.LTDA") || igual(A, "ALPAR DO BRASIL S/A")) return "NIKE"; // dois espaços em "ALPAR  DO" (grafia antiga)
   if (igual(A, "VIA COUNTRY IND E COM DE CALC LTDA") || igual(A, "NIRUT IND E COM CALC LTDA"))
     return "Farm";
   if (igual(A, "SAVE COMERCIAL E IMPORTADORA LTDA")) return "JANSPORT";
@@ -727,6 +727,7 @@ function referenciaFormula2(A: string, G: string, H: string, P: string, Q: strin
       "MALHAS D ESTEFANO LTDA",
       "SEEDER CONFECCOES LTDA",
       "TSC IDOLOS COMERCIO DE ARTIGOS ESPORTIVOS LTDA",
+      "TSC ESTADIOS COMERCIO DE ARTIGOS ESPORTIVOS LTDA",
       "NATURAL COMPANY CONFECCOES LTDA",
       "NEW BRASIL ARTIGOS ESPORTIVOS LTDA",
       "NUR DISTRIBUIDORA LTDA",
@@ -821,7 +822,7 @@ function referenciaFormula3(A: string, G: string, H: string, P: string, Q: strin
   if (igual(A, "WAB COMPANY LTDA")) return esquerda(G, 10);
   if (igual(A, "BRAZILIAN COMERCIO DE MODA PRAIA LTDA."))
     return esquerda(G, G.length - ultimoNome(H).length);
-  if (igual(A, "ALPAR  DO BRASIL IND.COM.LTDA"))
+  if (igual(A, "ALPAR  DO BRASIL IND.COM.LTDA") || igual(A, "ALPAR DO BRASIL S/A"))
     return substituir(esquerda(H, localizar("-", H) - 2), "REF: ", "");
   if (igual(A, "BRANDILI TEXTIL LTDA")) return esquerda(G, 12);
   if (igual(A, "NEW ERA BRASIL LTDA")) return esquerda(G, 15);
