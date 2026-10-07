@@ -139,49 +139,65 @@ async function main() {
       SELECT DISTINCT "emitenteNome" AS nome FROM "Note"
       WHERE upper(trim("emitenteNome")) = ANY(${ALVOS.map((a) => a.trim().toUpperCase())})`
   ).map((r) => r.nome);
-  const itens = await prisma.notaItem.findMany({
-    where: { note: { emitenteNome: { in: nomesReais } } },
-    select: {
-      id: true,
-      noteId: true,
-      codigoProduto: true,
-      descricao: true,
-      ean: true,
-      modeloIdentificado: true,
-      referenciaFornecedorIdentificada: true,
-      referenciaComRegraEspecifica: true,
-      temCadastro: true,
-      note: { select: { emitenteNome: true, xmlCompleto: true } },
-    },
-  });
+  // Leitura por SQL com texto sanitizado (caracteres não imprimíveis viram
+  // espaço). O Prisma falhava com "Failed to convert rust String into napi
+  // string" ao ler alguma linha com caractere inválido.
+  const LIMPA = (col: string) => `regexp_replace(${col}, '[^[:print:]]', ' ', 'g')`;
+  const itens = await prisma.$queryRawUnsafe<
+    {
+      id: string;
+      noteId: string;
+      codigoProduto: string;
+      descricao: string;
+      ean: string | null;
+      infAd: string | null;
+      emitenteNome: string | null;
+    }[]
+  >(
+    `SELECT i.id, i."noteId",
+            ${LIMPA('i."codigoProduto"')} AS "codigoProduto",
+            ${LIMPA("i.descricao")}       AS descricao,
+            i.ean,
+            ${LIMPA('left(i."infAdProd", 1000)')} AS "infAd",
+            n."emitenteNome"
+     FROM "NotaItem" i JOIN "Note" n ON n.id = i."noteId"
+     WHERE n."emitenteNome" = ANY($1::text[])`,
+    nomesReais
+  ).then((rows) =>
+    rows.map((r) => ({
+      id: r.id,
+      noteId: r.noteId,
+      codigoProduto: r.codigoProduto,
+      descricao: r.descricao,
+      ean: r.ean,
+      infAd: r.infAd,
+      note: { emitenteNome: r.emitenteNome },
+    }))
+  );
   console.log(`NotaItem dos fornecedores alvo: ${itens.length}\n`);
 
-  // infAdProd (cor do item: Outside/Core Brands/R3...) por SQL, já limpo de
-  // caracteres de controle/inválidos — o Prisma falhava ao ler essa coluna
-  // direto ("Failed to convert rust String into napi string").
-  const infAdPorItem = new Map<string, string>();
-  const ids = itens.map((i) => i.id);
-  for (let k = 0; k < ids.length; k += 2000) {
-    const rows = await prisma.$queryRaw<{ id: string; inf: string | null }[]>`
-      SELECT id, regexp_replace(left("infAdProd", 1000), '[^[:print:]]', ' ', 'g') AS inf
-      FROM "NotaItem" WHERE id = ANY(${ids.slice(k, k + 2000)}::text[])`;
-    for (const r of rows) infAdPorItem.set(r.id, r.inf ?? "");
-  }
+  const infAdPorItem = new Map<string, string>(itens.map((i) => [i.id, i.infAd ?? ""]));
 
-  // infocompl por nota (memoizado) — lido do XML como o popularNotaItens faz.
+  // infocompl por nota (lido do XML como o popularNotaItens faz). O XML é lido
+  // em lotes por SQL sanitizado e só o infCpl é guardado.
   const infCplPorNota = new Map<string, string>();
-  const infCpl = (noteId: string, xml: string): string => {
-    let v = infCplPorNota.get(noteId);
-    if (v === undefined) {
+  const noteIds = [...new Set(itens.map((i) => i.noteId))];
+  for (let k = 0; k < noteIds.length; k += 100) {
+    const rows = await prisma.$queryRawUnsafe<{ id: string; xml: string | null }[]>(
+      `SELECT id, ${LIMPA('"xmlCompleto"')} AS xml FROM "Note" WHERE id = ANY($1::text[])`,
+      noteIds.slice(k, k + 100)
+    );
+    for (const r of rows) {
+      let v = "";
       try {
-        v = parseNFeXml(xml || "").informacoesComplementares || "";
+        v = parseNFeXml(r.xml || "").informacoesComplementares || "";
       } catch {
         v = "";
       }
-      infCplPorNota.set(noteId, v);
+      infCplPorNota.set(r.id, v);
     }
-    return v;
-  };
+  }
+  const infCpl = (noteId: string, _xml?: string): string => infCplPorNota.get(noteId) ?? "";
 
   const recalc = itens.map((it) => {
     const emit = it.note.emitenteNome ?? "";
@@ -190,7 +206,7 @@ async function main() {
       emit,
       it.codigoProduto,
       it.descricao,
-      infCpl(it.noteId, it.note.xmlCompleto),
+      infCpl(it.noteId),
       infAdPorItem.get(it.id) ?? undefined
     );
     return {
