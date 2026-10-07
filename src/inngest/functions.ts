@@ -1845,7 +1845,7 @@ export const enriquecerVariacoes = inngest.createFunction(
     concurrency: [{ scope: "account", key: '"enriquecer-variacoes"', limit: 1 }],
     retries: 3,
   },
-  { cron: "10,40 * * * *" }, // a cada 30 min, deslocado de syncProdutos (era "0 */3 * * *")
+  { cron: "TZ=America/Sao_Paulo 10 6-20/2 * * *" }, // de 2 em 2h (6h-20h), deslocado de syncProdutos (que roda no minuto 0). Era "10,40 * * * *".
   async ({ step }) => {
     const cursor = await step.run("cursor-enriquecer", () =>
       lerSyncState<CursorEnriquecer>("enriquecer-variacoes:cursor", { ultimoId: "" })
