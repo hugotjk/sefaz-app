@@ -108,6 +108,10 @@ const EMPRESAS_NOVAS = [
   "NEW BRASIL ARTIGOS ESPORTIVOS LTDA",
   "BC SARTORI ARTIGOS ESPORTIVOS ME",
   "PREMIER DIST DE VESTUARIOS CALCADOS EQUIPAMENTOS E ACESSORIO",
+  // leva 7: TVB (Modelo fixo "TVB" + Referência = código puro). Grafia real no
+  // banco (filtro `in` é exato), e a variante em maiúsculas por garantia.
+  "Tvb Industria E Comercio Ltda",
+  "TVB INDUSTRIA E COMERCIO LTDA",
 ];
 
 const ALVOS = [
