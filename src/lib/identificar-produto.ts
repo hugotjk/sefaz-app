@@ -822,7 +822,13 @@ function referenciaFormula3(A: string, G: string, H: string, P: string, Q: strin
   if (igual(A, "WAB COMPANY LTDA")) return esquerda(G, 10);
   if (igual(A, "BRAZILIAN COMERCIO DE MODA PRAIA LTDA."))
     return esquerda(G, G.length - ultimoNome(H).length);
-  if (igual(A, "ALPAR  DO BRASIL IND.COM.LTDA") || igual(A, "ALPAR DO BRASIL S/A"))
+  // Alpar do Brasil S/A (grafia nova): referência = o que vem depois de "REF:"
+  // na descrição (até o primeiro espaço); sem "REF:" cai no código puro.
+  if (igual(A, "ALPAR DO BRASIL S/A")) {
+    const m = H.match(/REF:\s*(\S+)/i);
+    return m ? m[1].replace(/-+$/, "") : G;
+  }
+  if (igual(A, "ALPAR  DO BRASIL IND.COM.LTDA"))
     return substituir(esquerda(H, localizar("-", H) - 2), "REF: ", "");
   if (igual(A, "BRANDILI TEXTIL LTDA")) return esquerda(G, 12);
   if (igual(A, "NEW ERA BRASIL LTDA")) return esquerda(G, 15);
