@@ -1851,14 +1851,46 @@ export const enriquecerVariacoes = inngest.createFunction(
       lerSyncState<CursorEnriquecer>("enriquecer-variacoes:cursor", { ultimoId: "" })
     );
 
-    const variacoes = await step.run("proximas-variacoes-sem-ean", () =>
-      prisma.variacaoProduto.findMany({
-        where: { ean: null, id: { gt: cursor.ultimoId } },
-        orderBy: { id: "asc" },
-        take: ENRIQUECER_VARIACOES_POR_EXECUCAO,
-        select: { id: true, produtoId: true, redeId: true },
-      })
+    // PRIORIDADE: variações (ean null) de produtos cuja referência bate com a de
+    // itens de notas recebidas que ainda estão sem cadastro e têm EAN — são as
+    // que destravam o "tem cadastro" primeiro. Quem já foi enriquecido sai da
+    // fila sozinho (ean deixa de ser null); os que o PDV não devolve são
+    // "tocados" (updatedAt) no fim para irem pro fim da fila e não travá-la.
+    const prioritarias = await step.run("variacoes-prioritarias", () =>
+      prisma.$queryRaw<{ id: string; produtoId: string; redeId: number }[]>(Prisma.sql`
+        SELECT v.id, v."produtoId", v."redeId"
+        FROM "VariacaoProduto" v
+        JOIN "Produto" p ON p.id = v."produtoId"
+        WHERE v.ean IS NULL
+          AND upper(trim(p."referenciaFornecedor")) IN (
+            SELECT DISTINCT upper(trim("referenciaFornecedorIdentificada"))
+            FROM "NotaItem"
+            WHERE "temCadastro" = false
+              AND ean IS NOT NULL AND ean <> ''
+              AND "referenciaFornecedorIdentificada" IS NOT NULL
+          )
+        ORDER BY v."updatedAt" ASC
+        LIMIT ${ENRIQUECER_VARIACOES_POR_EXECUCAO}
+      `)
     );
+
+    // Restante da cota: varredura normal por id (cursor), como antes.
+    const restante = ENRIQUECER_VARIACOES_POR_EXECUCAO - prioritarias.length;
+    const varridas =
+      restante > 0
+        ? await step.run("proximas-variacoes-sem-ean", () =>
+            prisma.variacaoProduto.findMany({
+              where: {
+                ean: null,
+                id: { gt: cursor.ultimoId, notIn: prioritarias.map((v) => v.id) },
+              },
+              orderBy: { id: "asc" },
+              take: restante,
+              select: { id: true, produtoId: true, redeId: true },
+            })
+          )
+        : [];
+    const variacoes = [...prioritarias, ...varridas];
 
     if (variacoes.length === 0) {
       await gravarSyncState("enriquecer-variacoes:cursor", { ultimoId: "" });
@@ -1897,6 +1929,12 @@ export const enriquecerVariacoes = inngest.createFunction(
             atualizadas++;
           }
         }
+        // Quem continua sem ean (produto não respondeu / variação ausente na
+        // resposta) vai pro fim da fila de prioridade (ordenada por updatedAt).
+        await prisma.variacaoProduto.updateMany({
+          where: { produtoId: { in: lote.map((l) => l.produtoId) }, ean: null },
+          data: { updatedAt: new Date() },
+        });
         return atualizadas;
       });
 
@@ -1904,19 +1942,19 @@ export const enriquecerVariacoes = inngest.createFunction(
       await step.sleep(`pausa-enriquecer-${cursor.ultimoId || "ini"}-${i}`, PDV_PAUSA_ENTRE_LOTES_MS);
     }
 
-    // Avança o cursor pra maior id do lote lido.
-    const ultimoId = variacoes[variacoes.length - 1].id;
-    if (variacoes.length < ENRIQUECER_VARIACOES_POR_EXECUCAO) {
-      await gravarSyncState("enriquecer-variacoes:cursor", { ultimoId: "" });
-    } else {
-      await gravarSyncState("enriquecer-variacoes:cursor", { ultimoId });
+    // Avança o cursor só pela varredura normal (a fila de prioridade não usa cursor).
+    let proximoCursor = cursor.ultimoId;
+    if (restante > 0) {
+      proximoCursor = varridas.length < restante ? "" : varridas[varridas.length - 1].id;
+      await gravarSyncState("enriquecer-variacoes:cursor", { ultimoId: proximoCursor });
     }
 
     return {
       lidas: variacoes.length,
+      prioritarias: prioritarias.length,
       produtosConsultados: produtos.length,
       variacoesAtualizadas,
-      proximoCursor: variacoes.length < ENRIQUECER_VARIACOES_POR_EXECUCAO ? "" : ultimoId,
+      proximoCursor,
     };
   }
 );
