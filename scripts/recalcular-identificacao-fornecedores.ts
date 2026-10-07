@@ -112,6 +112,8 @@ const EMPRESAS_NOVAS = [
   // banco (filtro `in` é exato), e a variante em maiúsculas por garantia.
   "Tvb Industria E Comercio Ltda",
   "TVB INDUSTRIA E COMERCIO LTDA",
+  // leva 8: G.R.W Confecções (Modelo Approve + Referência sem o tamanho do fim)
+  "G.R.W CONFECCOES LTDA",
 ];
 
 const ALVOS = [

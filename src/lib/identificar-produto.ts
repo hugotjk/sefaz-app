@@ -455,6 +455,7 @@ function identificarModeloRaw(
     return localizar("KENNER", H) > 0 ? "Kenner" : "Redley";
   if (igual(A, "VF FERRARI PRODUTOS LICENCIADOS")) return "CEBOLA";
   if (igual(A, "TVB INDUSTRIA E COMERCIO LTDA")) return "TVB";
+  if (igual(A, "G.R.W CONFECCOES LTDA")) return "Approve";
   if (EMPRESAS_THUG_DUBS.some((x) => igual(A, x))) {
     // Grupo Thug Nine / Dubs / Brotherhood: 4º dígito dos 8 primeiros do
     // código do produto da nota. Ex.: "25097401-01" -> 8 primeiros "25097401"
@@ -740,6 +741,21 @@ function referenciaFormula2(A: string, G: string, H: string, P: string, Q: strin
   if (igual(A, "AURA COMERCIO DE ARTIGOS DO VESTUARIO LTDA")) return esquerda(G, 4);
   // Dualt: código sem os zeros à esquerda (remove enquanto começar com "0").
   if (igual(A, "DUALT INDUSTRIA DE ARTIGOS ESPORTIVOS LTDA")) return G.replace(/^0+/, "");
+  // G.R.W Confecções (Approve): código = <ref><cor><TAMANHO>, ex. "7770KKKGG"
+  // (cor "KKK", tam "GG") -> "7770KKK". O tamanho é lido da descrição
+  // ("... (Cor: BEGE - Tam: GG)") e removido do FIM do código; assim "7770PPPP"
+  // (cor "PPP" + tam "P") vira "7770PPP". Sem "Tam:" na descrição (item pai,
+  // ex. "7770") o código fica como veio.
+  if (igual(A, "G.R.W CONFECCOES LTDA")) {
+    const m = H.match(/Tam:\s*([^)\s]+)\s*\)/i);
+    if (m) {
+      const tam = m[1];
+      if (G.length > tam.length && G.toUpperCase().endsWith(tam.toUpperCase())) {
+        return G.slice(0, G.length - tam.length);
+      }
+    }
+    return G;
+  }
 
   return null;
 }
