@@ -116,6 +116,8 @@ const EMPRESAS_NOVAS = [
   "G.R.W CONFECCOES LTDA",
   // leva 9: Superação (Modelo Cachecol Mania + Referência = código puro)
   "SUPERACAO COMERCIO DE ARTIGOS DO VESTUARIO LTDA",
+  // leva 10: Blue Wave (Modelo Blue Wave + Referência = código puro)
+  "BLUE WAVE IND E COM LTDA",
 ];
 
 const ALVOS = [
