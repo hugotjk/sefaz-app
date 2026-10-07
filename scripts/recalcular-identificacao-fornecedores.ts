@@ -245,23 +245,30 @@ async function main() {
     return;
   }
 
+  // Gravação em bloco: 1 UPDATE por lote de 500 (unnest de arrays) em vez de
+  // 1 round-trip por item — o banco remoto é lento e o modo antigo parecia travado.
   let n = 0;
-  for (let i = 0; i < recalc.length; i += 200) {
-    const chunk = recalc.slice(i, i + 200);
-    await prisma.$transaction(
-      chunk.map((r, j) =>
-        prisma.notaItem.update({
-          where: { id: r.it.id },
-          data: {
-            modeloIdentificado: r.modelo,
-            referenciaFornecedorIdentificada: r.referencia,
-            referenciaComRegraEspecifica: r.comRegra,
-            temCadastro: flags[i + j],
-          },
-        })
-      )
-    );
+  const LOTE = 500;
+  for (let i = 0; i < recalc.length; i += LOTE) {
+    const chunk = recalc.slice(i, i + LOTE);
+    await prisma.$executeRaw`
+      UPDATE "NotaItem" AS t SET
+        "modeloIdentificado" = v.modelo,
+        "referenciaFornecedorIdentificada" = v.ref,
+        "referenciaComRegraEspecifica" = v.regra,
+        "temCadastro" = v.cad
+      FROM (
+        SELECT * FROM unnest(
+          ${chunk.map((r) => r.it.id)}::text[],
+          ${chunk.map((r) => r.modelo)}::text[],
+          ${chunk.map((r) => r.referencia)}::text[],
+          ${chunk.map((r) => r.comRegra)}::boolean[],
+          ${chunk.map((_, j) => flags[i + j])}::boolean[]
+        ) AS x(id, modelo, ref, regra, cad)
+      ) AS v
+      WHERE t.id = v.id`;
     n += chunk.length;
+    console.log(`  gravados ${n}/${recalc.length}`);
   }
   console.log(`\n[APPLY] ${n} NotaItem atualizados.`);
   await prisma.$disconnect();
