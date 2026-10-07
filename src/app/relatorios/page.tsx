@@ -25,6 +25,13 @@ const RELATORIOS: CardRelatorio[] = [
       "Itens que apareceram em notas fiscais mas não batem com nenhum EAN do catálogo, com o fornecedor/modelo identificados por regra.",
     etiqueta: "Notas Fiscais",
   },
+  {
+    href: "/relatorios/conferencia-sem-ean",
+    titulo: "Conferência de Produtos Sem EAN",
+    descricao:
+      "Produtos que já existem no sistema, mas cujo EAN da nota fiscal não está cadastrado em nenhuma variação.",
+    etiqueta: "Notas Fiscais",
+  },
 ];
 
 export default function RelatoriosPage() {
