@@ -108,6 +108,16 @@ const EMPRESAS_NOVAS = [
   "NEW BRASIL ARTIGOS ESPORTIVOS LTDA",
   "BC SARTORI ARTIGOS ESPORTIVOS ME",
   "PREMIER DIST DE VESTUARIOS CALCADOS EQUIPAMENTOS E ACESSORIO",
+  // leva 7: TVB (Modelo fixo "TVB" + Referência = código puro). Grafia real no
+  // banco (filtro `in` é exato), e a variante em maiúsculas por garantia.
+  "Tvb Industria E Comercio Ltda",
+  "TVB INDUSTRIA E COMERCIO LTDA",
+  // leva 8: G.R.W Confecções (Modelo Approve + Referência sem o tamanho do fim)
+  "G.R.W CONFECCOES LTDA",
+  // leva 9: Superação (Modelo Cachecol Mania + Referência = código puro)
+  "SUPERACAO COMERCIO DE ARTIGOS DO VESTUARIO LTDA",
+  // leva 10: Blue Wave (Modelo Blue Wave + Referência = código puro)
+  "BLUE WAVE IND E COM LTDA",
 ];
 
 const ALVOS = [

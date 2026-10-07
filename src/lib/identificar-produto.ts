@@ -79,6 +79,7 @@ const MODELO_PALAVRA_ESPECIAL: Record<string, string> = {
   rvca: "RVCA",
   mcd: "MCD",
   myflag: "MyFlag",
+  tvb: "TVB",
 };
 
 // Conectivos que ficam em minúsculo quando NÃO são a primeira palavra
@@ -172,6 +173,19 @@ export const EMPRESAS_BANIDAS: string[] = [
   "Sucesso Produtos Promocionais LTDA",
   "TALENT DISTRIBUIDORA DE MATERIAL DE LIMPEZA LTDA",
   "TARGET MULTICOISAS COM. IMP. E EXP. LTDA",
+  "RTT COMERCIO E SERVICOS LTDA",
+  "SUPERPEL COMERCIO DE PAPEIS EIRELI EPP",
+  "MERITO COMERCIO DE EQUIPAMENTOS LIMITADA",
+  "Talent Distribuidora de Material de Limpeza Ltda", // grafia em minúsculas/mistas no banco (o filtro é exato)
+  "AFC COMERCIO VAREJISTA DE COMPONENTES ELETRONICOS LTDA",
+  "A REDE ASSESS COML LTDA",
+  "CLAUDIO TOSHIO OTSUKA PADOVAN LTDA",
+  "MERCADO LIVRE BRASIL LTDA",
+  "MTAG ETIQUETAS ACESSORIOS EM GERAL LTDA",
+  "P D A COMERCIO PET E CINOFILIA",
+  "SENSORBRASIL COMERCIO E LOCACAO LTDA",
+  "VENDA MERC LTDA",
+  "WWG EMBALAGENS LTDA",
 ];
 
 // --------------------------------------------------------------------------
@@ -453,16 +467,20 @@ function identificarModeloRaw(
   if (igual(A, "TESS INDUSTRIA E COMERCIO LTDA"))
     return localizar("KENNER", H) > 0 ? "Kenner" : "Redley";
   if (igual(A, "VF FERRARI PRODUTOS LICENCIADOS")) return "CEBOLA";
+  if (igual(A, "TVB INDUSTRIA E COMERCIO LTDA")) return "TVB";
+  if (igual(A, "G.R.W CONFECCOES LTDA")) return "Approve";
+  if (igual(A, "SUPERACAO COMERCIO DE ARTIGOS DO VESTUARIO LTDA")) return "CACHECOL MANIA";
+  if (igual(A, "BLUE WAVE IND E COM LTDA")) return "BLUE WAVE";
   if (EMPRESAS_THUG_DUBS.some((x) => igual(A, x))) {
     // Grupo Thug Nine / Dubs / Brotherhood: 4º dígito dos 8 primeiros do
     // código do produto da nota. Ex.: "25097401-01" -> 8 primeiros "25097401"
     // -> 4º dígito "9".
     //   7, 8 ou 9 -> "DUBS"
-    //   1 ou 2 -> "THUG NINE"
+    //   1, 2 ou 3 -> "THUG NINE"   (3 incluído em 2026-10: ex. 25030103 Raiders)
     //   qualquer outro -> null (não identificado)
     const quartoDigito = G.slice(0, 8).replace(/\D/g, "")[3];
     if (quartoDigito === "7" || quartoDigito === "8" || quartoDigito === "9") return "DUBS";
-    if (quartoDigito === "1" || quartoDigito === "2") return "THUG NINE";
+    if (quartoDigito === "1" || quartoDigito === "2" || quartoDigito === "3") return "THUG NINE";
     return null;
   }
 
@@ -722,6 +740,9 @@ function referenciaFormula2(A: string, G: string, H: string, P: string, Q: strin
       "TOREL COMERCIO DE ARTIGOS ESPORTIVOS LTDA ME",
       "BC SARTORI ARTIGOS ESPORTIVOS ME",
       "GENIUS 1 PARTICIPACOES JOIAS E ARTIGOS DE LUXO LTDA",
+      "TVB INDUSTRIA E COMERCIO LTDA",
+      "SUPERACAO COMERCIO DE ARTIGOS DO VESTUARIO LTDA",
+      "BLUE WAVE IND E COM LTDA",
     ].some((x) => igual(A, x))
   )
     return G;
@@ -737,6 +758,21 @@ function referenciaFormula2(A: string, G: string, H: string, P: string, Q: strin
   if (igual(A, "AURA COMERCIO DE ARTIGOS DO VESTUARIO LTDA")) return esquerda(G, 4);
   // Dualt: código sem os zeros à esquerda (remove enquanto começar com "0").
   if (igual(A, "DUALT INDUSTRIA DE ARTIGOS ESPORTIVOS LTDA")) return G.replace(/^0+/, "");
+  // G.R.W Confecções (Approve): código = <ref><cor><TAMANHO>, ex. "7770KKKGG"
+  // (cor "KKK", tam "GG") -> "7770KKK". O tamanho é lido da descrição
+  // ("... (Cor: BEGE - Tam: GG)") e removido do FIM do código; assim "7770PPPP"
+  // (cor "PPP" + tam "P") vira "7770PPP". Sem "Tam:" na descrição (item pai,
+  // ex. "7770") o código fica como veio.
+  if (igual(A, "G.R.W CONFECCOES LTDA")) {
+    const m = H.match(/Tam:\s*([^)\s]+)\s*\)/i);
+    if (m) {
+      const tam = m[1];
+      if (G.length > tam.length && G.toUpperCase().endsWith(tam.toUpperCase())) {
+        return G.slice(0, G.length - tam.length);
+      }
+    }
+    return G;
+  }
 
   return null;
 }
