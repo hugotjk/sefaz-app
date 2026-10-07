@@ -180,6 +180,7 @@ export const EMPRESAS_BANIDAS: string[] = [
   "AFC COMERCIO VAREJISTA DE COMPONENTES ELETRONICOS LTDA",
   "A REDE ASSESS COML LTDA",
   "CLAUDIO TOSHIO OTSUKA PADOVAN LTDA",
+  "MERCADO LIVRE BRASIL LTDA",
 ];
 
 // --------------------------------------------------------------------------
