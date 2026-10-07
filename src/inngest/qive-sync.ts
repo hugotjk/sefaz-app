@@ -31,21 +31,32 @@ const DIAS_RETENCAO = 90;
 const PAGINAS_NOTAS_POR_EXECUCAO = 8; // 8 * 50 = 400 notas
 const PAGINAS_EVENTOS_POR_EXECUCAO = 8;
 const PAGINAS_BACKFILL_POR_EXECUCAO = 8;
-const FIM_DOS_TEMPOS = "2100-01-01"; // created_at[to] "aberto"
 const CHAVE = "qive-sync:estado";
 const CHAVE_REDUNDANCIA = "qive-sync:certificados-redundantes";
 
+interface JanelaPendente {
+  desde: string;
+  ate: string;
+  cursor: number;
+}
+
 interface EstadoQive {
   base: string; // AAAA-MM-DD: fronteira entre "passado" (backfill) e "daqui pra frente"
-  notasCursor: number;
+  /** janela de notas novas em andamento (cursor só vale dentro da mesma janela). */
+  pendente: JanelaPendente | null;
+  /** quando a última varredura de notas novas terminou por completo. */
+  ultimaVarreduraOk: string | null;
+  eventosBackfillFeito: boolean;
   backfillFase: number; // 0,1,2 = janelas; 3 = concluído
   backfillCursor: number;
-  eventosCursor: number;
   ultimaExecucao: string | null;
   totais: { importadas: number; jaExistiam: number; eventos: number; erros: number };
 }
 
 const dia = (d: Date) => d.toISOString().slice(0, 10);
+// A Qive NÃO aceita created_at[to] no futuro distante (testado: 2100-01-01 devolve 0
+// notas). "Amanhã" funciona e cobre tudo que existe até agora.
+const amanha = () => dia(new Date(Date.now() + 86_400_000));
 const menosDias = (base: string, n: number) =>
   dia(new Date(new Date(base + "T00:00:00Z").getTime() - n * 86_400_000));
 
@@ -72,10 +83,11 @@ async function lerEstado(): Promise<EstadoQive> {
   if (e) return e;
   return {
     base: dia(new Date()),
-    notasCursor: 0,
+    pendente: null,
+    ultimaVarreduraOk: null,
+    eventosBackfillFeito: false,
     backfillFase: 0,
     backfillCursor: 0,
-    eventosCursor: 0,
     ultimaExecucao: null,
     totais: { importadas: 0, jaExistiam: 0, eventos: 0, erros: 0 },
   };
@@ -95,20 +107,25 @@ export const qiveSync = inngest.createFunction(
   { cron: CRON_QIVE },
   async ({ step }) => {
     const estado = await step.run("ler-estado", lerEstado);
-    // 1ª execução: grava a fronteira `base` e já persiste.
     await step.run("garantir-estado", () => gravar(CHAVE, estado));
 
     // 1) notas novas ---------------------------------------------------------
+    // Janela curta [ontem da última varredura OK, amanhã], cursor 0 e pagina
+    // até acabar. Notas já existentes são puladas (idempotente). Se estourar o
+    // limite de páginas, a MESMA janela continua na próxima execução.
+    if (!estado.pendente) {
+      const desde = estado.ultimaVarreduraOk
+        ? dia(new Date(new Date(estado.ultimaVarreduraOk).getTime() - 86_400_000))
+        : estado.base;
+      estado.pendente = { desde, ate: amanha(), cursor: 0 };
+    }
     let importadas = 0;
     let jaExistiam = 0;
-    for (let i = 0; i < PAGINAS_NOTAS_POR_EXECUCAO; i++) {
-      const r = await step.run(`notas-${estado.notasCursor}`, async () => {
-        const pag = await buscarNfesRecebidasPorJanela(
-          estado.base,
-          FIM_DOS_TEMPOS,
-          estado.notasCursor,
-          QIVE_LIMIT_PAGINA
-        );
+    let terminou = false;
+    for (let i = 0; i < PAGINAS_NOTAS_POR_EXECUCAO && !terminou; i++) {
+      const janela = estado.pendente!;
+      const r = await step.run(`notas-${janela.desde}-${janela.cursor}`, async () => {
+        const pag = await buscarNfesRecebidasPorJanela(janela.desde, janela.ate, janela.cursor, QIVE_LIMIT_PAGINA);
         const res = await importarLoteQive(pag.notas);
         await registrarRedundancia(res.redundantesPorCertificado);
         return { ...res, proximoCursor: pag.proximoCursor };
@@ -116,29 +133,39 @@ export const qiveSync = inngest.createFunction(
       importadas += r.importadas;
       jaExistiam += r.jaExistiam;
       estado.totais.erros += r.erros;
-      // chegou ao fim da fila: mantém o cursor atual (as notas novas aparecem
-      // a partir dele na próxima execução).
-      if (r.recebidas === 0 || r.proximoCursor == null || r.proximoCursor === estado.notasCursor) break;
-      estado.notasCursor = r.proximoCursor;
-      await step.run(`salvar-notas-${estado.notasCursor}`, () => gravar(CHAVE, estado));
+      if (r.recebidas === 0 || r.proximoCursor == null || r.proximoCursor === janela.cursor) {
+        terminou = true;
+      } else {
+        janela.cursor = r.proximoCursor;
+        await step.run(`salvar-notas-${janela.cursor}`, () => gravar(CHAVE, estado));
+      }
+    }
+    if (terminou) {
+      estado.pendente = null;
+      estado.ultimaVarreduraOk = new Date().toISOString();
     }
 
-    // 2) eventos (só depois do backfill, senão cancelamento de nota ainda não
-    //    importada seria perdido) ---------------------------------------------
+    // 2) eventos (só depois do backfill de notas) ---------------------------
     let eventosAplicados = 0;
     if (estado.backfillFase >= 3) {
-      const desde = menosDias(estado.base, DIAS_RETENCAO);
+      // 1ª vez: 90 dias inteiros (poucos eventos). Depois: janela curta.
+      const desde = estado.eventosBackfillFeito
+        ? dia(new Date(Date.now() - 2 * 86_400_000))
+        : menosDias(estado.base, DIAS_RETENCAO);
+      let cursor = 0;
       for (let i = 0; i < PAGINAS_EVENTOS_POR_EXECUCAO; i++) {
-        const r = await step.run(`eventos-${estado.eventosCursor}`, async () => {
-          const pag = await buscarEventosNfe(desde, FIM_DOS_TEMPOS, estado.eventosCursor);
+        const r = await step.run(`eventos-${desde}-${cursor}`, async () => {
+          const pag = await buscarEventosNfe(desde, amanha(), cursor);
           const res = await aplicarEventosQive(pag.notas);
           return { ...res, proximoCursor: pag.proximoCursor };
         });
         eventosAplicados += r.aplicados;
         estado.totais.erros += r.erros;
-        if (r.recebidos === 0 || r.proximoCursor == null || r.proximoCursor === estado.eventosCursor) break;
-        estado.eventosCursor = r.proximoCursor;
-        await step.run(`salvar-eventos-${estado.eventosCursor}`, () => gravar(CHAVE, estado));
+        if (r.recebidos === 0 || r.proximoCursor == null || r.proximoCursor === cursor) {
+          estado.eventosBackfillFeito = true;
+          break;
+        }
+        cursor = r.proximoCursor;
       }
     }
 
@@ -146,9 +173,19 @@ export const qiveSync = inngest.createFunction(
     estado.totais.jaExistiam += jaExistiam;
     estado.totais.eventos += eventosAplicados;
     estado.ultimaExecucao = new Date().toISOString();
-    await step.run("salvar-final", () => gravar(CHAVE, estado));
+    await step.run("salvar-final", async () => {
+      // não pisa no progresso do backfill, que roda em outra função
+      const atual = await lerEstado();
+      atual.pendente = estado.pendente;
+      atual.ultimaVarreduraOk = estado.ultimaVarreduraOk;
+      atual.eventosBackfillFeito = estado.eventosBackfillFeito;
+      atual.ultimaExecucao = estado.ultimaExecucao;
+      atual.totais.eventos = estado.totais.eventos;
+      atual.totais.jaExistiam = estado.totais.jaExistiam;
+      await gravar(CHAVE, atual);
+    });
 
-    return { importadas, jaExistiam, eventosAplicados, backfillFase: estado.backfillFase };
+    return { importadas, jaExistiam, eventosAplicados, backfillFase: estado.backfillFase, terminou };
   }
 );
 

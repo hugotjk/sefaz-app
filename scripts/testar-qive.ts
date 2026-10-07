@@ -30,17 +30,17 @@ async function main() {
   console.log("QIVE_API_KEY presente:", !!process.env.QIVE_API_KEY);
   console.log("---");
 
-  // 1) notas dos últimos 3 dias até o "fim dos tempos"
+  // 1) notas dos últimos 3 dias
   const desde = menosDias(3);
-  const p1 = await tenta("notas created_at[from]=hoje-3d, to=2100-01-01, limit 5", () =>
-    buscarNfesRecebidasPorJanela(desde, "2100-01-01", 0, 5)
+  const p1 = await tenta("notas created_at[from]=hoje-3d, to=amanhã, limit 5", () =>
+    buscarNfesRecebidasPorJanela(desde, menosDias(-1), 0, 5)
   );
   if (p1) {
     console.log(`      recebidas: ${p1.notas.length}, count: ${p1.count}, proximoCursor: ${p1.proximoCursor}`);
     console.log(`      com xml: ${p1.notas.filter((n) => n.xml).length}/${p1.notas.length}`);
     if (p1.proximoCursor != null) {
       const p2 = await tenta("notas, 2ª página pelo cursor", () =>
-        buscarNfesRecebidasPorJanela(desde, "2100-01-01", p1.proximoCursor!, 5)
+        buscarNfesRecebidasPorJanela(desde, menosDias(-1), p1.proximoCursor!, 5)
       );
       if (p2) {
         const mesmas = p2.notas.filter((n) => p1.notas.some((m) => m.access_key === n.access_key)).length;
@@ -54,12 +54,12 @@ async function main() {
     buscarNfesRecebidasPorJanela(desde, menosDias(-1), 0, 5)
   );
   if (p3 && p1) {
-    console.log(`      to aberto: count=${p1.count} | to fechado: count=${p3.count}`);
+    console.log(`      repetido (mesma janela): count=${p1.count} e ${p3.count}`);
   }
 
   // 3) eventos dos últimos 90 dias
-  const e1 = await tenta("eventos created_at[from]=hoje-90d, to=2100-01-01, limit 20", () =>
-    buscarEventosNfe(menosDias(90), "2100-01-01", 0, 20)
+  const e1 = await tenta("eventos created_at[from]=hoje-90d, to=amanhã, limit 20", () =>
+    buscarEventosNfe(menosDias(90), menosDias(-1), 0, 20)
   );
   if (e1) {
     const porTipo: Record<string, number> = {};

@@ -142,13 +142,12 @@ export async function buscarEventosNfe(
   return chamarReceived(params.toString(), "/v1/events/nfe");
 }
 
-const TIPO_EVENTO: Record<string, "CARTA_CORRECAO" | "CANCELAMENTO" | "CIENCIA_OPERACAO" | "CONFIRMACAO_OPERACAO" | "DESCONHECIMENTO_OPERACAO" | "OPERACAO_NAO_REALIZADA" | "OUTRO"> = {
+// Só gravamos o que muda a nota. Manifestação (2102xx) e os códigos internos
+// 5106xx/6106xx que a Qive entrega na fila são ignorados (não enchem o banco).
+const TIPO_EVENTO: Record<string, "CARTA_CORRECAO" | "CANCELAMENTO"> = {
   "110110": "CARTA_CORRECAO",
   "110111": "CANCELAMENTO",
-  "210210": "CIENCIA_OPERACAO",
-  "210200": "CONFIRMACAO_OPERACAO",
-  "210220": "DESCONHECIMENTO_OPERACAO",
-  "210240": "OPERACAO_NAO_REALIZADA",
+  "110112": "CANCELAMENTO", // cancelamento por substituição
 };
 
 function tag(xml: string, nome: string): string | null {
@@ -172,6 +171,12 @@ export async function aplicarEventosQive(eventos: QiveNfe[]): Promise<ResultadoE
   const r: ResultadoEventos = { recebidos: eventos.length, aplicados: 0, semNota: 0, jaExistiam: 0, erros: 0 };
   for (const ev of eventos) {
     try {
+      const xml = Buffer.from(ev.xml ?? "", "base64").toString("utf8");
+      const codigo = ev.type || tag(xml, "tpEvento") || "";
+      if (!TIPO_EVENTO[codigo]) {
+        r.jaExistiam++; // tipo que não nos interessa
+        continue;
+      }
       const nota = await prisma.note.findUnique({
         where: { chaveAcesso: ev.access_key },
         select: { id: true },
@@ -180,9 +185,11 @@ export async function aplicarEventosQive(eventos: QiveNfe[]): Promise<ResultadoE
         r.semNota++;
         continue;
       }
-      const xml = Buffer.from(ev.xml ?? "", "base64").toString("utf8");
-      const codigo = ev.type || tag(xml, "tpEvento") || "";
-      const tipo = TIPO_EVENTO[codigo] ?? "OUTRO";
+      const tipo = TIPO_EVENTO[codigo];
+      if (!tipo) {
+        r.jaExistiam++; // ignorado de propósito
+        continue;
+      }
       const dh = tag(xml, "dhEvento");
       const dup = await prisma.noteEvent.findFirst({
         where: { noteId: nota.id, tipo, xmlEvento: xml },
