@@ -147,7 +147,6 @@ async function main() {
       codigoProduto: true,
       descricao: true,
       ean: true,
-      infAdProd: true, // cor do item (Outside/Core Brands/R3...) vem daqui
       modeloIdentificado: true,
       referenciaFornecedorIdentificada: true,
       referenciaComRegraEspecifica: true,
@@ -156,6 +155,18 @@ async function main() {
     },
   });
   console.log(`NotaItem dos fornecedores alvo: ${itens.length}\n`);
+
+  // infAdProd (cor do item: Outside/Core Brands/R3...) por SQL, já limpo de
+  // caracteres de controle/inválidos — o Prisma falhava ao ler essa coluna
+  // direto ("Failed to convert rust String into napi string").
+  const infAdPorItem = new Map<string, string>();
+  const ids = itens.map((i) => i.id);
+  for (let k = 0; k < ids.length; k += 2000) {
+    const rows = await prisma.$queryRaw<{ id: string; inf: string | null }[]>`
+      SELECT id, regexp_replace(left("infAdProd", 1000), '[^[:print:]]', ' ', 'g') AS inf
+      FROM "NotaItem" WHERE id = ANY(${ids.slice(k, k + 2000)}::text[])`;
+    for (const r of rows) infAdPorItem.set(r.id, r.inf ?? "");
+  }
 
   // infocompl por nota (memoizado) — lido do XML como o popularNotaItens faz.
   const infCplPorNota = new Map<string, string>();
@@ -180,7 +191,7 @@ async function main() {
       it.codigoProduto,
       it.descricao,
       infCpl(it.noteId, it.note.xmlCompleto),
-      it.infAdProd ?? undefined
+      infAdPorItem.get(it.id) ?? undefined
     );
     return {
       it,
