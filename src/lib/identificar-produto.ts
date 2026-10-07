@@ -458,11 +458,11 @@ function identificarModeloRaw(
     // código do produto da nota. Ex.: "25097401-01" -> 8 primeiros "25097401"
     // -> 4º dígito "9".
     //   7, 8 ou 9 -> "DUBS"
-    //   1 ou 2 -> "THUG NINE"
+    //   1, 2 ou 3 -> "THUG NINE"   (3 incluído em 2026-10: ex. 25030103 Raiders)
     //   qualquer outro -> null (não identificado)
     const quartoDigito = G.slice(0, 8).replace(/\D/g, "")[3];
     if (quartoDigito === "7" || quartoDigito === "8" || quartoDigito === "9") return "DUBS";
-    if (quartoDigito === "1" || quartoDigito === "2") return "THUG NINE";
+    if (quartoDigito === "1" || quartoDigito === "2" || quartoDigito === "3") return "THUG NINE";
     return null;
   }
 
