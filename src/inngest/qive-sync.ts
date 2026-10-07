@@ -80,7 +80,9 @@ async function gravar(chave: string, valor: unknown): Promise<void> {
 
 // Trava de segurança: o Aiven gratuito tem 1 GB e vira somente-leitura ao encher.
 // Acima deste limite o sync da Qive pausa (não importa nada). Ajustável por env.
-const LIMITE_BANCO_MB = Number(process.env.QIVE_LIMITE_BANCO_MB || 850);
+// O painel da Aiven conta MAIS que pg_database_size (WAL/sistema: ~137 MB a mais
+// com o banco em 123 MB), então 700 MB aqui ~ 840 MB no painel, de 1 GB.
+const LIMITE_BANCO_MB = Number(process.env.QIVE_LIMITE_BANCO_MB || 700);
 
 async function bancoCheio(): Promise<{ cheio: boolean; mb: number }> {
   const rows = await prisma.$queryRaw<{ bytes: bigint }[]>`SELECT pg_database_size(current_database()) AS bytes`;
