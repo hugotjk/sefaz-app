@@ -174,6 +174,7 @@ export const EMPRESAS_BANIDAS: string[] = [
   "TALENT DISTRIBUIDORA DE MATERIAL DE LIMPEZA LTDA",
   "TARGET MULTICOISAS COM. IMP. E EXP. LTDA",
   "RTT COMERCIO E SERVICOS LTDA",
+  "SUPERPEL COMERCIO DE PAPEIS EIRELI EPP",
 ];
 
 // --------------------------------------------------------------------------
