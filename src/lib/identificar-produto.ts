@@ -173,6 +173,7 @@ export const EMPRESAS_BANIDAS: string[] = [
   "Sucesso Produtos Promocionais LTDA",
   "TALENT DISTRIBUIDORA DE MATERIAL DE LIMPEZA LTDA",
   "TARGET MULTICOISAS COM. IMP. E EXP. LTDA",
+  "RTT COMERCIO E SERVICOS LTDA",
 ];
 
 // --------------------------------------------------------------------------
