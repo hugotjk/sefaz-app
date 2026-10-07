@@ -130,8 +130,15 @@ const ALVOS = [
 ];
 
 async function main() {
+  // Casa os emitentes sem diferenciar maiúsculas/minúsculas (ex.: a Qive traz
+  // "Tvb Industria E Comercio Ltda" e a lista tem "TVB INDUSTRIA ...").
+  const nomesReais = (
+    await prisma.$queryRaw<{ nome: string }[]>`
+      SELECT DISTINCT "emitenteNome" AS nome FROM "Note"
+      WHERE upper(trim("emitenteNome")) = ANY(${ALVOS.map((a) => a.trim().toUpperCase())})`
+  ).map((r) => r.nome);
   const itens = await prisma.notaItem.findMany({
-    where: { note: { emitenteNome: { in: ALVOS } } },
+    where: { note: { emitenteNome: { in: nomesReais } } },
     select: {
       id: true,
       noteId: true,
