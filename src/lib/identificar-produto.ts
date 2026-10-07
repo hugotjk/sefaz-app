@@ -178,6 +178,7 @@ export const EMPRESAS_BANIDAS: string[] = [
   "MERITO COMERCIO DE EQUIPAMENTOS LIMITADA",
   "Talent Distribuidora de Material de Limpeza Ltda", // grafia em minúsculas/mistas no banco (o filtro é exato)
   "AFC COMERCIO VAREJISTA DE COMPONENTES ELETRONICOS LTDA",
+  "A REDE ASSESS COML LTDA",
 ];
 
 // --------------------------------------------------------------------------
