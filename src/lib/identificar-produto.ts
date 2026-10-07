@@ -457,6 +457,7 @@ function identificarModeloRaw(
   if (igual(A, "VF FERRARI PRODUTOS LICENCIADOS")) return "CEBOLA";
   if (igual(A, "TVB INDUSTRIA E COMERCIO LTDA")) return "TVB";
   if (igual(A, "G.R.W CONFECCOES LTDA")) return "Approve";
+  if (igual(A, "SUPERACAO COMERCIO DE ARTIGOS DO VESTUARIO LTDA")) return "CACHECOL MANIA";
   if (EMPRESAS_THUG_DUBS.some((x) => igual(A, x))) {
     // Grupo Thug Nine / Dubs / Brotherhood: 4º dígito dos 8 primeiros do
     // código do produto da nota. Ex.: "25097401-01" -> 8 primeiros "25097401"
@@ -727,6 +728,7 @@ function referenciaFormula2(A: string, G: string, H: string, P: string, Q: strin
       "BC SARTORI ARTIGOS ESPORTIVOS ME",
       "GENIUS 1 PARTICIPACOES JOIAS E ARTIGOS DE LUXO LTDA",
       "TVB INDUSTRIA E COMERCIO LTDA",
+      "SUPERACAO COMERCIO DE ARTIGOS DO VESTUARIO LTDA",
     ].some((x) => igual(A, x))
   )
     return G;

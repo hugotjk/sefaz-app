@@ -114,6 +114,8 @@ const EMPRESAS_NOVAS = [
   "TVB INDUSTRIA E COMERCIO LTDA",
   // leva 8: G.R.W Confecções (Modelo Approve + Referência sem o tamanho do fim)
   "G.R.W CONFECCOES LTDA",
+  // leva 9: Superação (Modelo Cachecol Mania + Referência = código puro)
+  "SUPERACAO COMERCIO DE ARTIGOS DO VESTUARIO LTDA",
 ];
 
 const ALVOS = [
