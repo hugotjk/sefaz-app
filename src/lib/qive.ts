@@ -35,7 +35,9 @@ export const QIVE_LIMIT_PAGINA = 50;
 
 export interface QiveNfe {
   access_key: string;
-  xml: string; // Base64 do nfeProc completo
+  xml: string; // Base64 do nfeProc completo (ou do evento, em /v1/events/nfe)
+  /** só em /v1/events/nfe: código de 6 dígitos do evento (ex.: 110111). */
+  type?: string;
 }
 
 export interface QivePagina {
@@ -54,9 +56,9 @@ function credenciais(): { id: string; key: string } {
   return { id, key };
 }
 
-async function chamarReceived(query: string): Promise<QivePagina> {
+async function chamarReceived(query: string, caminho = "/v1/nfe/received"): Promise<QivePagina> {
   const { id, key } = credenciais();
-  const url = `${QIVE_BASE}/v1/nfe/received?${query}`;
+  const url = `${QIVE_BASE}${caminho}?${query}`;
   const res = await fetch(url, {
     headers: { "X-API-ID": id, "X-API-KEY": key, Accept: "application/json" },
     signal: AbortSignal.timeout(30_000),
@@ -120,6 +122,97 @@ export async function buscarNfesRecebidasPorJanela(
   return chamarReceived(params.toString());
 }
 
+/**
+ * Fila de EVENTOS da conta (cancelamento 110111, carta de correção 110110,
+ * manifestação etc.). Cursor posicional: consumir a próxima página já "dá o
+ * ack" da anterior. Mesma janela `created_at` (from obrigatório com to).
+ */
+export async function buscarEventosNfe(
+  desde: string,
+  ate: string,
+  cursor: number,
+  limit: number = QIVE_LIMIT_PAGINA
+): Promise<QivePagina> {
+  const params = new URLSearchParams({
+    limit: String(limit),
+    cursor: String(cursor),
+    "created_at[from]": desde,
+    "created_at[to]": ate,
+  });
+  return chamarReceived(params.toString(), "/v1/events/nfe");
+}
+
+const TIPO_EVENTO: Record<string, "CARTA_CORRECAO" | "CANCELAMENTO" | "CIENCIA_OPERACAO" | "CONFIRMACAO_OPERACAO" | "DESCONHECIMENTO_OPERACAO" | "OPERACAO_NAO_REALIZADA" | "OUTRO"> = {
+  "110110": "CARTA_CORRECAO",
+  "110111": "CANCELAMENTO",
+  "210210": "CIENCIA_OPERACAO",
+  "210200": "CONFIRMACAO_OPERACAO",
+  "210220": "DESCONHECIMENTO_OPERACAO",
+  "210240": "OPERACAO_NAO_REALIZADA",
+};
+
+function tag(xml: string, nome: string): string | null {
+  const m = xml.match(new RegExp(`<(?:\\w+:)?${nome}>([\\s\\S]*?)</(?:\\w+:)?${nome}>`));
+  return m ? m[1].trim() : null;
+}
+
+export interface ResultadoEventos {
+  recebidos: number;
+  aplicados: number;
+  semNota: number; // nota não está no nosso banco (ex.: > 90 dias) -> ignorado
+  jaExistiam: number;
+  erros: number;
+}
+
+/**
+ * Aplica eventos da Qive às notas que já temos: grava NoteEvent (sem
+ * duplicar) e, no caso de cancelamento, marca Note.status = CANCELADA.
+ */
+export async function aplicarEventosQive(eventos: QiveNfe[]): Promise<ResultadoEventos> {
+  const r: ResultadoEventos = { recebidos: eventos.length, aplicados: 0, semNota: 0, jaExistiam: 0, erros: 0 };
+  for (const ev of eventos) {
+    try {
+      const nota = await prisma.note.findUnique({
+        where: { chaveAcesso: ev.access_key },
+        select: { id: true },
+      });
+      if (!nota) {
+        r.semNota++;
+        continue;
+      }
+      const xml = Buffer.from(ev.xml ?? "", "base64").toString("utf8");
+      const codigo = ev.type || tag(xml, "tpEvento") || "";
+      const tipo = TIPO_EVENTO[codigo] ?? "OUTRO";
+      const dh = tag(xml, "dhEvento");
+      const dup = await prisma.noteEvent.findFirst({
+        where: { noteId: nota.id, tipo, xmlEvento: xml },
+        select: { id: true },
+      });
+      if (dup) {
+        r.jaExistiam++;
+        continue;
+      }
+      await prisma.noteEvent.create({
+        data: {
+          noteId: nota.id,
+          tipo,
+          descricao: tag(xml, "xCorrecao") || tag(xml, "xJust") || tag(xml, "descEvento"),
+          xmlEvento: xml,
+          nsu: "qive",
+          dataEvento: dh ? new Date(dh) : null,
+        },
+      });
+      if (tipo === "CANCELAMENTO") {
+        await prisma.note.update({ where: { id: nota.id }, data: { status: "CANCELADA" } });
+      }
+      r.aplicados++;
+    } catch {
+      r.erros++;
+    }
+  }
+  return r;
+}
+
 export interface ResultadoImportacaoLote {
   recebidas: number;
   /** inclui as importadas com certificateId = null (ver semCertificado). */
@@ -128,6 +221,14 @@ export interface ResultadoImportacaoLote {
   /** dentro de `importadas`: quantas ficaram com certificateId = null. */
   semCertificado: number;
   erros: number;
+  /**
+   * Notas que a Qive trouxe e que JÁ existiam por um certificado SEFAZ:
+   * certificateId -> quantidade. Se um certificado só aparece aqui, a Qive já
+   * cobre ele e o certificado é redundante.
+   */
+  redundantesPorCertificado: Record<string, number>;
+  /** notas existentes só com resumo (xmlCompleto vazio) que a Qive completou. */
+  xmlCompletados: number;
   /** CNPJs de destinatário sem Certificate cadastrado (amostra, únicos). */
   cnpjsSemCertificado: string[];
 }
@@ -172,19 +273,19 @@ export async function importarLoteQive(
     jaExistiam: 0,
     semCertificado: 0,
     erros: 0,
+    redundantesPorCertificado: {},
+    xmlCompletados: 0,
     cnpjsSemCertificado: [],
   };
   if (notas.length === 0) return r;
 
   const chaves = notas.map((n) => n.access_key).filter(Boolean);
-  const jaTemos = new Set(
-    (
-      await prisma.note.findMany({
-        where: { chaveAcesso: { in: chaves } },
-        select: { chaveAcesso: true },
-      })
-    ).map((x) => x.chaveAcesso)
-  );
+  const existentes = await prisma.note.findMany({
+    where: { chaveAcesso: { in: chaves } },
+    select: { id: true, chaveAcesso: true, certificateId: true, nsu: true, xmlCompleto: true },
+  });
+  const jaTemos = new Set(existentes.map((x) => x.chaveAcesso));
+  const porChave = new Map(existentes.map((x) => [x.chaveAcesso, x]));
 
   // cache CNPJ destinatário -> certificateId | null (evita N queries repetidas)
   const certPorCnpj = new Map<string, string | null>();
@@ -194,6 +295,25 @@ export async function importarLoteQive(
     try {
       if (!nfe.access_key || jaTemos.has(nfe.access_key)) {
         r.jaExistiam++;
+        const ex = porChave.get(nfe.access_key);
+        if (ex) {
+          // veio por certificado SEFAZ (nsu real) -> a Qive também cobre.
+          if (ex.certificateId && ex.nsu !== "") {
+            r.redundantesPorCertificado[ex.certificateId] =
+              (r.redundantesPorCertificado[ex.certificateId] ?? 0) + 1;
+          }
+          // nota só com resumo: completa com o XML da Qive.
+          if (!ex.xmlCompleto && nfe.xml) {
+            try {
+              const xmlQ = Buffer.from(nfe.xml, "base64").toString("utf8");
+              await prisma.note.update({ where: { id: ex.id }, data: { xmlCompleto: xmlQ } });
+              await popularNotaItens(ex.id, xmlQ);
+              r.xmlCompletados++;
+            } catch {
+              /* completarXmlNotas tenta depois */
+            }
+          }
+        }
         continue;
       }
 
