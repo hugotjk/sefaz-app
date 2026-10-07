@@ -1679,7 +1679,7 @@ export const completarXmlNotas = inngest.createFunction(
     concurrency: [{ scope: "account", key: '"completar-xml-notas"', limit: 1 }],
     retries: 2,
   },
-  { cron: "*/30 * * * *" },
+  { cron: "TZ=America/Sao_Paulo 0 6-20 * * *" },
   async ({ step }) => {
     const limite = new Date(Date.now() - COMPLETAR_XML_REPETIR_APOS_H * 3_600_000);
     const trintaDiasAtras = new Date(Date.now() - DIAS_NOTA_RECENTE * 86_400_000);
