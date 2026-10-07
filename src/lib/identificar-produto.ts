@@ -874,7 +874,11 @@ function referenciaFormula3(A: string, G: string, H: string, P: string, Q: strin
   }
   if (igual(A, "NB BRASIL COMERCIO DE CALCADOS LTDA")) return esquerda(G, G.length - 3);
   if (igual(A, "FILA BRASIL LTDA")) return esquerda(H, localizar("-", H) - 1) + G;
-  if (igual(A, "High Company LTDA")) return esquerda(G, localizar("-", G) - 1);
+  if (igual(A, "High Company LTDA")) {
+    // tudo antes do 1º "-" do código; sem "-" é o código puro.
+    const i = G.indexOf("-");
+    return i > 0 ? G.slice(0, i) : G;
+  }
   if (igual(A, "PUMA SPORTS LTDA")) return esquerda(G, G.length - ultimoNome(H).length);
   if (
     igual(A, "COOPERSHOES COOP.TRAB.IND.CALC.JOANETENSE LTDA") ||
