@@ -260,7 +260,7 @@ function identificarModeloRaw(
     return eqi(h3, "REF") ? "Reef" : "Redley";
   if (igual(A, "DASS NORDESTE CALCADOS E ARTIGOS ESPORTIVOS S.A.")) return "Umbro";
   if (igual(A, "XERYUS IMP. DISTRIB. DE ARTIGOS P/ VESTUARIO LTDA")) return "Xeryus Fla";
-  if (igual(A, "ALPAR  DO BRASIL IND.COM.LTDA")) return "NIKE"; // dois espaços em "ALPAR  DO"
+  if (igual(A, "ALPAR  DO BRASIL IND.COM.LTDA") || igual(A, "ALPAR DO BRASIL S/A")) return "NIKE"; // dois espaços em "ALPAR  DO" (grafia antiga)
   if (igual(A, "VIA COUNTRY IND E COM DE CALC LTDA") || igual(A, "NIRUT IND E COM CALC LTDA"))
     return "Farm";
   if (igual(A, "SAVE COMERCIAL E IMPORTADORA LTDA")) return "JANSPORT";
@@ -727,6 +727,7 @@ function referenciaFormula2(A: string, G: string, H: string, P: string, Q: strin
       "MALHAS D ESTEFANO LTDA",
       "SEEDER CONFECCOES LTDA",
       "TSC IDOLOS COMERCIO DE ARTIGOS ESPORTIVOS LTDA",
+      "TSC ESTADIOS COMERCIO DE ARTIGOS ESPORTIVOS LTDA",
       "NATURAL COMPANY CONFECCOES LTDA",
       "NEW BRASIL ARTIGOS ESPORTIVOS LTDA",
       "NUR DISTRIBUIDORA LTDA",
@@ -821,6 +822,12 @@ function referenciaFormula3(A: string, G: string, H: string, P: string, Q: strin
   if (igual(A, "WAB COMPANY LTDA")) return esquerda(G, 10);
   if (igual(A, "BRAZILIAN COMERCIO DE MODA PRAIA LTDA."))
     return esquerda(G, G.length - ultimoNome(H).length);
+  // Alpar do Brasil S/A (grafia nova): referência = o que vem depois de "REF:"
+  // na descrição (até o primeiro espaço); sem "REF:" cai no código puro.
+  if (igual(A, "ALPAR DO BRASIL S/A")) {
+    const m = H.match(/REF:\s*(\S+)/i);
+    return m ? m[1].replace(/-+$/, "") : G;
+  }
   if (igual(A, "ALPAR  DO BRASIL IND.COM.LTDA"))
     return substituir(esquerda(H, localizar("-", H) - 2), "REF: ", "");
   if (igual(A, "BRANDILI TEXTIL LTDA")) return esquerda(G, 12);
@@ -867,7 +874,11 @@ function referenciaFormula3(A: string, G: string, H: string, P: string, Q: strin
   }
   if (igual(A, "NB BRASIL COMERCIO DE CALCADOS LTDA")) return esquerda(G, G.length - 3);
   if (igual(A, "FILA BRASIL LTDA")) return esquerda(H, localizar("-", H) - 1) + G;
-  if (igual(A, "High Company LTDA")) return esquerda(G, localizar("-", G) - 1);
+  if (igual(A, "High Company LTDA")) {
+    // tudo antes do 1º "-" do código; sem "-" é o código puro.
+    const i = G.indexOf("-");
+    return i > 0 ? G.slice(0, i) : G;
+  }
   if (igual(A, "PUMA SPORTS LTDA")) return esquerda(G, G.length - ultimoNome(H).length);
   if (
     igual(A, "COOPERSHOES COOP.TRAB.IND.CALC.JOANETENSE LTDA") ||
