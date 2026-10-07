@@ -78,6 +78,16 @@ async function gravar(chave: string, valor: unknown): Promise<void> {
   });
 }
 
+// Trava de segurança: o Aiven gratuito tem 1 GB e vira somente-leitura ao encher.
+// Acima deste limite o sync da Qive pausa (não importa nada). Ajustável por env.
+const LIMITE_BANCO_MB = Number(process.env.QIVE_LIMITE_BANCO_MB || 850);
+
+async function bancoCheio(): Promise<{ cheio: boolean; mb: number }> {
+  const rows = await prisma.$queryRaw<{ bytes: bigint }[]>`SELECT pg_database_size(current_database()) AS bytes`;
+  const mb = Math.round(Number(rows[0]?.bytes ?? 0) / (1024 * 1024));
+  return { cheio: mb > LIMITE_BANCO_MB, mb };
+}
+
 async function lerEstado(): Promise<EstadoQive> {
   const e = await ler<EstadoQive | null>(CHAVE, null);
   if (e) return e;
@@ -106,6 +116,9 @@ export const qiveSync = inngest.createFunction(
   { id: "qive-sync", concurrency: [{ limit: 1 }], retries: 2 },
   { cron: CRON_QIVE },
   async ({ step }) => {
+    const trava = await step.run("checar-tamanho-banco", bancoCheio);
+    if (trava.cheio) return { pausado: true, motivo: `banco com ${trava.mb} MB (limite ${LIMITE_BANCO_MB})` };
+
     const estado = await step.run("ler-estado", lerEstado);
     await step.run("garantir-estado", () => gravar(CHAVE, estado));
 
@@ -196,6 +209,8 @@ export const qiveBackfill = inngest.createFunction(
   async ({ step }) => {
     const estado = await step.run("ler-estado", lerEstado);
     if (estado.backfillFase >= 3) return { concluido: true };
+    const trava = await step.run("checar-tamanho-banco", bancoCheio);
+    if (trava.cheio) return { pausado: true, motivo: `banco com ${trava.mb} MB (limite ${LIMITE_BANCO_MB})` };
 
     let importadas = 0;
     let paginas = 0;
