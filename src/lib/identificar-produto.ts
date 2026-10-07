@@ -175,6 +175,7 @@ export const EMPRESAS_BANIDAS: string[] = [
   "TARGET MULTICOISAS COM. IMP. E EXP. LTDA",
   "RTT COMERCIO E SERVICOS LTDA",
   "SUPERPEL COMERCIO DE PAPEIS EIRELI EPP",
+  "MERITO COMERCIO DE EQUIPAMENTOS LIMITADA",
 ];
 
 // --------------------------------------------------------------------------
