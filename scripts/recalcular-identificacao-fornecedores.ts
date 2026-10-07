@@ -147,6 +147,7 @@ async function main() {
       codigoProduto: true,
       descricao: true,
       ean: true,
+      infAdProd: true, // cor do item (Outside/Core Brands/R3...) vem daqui
       modeloIdentificado: true,
       referenciaFornecedorIdentificada: true,
       referenciaComRegraEspecifica: true,
@@ -178,7 +179,8 @@ async function main() {
       emit,
       it.codigoProduto,
       it.descricao,
-      infCpl(it.noteId, it.note.xmlCompleto)
+      infCpl(it.noteId, it.note.xmlCompleto),
+      it.infAdProd ?? undefined
     );
     return {
       it,
