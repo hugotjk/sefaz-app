@@ -9,7 +9,7 @@
  *   npx tsx --env-file=.env scripts/estudo-tamanhos.ts
  */
 import { PrismaClient } from "@prisma/client";
-import { identificarTamanho, temRegraTamanho } from "../src/lib/identificar-tamanho";
+import { identificarTamanho, temRegraTamanho, tamanhoGenerico, canonicalizarTamanho } from "../src/lib/identificar-tamanho";
 
 const prisma = new PrismaClient();
 const LIMPA = (c: string) => `regexp_replace(${c}, '[^[:print:]]', ' ', 'g')`;
@@ -34,9 +34,11 @@ async function main() {
     WHERE n."dataEmissao" >= now() - interval '365 days'`);
   console.log(`Itens analisados (últimos 365 dias): ${itens.length}\n`);
 
-  type Ac = { n: number; comRegra: number; calculou: number; comPdv: number; acertou: number; erros: string[] };
+  type Ac = {
+    n: number; regra: boolean; calculou: number; comPdv: number; acertou: number;
+    pares: Map<string, number>; ex: string;
+  };
   const porEmit = new Map<string, Ac>();
-  const semRegra = new Map<string, { n: number; ex: string }>();
 
   for (const it of itens) {
     const emit = it.emit ?? "(sem emitente)";
@@ -45,43 +47,46 @@ async function main() {
       ean: it.ean, infAdProd: it.inf, referencia: it.ref,
     };
     const regra = temRegraTamanho({ emitente: emit, modelo: it.modelo });
-    const calc = regra ? identificarTamanho(entrada) : null;
+    let calc: string | null = regra ? identificarTamanho(entrada) : null;
+    if (!calc) calc = tamanhoGenerico(entrada); // sem regra (ou regra sem resultado): genérica
 
-    const a = porEmit.get(emit) ?? { n: 0, comRegra: 0, calculou: 0, comPdv: 0, acertou: 0, erros: [] };
+    const a = porEmit.get(emit) ?? {
+      n: 0, regra, calculou: 0, comPdv: 0, acertou: 0, pares: new Map<string, number>(),
+      ex: `cód="${(it.codigo ?? "").slice(0, 24)}"  desc="${(it.descricao ?? "").slice(0, 60)}"  info="${(it.inf ?? "").slice(0, 30)}"`,
+    };
     a.n++;
-    if (regra) a.comRegra++;
     if (calc) a.calculou++;
     if (it.tam_pdv) {
       a.comPdv++;
-      if (calc && norm(calc) === norm(it.tam_pdv)) a.acertou++;
-      else if (a.erros.length < 3) a.erros.push(`calc="${calc ?? ""}" pdv="${it.tam_pdv}" cód="${(it.codigo ?? "").slice(0, 22)}" desc="${(it.descricao ?? "").slice(-30)}"`);
+      if (calc && canonicalizarTamanho(calc) === canonicalizarTamanho(it.tam_pdv)) a.acertou++;
+      else {
+        const k = `${calc ?? "∅"}  →  PDV ${it.tam_pdv}`;
+        a.pares.set(k, (a.pares.get(k) ?? 0) + 1);
+      }
     }
     porEmit.set(emit, a);
+  }
 
-    if (it.recente && !regra) {
-      const s = semRegra.get(emit) ?? { n: 0, ex: `cód="${(it.codigo ?? "").slice(0, 24)}"  desc="${(it.descricao ?? "").slice(0, 60)}"  info="${(it.inf ?? "").slice(0, 40)}"` };
-      s.n++;
-      semRegra.set(emit, s);
+  const linha = (e: string, a: Ac) =>
+    `  ${e.slice(0, 44).padEnd(44)} itens=${String(a.n).padStart(6)}  achou tamanho=${pct(a.calculou, a.n).padStart(4)}  comparáveis=${String(a.comPdv).padStart(5)}  acerto=${pct(a.acertou, a.comPdv).padStart(4)}`;
+
+  console.log("==================== 1. COM REGRA da fórmula (acerto comparado ao tamanho do PDV; S/M/L e P/M/G contam como iguais) ====================");
+  const comRegra = [...porEmit.entries()].filter(([, a]) => a.regra).sort((x, y) => y[1].n - x[1].n);
+  for (const [e, a] of comRegra) {
+    console.log(linha(e, a));
+    if (a.comPdv > 0 && a.acertou < a.comPdv) {
+      [...a.pares.entries()].sort((x, y) => y[1] - x[1]).slice(0, 6).forEach(([k, n]) => console.log(`        ✗ ${String(n).padStart(4)}x  ${k}`));
     }
   }
 
-  console.log("==================== 1. ACERTO vs TAMANHO DO PDV (só onde o PDV tem o tamanho do EAN) ====================");
-  const comPdv = [...porEmit.entries()].filter(([, a]) => a.comRegra > 0 && a.comPdv > 0).sort((x, y) => y[1].comPdv - x[1].comPdv);
-  if (!comPdv.length) console.log("  (nenhum emitente com regra teve EAN encontrado no PDV com tamanho — o PDV ainda tem poucos EANs preenchidos)");
-  for (const [e, a] of comPdv) {
-    console.log(`  ${e.slice(0, 44).padEnd(44)} comparáveis=${String(a.comPdv).padStart(5)}  acerto=${pct(a.acertou, a.comPdv).padStart(4)}`);
-    if (a.acertou < a.comPdv) a.erros.forEach((x) => console.log(`        ✗ ${x}`));
-  }
-
-  console.log("\n==================== 2. COBERTURA — fornecedores COM regra: % de itens com tamanho calculado ====================");
-  for (const [e, a] of [...porEmit.entries()].filter(([, v]) => v.comRegra > 0).sort((x, y) => y[1].n - x[1].n).slice(0, 40)) {
-    console.log(`  ${e.slice(0, 44).padEnd(44)} itens=${String(a.n).padStart(6)}  calculou=${pct(a.calculou, a.comRegra).padStart(4)}`);
-  }
-
-  console.log("\n==================== 3. A APRENDER — fornecedores SEM regra de tamanho (últimos 90 dias) ====================");
-  for (const [e, s] of [...semRegra.entries()].sort((x, y) => y[1].n - x[1].n).slice(0, 50)) {
-    console.log(`  ${e.slice(0, 50).padEnd(50)} itens=${String(s.n).padStart(5)}`);
-    console.log(`       ex.: ${s.ex}`);
+  console.log("\n==================== 2. SEM REGRA — regra GENÉRICA (últimos 365 dias; 'acerto' só onde o PDV conhece o EAN) ====================");
+  const sem = [...porEmit.entries()].filter(([, a]) => !a.regra).sort((x, y) => y[1].n - x[1].n).slice(0, 50);
+  for (const [e, a] of sem) {
+    console.log(linha(e, a));
+    console.log(`        ex.: ${a.ex}`);
+    if (a.comPdv > 0 && a.acertou < a.comPdv) {
+      [...a.pares.entries()].sort((x, y) => y[1] - x[1]).slice(0, 4).forEach(([k, n]) => console.log(`        ✗ ${String(n).padStart(4)}x  ${k}`));
+    }
   }
   console.log("\nFim. Nada foi gravado.");
 }

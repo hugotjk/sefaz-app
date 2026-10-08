@@ -217,3 +217,52 @@ export function identificarTamanho(e: EntradaTamanho): string | null {
 export function temRegraTamanho(e: Pick<EntradaTamanho, "emitente" | "modelo">): boolean {
   return REGRAS.some((r) => r.quando({ ...e, codigo: "", descricao: "" }));
 }
+
+// ---------------------------------------------------------------------------
+// Normalização e regra GENÉRICA (para emitentes sem regra própria)
+// ---------------------------------------------------------------------------
+
+/**
+ * Forma canônica de um tamanho, para COMPARAR/CASAR tamanhos escritos de jeitos
+ * diferentes (o PDV mistura "S/M/L" com "P/M/G"; as notas trazem "XL", "2XL"...).
+ * Usa os mesmos apelidos das suas fórmulas (S->P, L->G, XL->GG, XXL->2G...).
+ */
+export function canonicalizarTamanho(t: string | null | undefined): string {
+  const v = (t ?? "").trim().toUpperCase().replace(/\s+/g, "");
+  const mapa: Record<string, string> = {
+    S: "P", L: "G", XL: "GG", XXL: "2G", "2XL": "2G", XXXL: "3G", "3XL": "3G", "4XL": "4G",
+    XS: "PP", XXS: "2PP", "2XS": "2PP", "3XS": "3PP", "4XS": "4PP",
+    UNICO: "UN", ÚNICO: "UN", UNICA: "UN", ÚNICA: "UN", U: "UN", TU: "UN", ONE: "UN", ONESIZE: "UN",
+    PQ: "P", MD: "M", GR: "G", "1G": "G",
+  };
+  return mapa[v] ?? v;
+}
+
+// Tamanhos plausíveis (vestuário, calçado, único). Usado só pelo fallback.
+const VOCAB_TAMANHO =
+  /^(UN|U|TU|UNICO|ÚNICO|PP|P|M|G|GG|XG|XGG|EG|EGG|XS|S|L|XL|XXL|XXXL|[234]XL|[234]XS|[234]G|[234]PP|G[123]|\d{1,2}A|\d{2}\/\d{2}|\d{2}[.,]\d|\d{1,2})$/i;
+
+const tokensDe = (t: string) =>
+  t.split(/[\s\-_/'".:|,]+/).filter(Boolean);
+
+/**
+ * Regra genérica: acha um token que PAREÇA tamanho. Ordem: "Tam:"/"Tamanho:"
+ * na descrição/infAdProd -> última palavra da descrição -> sufixo do código
+ * (depois de "-", "_" ou "."). Devolve null se nada parecer tamanho.
+ */
+export function tamanhoGenerico(e: Pick<EntradaTamanho, "codigo" | "descricao" | "infAdProd">): string | null {
+  const textos = [e.descricao ?? "", e.infAdProd ?? ""];
+  for (const t of textos) {
+    const m = /TAM(?:ANHO)?\.?\s*:?\s*([A-Z0-9][A-Z0-9/.,]*)/i.exec(t);
+    if (m && VOCAB_TAMANHO.test(m[1])) return m[1].toUpperCase();
+  }
+  const ultimaDesc = ultimoNome(e.descricao ?? "");
+  if (ultimaDesc && VOCAB_TAMANHO.test(ultimaDesc)) return ultimaDesc.toUpperCase();
+  const partesDesc = tokensDe(e.descricao ?? "");
+  const ultTokDesc = partesDesc[partesDesc.length - 1];
+  if (ultTokDesc && VOCAB_TAMANHO.test(ultTokDesc)) return ultTokDesc.toUpperCase();
+  const partesCod = (e.codigo ?? "").split(/[-_.]/).filter(Boolean);
+  const sufCod = partesCod.length > 1 ? partesCod[partesCod.length - 1] : "";
+  if (sufCod && VOCAB_TAMANHO.test(sufCod)) return sufCod.toUpperCase();
+  return null;
+}
