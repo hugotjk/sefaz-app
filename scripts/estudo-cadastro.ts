@@ -101,18 +101,30 @@ async function estudoGrupo() {
 
 async function estudoMarkup() {
   console.log("\n==================== 2. MARKUP (preço PDV / custo bruto da NF) ====================");
-  console.log("Pares = itens de NF cujo EAN existe no PDV (produto já cadastrado). Custo = valor unitário da NF.\n");
+  const [c] = await prisma.$queryRaw<{ n: number; v: number }[]>`
+    SELECT COUNT(*)::int AS n, COUNT(*) FILTER (WHERE preco > 0)::int AS v FROM "PrecoVariacao"`;
+  console.log(`PrecoVariacao: ${c.n} linhas, ${c.v} com preço > 0.`);
+  console.log("Pares = itens de NF casados com produto do PDV por referência + modelo; preço do produto = mediana dos preços das variações.");
+  console.log("Custo = valor unitário (bruto) da NF.\n");
 
   const base = `
-    WITH par AS (
+    WITH preco_prod AS (
+      SELECT v."produtoId" AS produto_id,
+             percentile_cont(0.5) WITHIN GROUP (ORDER BY pv.preco)::float8 AS preco
+      FROM "VariacaoProduto" v JOIN "PrecoVariacao" pv ON pv."variacaoId" = v.id
+      WHERE pv.preco > 0 GROUP BY 1
+    ),
+    par AS (
       SELECT p."modeloNome" AS modelo, p."grupoNome" AS grupo,
-             (p."precoVarejoAtual" / NULLIF(i."valorUnitario", 0))::float8 AS mk
+             (pp.preco / NULLIF(i."valorUnitario", 0))::float8 AS mk
       FROM "NotaItem" i
-      JOIN "VariacaoProduto" v ON v."ean" = i."ean"
-      JOIN "Produto" p ON p.id = v."produtoId"
-      WHERE i."ean" IS NOT NULL AND i."ean" <> ''
-        AND p."precoVarejoAtual" > 0 AND i."valorUnitario" > 0
-        AND p."modeloNome" IS NOT NULL
+      JOIN "Produto" p
+        ON upper(trim(p."referenciaFornecedor")) = upper(trim(i."referenciaFornecedorIdentificada"))
+       AND upper(trim(p."modeloNome")) = upper(trim(i."modeloIdentificado"))
+      JOIN preco_prod pp ON pp.produto_id = p.id
+      WHERE i."valorUnitario" > 0
+        AND COALESCE(i."referenciaFornecedorIdentificada", '') <> ''
+        AND COALESCE(i."modeloIdentificado", '') <> ''
     )`;
   const sel = (chave: string, minN: number, limite: number) => `${base}
     SELECT ${chave} AS chave, COUNT(*)::int AS n,
@@ -141,12 +153,12 @@ async function estudoFinalPreco() {
   console.log("\n==================== 3. FINAL DO PREÇO NO PDV ====================");
   const r = await prisma.$queryRaw<{ total: number; f999: number; f499: number; f99: number }[]>`
     SELECT COUNT(*)::int AS total,
-           COUNT(*) FILTER (WHERE round("precoVarejoAtual" * 100)::bigint % 1000 = 999)::int AS f999,
-           COUNT(*) FILTER (WHERE round("precoVarejoAtual" * 100)::bigint % 1000 = 499)::int AS f499,
-           COUNT(*) FILTER (WHERE round("precoVarejoAtual" * 100)::bigint % 100 = 99)::int  AS f99
-    FROM "Produto" WHERE "precoVarejoAtual" > 0`;
+           COUNT(*) FILTER (WHERE round(preco * 100)::bigint % 1000 = 999)::int AS f999,
+           COUNT(*) FILTER (WHERE round(preco * 100)::bigint % 1000 = 499)::int AS f499,
+           COUNT(*) FILTER (WHERE round(preco * 100)::bigint % 100 = 99)::int  AS f99
+    FROM "PrecoVariacao" WHERE preco > 0`;
   const x = r[0];
-  console.log(`Produtos com preço: ${x.total}`);
+  console.log(`Preços (variações) > 0: ${x.total}`);
   console.log(`  terminam em x9,99 ... ${x.f999} (${pct(x.f999, x.total)})`);
   console.log(`  terminam em x4,99 ... ${x.f499} (${pct(x.f499, x.total)})`);
   console.log(`  terminam em ,99 ..... ${x.f99} (${pct(x.f99, x.total)})`);
