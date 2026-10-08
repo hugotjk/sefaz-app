@@ -35,6 +35,7 @@ interface Resposta {
 }
 
 const chaveModelo = (m: string | null) => m ?? " sem-modelo";
+const CHAVE_SELECAO = "conferencia-produtos:selecionados";
 
 function ymd(d: Date) {
   return d.toISOString().slice(0, 10);
@@ -64,6 +65,28 @@ export default function ConferenciaProdutosPage() {
   // Avisos "Sem regra de..." — por padrão só o título aparece.
   const [avisoModeloAberto, setAvisoModeloAberto] = useState(false);
   const [avisoReferenciaAberto, setAvisoReferenciaAberto] = useState(false);
+
+  // Produtos marcados para cadastrar (chave = JSON([modelo, referência])).
+  // Persiste entre páginas da lista e ao recarregar (localStorage, com try/catch).
+  const [selecionados, setSelecionados] = useState<Set<string>>(new Set());
+  const [selecaoCarregada, setSelecaoCarregada] = useState(false);
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(CHAVE_SELECAO);
+      if (raw) setSelecionados(new Set(JSON.parse(raw) as string[]));
+    } catch {
+      /* sem storage: segue só em memória */
+    }
+    setSelecaoCarregada(true);
+  }, []);
+  useEffect(() => {
+    if (!selecaoCarregada) return;
+    try {
+      localStorage.setItem(CHAVE_SELECAO, JSON.stringify([...selecionados]));
+    } catch {
+      /* ignora */
+    }
+  }, [selecionados, selecaoCarregada]);
 
   // debounce do texto de emitente (400ms), volta pra página 1
   useEffect(() => {
@@ -120,6 +143,28 @@ export default function ConferenciaProdutosPage() {
       const prox = new Set(prev);
       if (prox.has(chave)) prox.delete(chave);
       else prox.add(chave);
+      return prox;
+    });
+  }
+
+  function alternarProduto(chave: string) {
+    setSelecionados((prev) => {
+      const prox = new Set(prev);
+      if (prox.has(chave)) prox.delete(chave);
+      else prox.add(chave);
+      return prox;
+    });
+  }
+
+  // Marca/desmarca TODOS os produtos do modelo (todos estão na mesma página).
+  function alternarModelo(g: GrupoModelo) {
+    setSelecionados((prev) => {
+      const prox = new Set(prev);
+      const todos = g.produtos.every((p) => prox.has(p.chave));
+      for (const p of g.produtos) {
+        if (todos) prox.delete(p.chave);
+        else prox.add(p.chave);
+      }
       return prox;
     });
   }
@@ -361,22 +406,54 @@ export default function ConferenciaProdutosPage() {
                 {totalModelos === 1 ? "" : "s"}
                 {carregando ? " · atualizando…" : ""}
               </p>
-              <button
-                type="button"
-                className="btn-secundario"
-                style={{ padding: "5px 10px", fontSize: 12 }}
-                onClick={alternarTodos}
-              >
-                {todosAbertos ? "Recolher todos" : "Expandir todos"}
-              </button>
+              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                <span style={{ fontSize: 12, color: "var(--text-dim)" }}>
+                  {selecionados.size.toLocaleString("pt-BR")} selecionado
+                  {selecionados.size === 1 ? "" : "s"} para cadastrar
+                </span>
+                {selecionados.size > 0 && (
+                  <button
+                    type="button"
+                    className="btn-secundario"
+                    style={{ padding: "5px 10px", fontSize: 12 }}
+                    onClick={() => setSelecionados(new Set())}
+                  >
+                    Limpar seleção
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="btn-secundario"
+                  style={{ padding: "5px 10px", fontSize: 12 }}
+                  onClick={alternarTodos}
+                >
+                  {todosAbertos ? "Recolher todos" : "Expandir todos"}
+                </button>
+              </div>
             </div>
 
             <div className="cp-grupos">
               {grupos.map((g) => {
                 const ck = chaveModelo(g.modelo);
                 const aberto = abertos.has(ck);
+                const marcados = g.produtos.filter((p) => selecionados.has(p.chave)).length;
                 return (
                   <div key={ck} className={`cp-grupo${aberto ? " aberto" : ""}`}>
+                    <div className="cp-grupo-topo">
+                    <label
+                      className="cp-sel"
+                      title="Marcar/desmarcar todos os produtos deste modelo"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={marcados === g.produtos.length && g.produtos.length > 0}
+                        ref={(el) => {
+                          if (el) el.indeterminate = marcados > 0 && marcados < g.produtos.length;
+                        }}
+                        onChange={() => alternarModelo(g)}
+                        aria-label={`Selecionar todos os produtos de ${g.modelo ?? "sem modelo"}`}
+                      />
+                    </label>
                     <button
                       type="button"
                       className="cp-grupo-cab"
@@ -390,14 +467,24 @@ export default function ConferenciaProdutosPage() {
                         )}
                       </span>
                       <span className="cp-grupo-cont">
+                        {marcados > 0 ? `${marcados}/` : ""}
                         {g.produtos.length} referência
                         {g.produtos.length === 1 ? "" : "s"}
                       </span>
                     </button>
+                    </div>
                     {aberto && (
                       <div className="cp-refs">
                         {g.produtos.map((p) => (
-                          <div key={p.chave} className="cp-ref">
+                          <div key={p.chave} className="cp-ref cp-ref-selecionavel">
+                            <label className="cp-sel" title="Marcar este produto">
+                              <input
+                                type="checkbox"
+                                checked={selecionados.has(p.chave)}
+                                onChange={() => alternarProduto(p.chave)}
+                                aria-label={`Selecionar ${p.referencia ?? "produto"}`}
+                              />
+                            </label>
                             <span className="cp-ref-ref">{p.referencia || "-"}</span>
                             <span className="cp-ref-desc">
                               <span className="cp-ref-desc-txt" title={p.descricao}>

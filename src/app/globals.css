@@ -536,6 +536,13 @@ h2 { font-size: 16px; margin: 0 0 12px; }
   white-space: nowrap;
   flex: none;
 }
+/* Seleção de produtos (checkbox por modelo e por produto) */
+.cp-grupo-topo { display: flex; align-items: center; }
+.cp-grupo-topo .cp-grupo-cab { flex: 1; min-width: 0; padding-left: 8px; }
+.cp-sel { display: flex; align-items: center; padding: 0 0 0 16px; flex: none; cursor: pointer; }
+.cp-sel input { width: 16px; height: 16px; cursor: pointer; margin: 0; }
+.cp-ref-selecionavel { grid-template-columns: 22px minmax(120px, 200px) 1fr; padding-left: 16px; }
+.cp-ref-selecionavel .cp-sel { padding: 0; }
 .cp-refs { border-top: 1px solid var(--border); }
 .cp-ref {
   display: grid;
@@ -572,6 +579,8 @@ h2 { font-size: 16px; margin: 0 0 12px; }
 }
 @media (max-width: 720px) {
   .cp-ref { grid-template-columns: 1fr; padding-left: 24px; gap: 4px; }
+  .cp-ref-selecionavel { grid-template-columns: 22px 1fr; }
+  .cp-ref-selecionavel .cp-ref-desc { grid-column: 2; }
 }
 
 .btn {
