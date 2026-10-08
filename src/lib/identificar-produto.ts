@@ -35,19 +35,19 @@ function segundaPalavra(texto: string): string {
 const s = (v: unknown): string => (v == null ? "" : String(v));
 
 /** ESQUERDA / LEFT */
-function esquerda(t: string, n: number): string {
+export function esquerda(t: string, n: number): string {
   return n <= 0 ? "" : t.slice(0, n);
 }
 /** DIREITA / RIGHT */
-function direita(t: string, n: number): string {
+export function direita(t: string, n: number): string {
   return n <= 0 ? "" : t.slice(-n);
 }
 /** LOCALIZAR / SEARCH — posição 1-indexed, 0 se não achar. Case-insensitive. */
-function localizar(busca: string, texto: string): number {
+export function localizar(busca: string, texto: string): number {
   return texto.toUpperCase().indexOf(busca.toUpperCase()) + 1;
 }
 /** SUBSTITUIR / SUBSTITUTE (substitui TODAS as ocorrências) */
-function substituir(t: string, antigo: string, novo: string): string {
+export function substituir(t: string, antigo: string, novo: string): string {
   if (antigo === "") return t;
   return t.split(antigo).join(novo);
 }
