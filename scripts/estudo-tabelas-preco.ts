@@ -6,16 +6,13 @@
  *
  *   npx tsx --env-file=.env scripts/estudo-tabelas-preco.ts
  *
- * Opcional: PAGINAS=120 (padrão 60 páginas x 50 = 3.000 preços por tabela).
+ * Opcional: PAGINAS=120 (padrão 80 páginas espalhadas x 50 = 4.000 preços por tabela).
  */
 import { PrismaClient } from "@prisma/client";
 import { listarTabelasPreco, listarPrecos } from "../src/lib/pdvapi";
 
 const prisma = new PrismaClient();
-const PAGINAS = Number(process.env.PAGINAS || 60);
-const TABELAS_ALVO = [1, 2, 3, 7, 9];
-
-const fmt = (n: number | undefined) => (n == null ? "—" : n.toFixed(2));
+const PAGINAS = Number(process.env.PAGINAS || 80);
 
 async function main() {
   console.log("==================== TABELAS DE PREÇO DO PDV ====================");
@@ -24,67 +21,93 @@ async function main() {
     console.log(`  ${String(t.Codigo).padStart(3)}  tipo=${t.Tipo}  ${t.Descricao}${t.Descricaofranquia ? `  (franquia: ${t.Descricaofranquia})` : ""}`);
   }
 
-  const codigos = TABELAS_ALVO.filter((c) => tabelas.some((t) => t.Codigo === c));
-  const faltando = TABELAS_ALVO.filter((c) => !codigos.includes(c));
-  if (faltando.length) console.log(`\nAtenção: tabelas ${faltando.join(", ")} não existem na lista acima.`);
-
-  // preços por tabela: variacaoId -> { orig, promo }
-  const porTabela = new Map<number, Map<string, { orig: number; promo?: number }>>();
-  console.log(`\n==================== AMOSTRA (${PAGINAS} páginas x 50 por tabela) ====================`);
-  for (const cod of codigos) {
-    const mapa = new Map<string, { orig: number; promo?: number }>();
-    let total: number | undefined;
-    for (let pg = 1; pg <= PAGINAS; pg++) {
+  // Amostra ESPALHADA: páginas igualmente espaçadas ao longo das tabelas 1 e 3
+  // (quase do mesmo tamanho, então as mesmas páginas cobrem as mesmas variações),
+  // em vez das primeiras linhas — que são sempre os produtos mais antigos.
+  const porTabela = new Map<number, Map<string, number>>();
+  const primeira = await listarPrecos(3, { pagina: 1, tamanhoPagina: 50 });
+  const totalPag = primeira.paginacao?.TotalPaginas ?? 1;
+  const paginas = [...new Set(Array.from({ length: PAGINAS }, (_, k) => 1 + Math.floor((k * (totalPag - 1)) / Math.max(1, PAGINAS - 1))))];
+  console.log(`\n==================== AMOSTRA ESPALHADA (${paginas.length} páginas de ${totalPag}) ====================`);
+  for (const cod of [1, 3]) {
+    const mapa = new Map<string, number>();
+    for (const pg of paginas) {
       const r = await listarPrecos(cod, { pagina: pg, tamanhoPagina: 50 });
-      for (const p of r.registros) mapa.set(String(p.VariacaoId), { orig: Number(p.PrecoOriginal ?? 0), promo: p.PrecoPromocional != null ? Number(p.PrecoPromocional) : undefined });
-      total = (r.paginacao as any)?.TotalRegistros ?? total;
-      if (!r.paginacao?.TemProximaPagina || r.registros.length === 0) break;
+      for (const p of r.registros) mapa.set(String(p.VariacaoId), Number(p.PrecoOriginal ?? 0));
     }
     porTabela.set(cod, mapa);
-    const vals = [...mapa.values()].map((v) => v.orig).filter((v) => v > 0);
-    const f999 = vals.filter((v) => Math.round(v * 100) % 1000 === 999).length;
-    const f900 = vals.filter((v) => Math.round(v * 100) % 1000 === 900).length;
-    const f99 = vals.filter((v) => Math.round(v * 100) % 100 === 99).length;
-    console.log(
-      `  tabela ${cod}: ${mapa.size} preços lidos${total ? ` (total na tabela: ${total})` : ""}; com preço>0: ${vals.length}; terminam x9,99: ${f999}, ,99: ${f99}, x9,00: ${f900}`
-    );
-    console.log(`     exemplos: ${[...mapa.entries()].slice(0, 4).map(([id, v]) => `${id.slice(0, 8)}…=${fmt(v.orig)}`).join("  ")}`);
+    console.log(`  tabela ${cod}: ${mapa.size} preços lidos`);
   }
 
-  // Markup direto do PDV: preço da tabela 3 / preço da tabela 1, nas variações em comum.
-  const t1 = porTabela.get(1);
-  const t3 = porTabela.get(3);
-  if (t1 && t3) {
-    const comuns = [...t3.keys()].filter((id) => (t1.get(id)?.orig ?? 0) > 0 && (t3.get(id)?.orig ?? 0) > 0);
-    console.log(`\n==================== MARKUP DIRETO DO PDV (tabela 3 / tabela 1) ====================`);
-    console.log(`Variações com preço nas duas tabelas (na amostra): ${comuns.length}`);
-    if (comuns.length) {
-      const info = await prisma.$queryRaw<{ id: string; modelo: string | null; grupo: string | null }[]>`
-        SELECT v.id, p."modeloNome" AS modelo, p."grupoNome" AS grupo
-        FROM "VariacaoProduto" v JOIN "Produto" p ON p.id = v."produtoId"
-        WHERE v.id = ANY(${comuns}::text[])`;
-      const porModelo = new Map<string, number[]>();
-      for (const i of info) {
-        const mk = t3.get(i.id)!.orig / t1.get(i.id)!.orig;
-        const k = `${i.modelo ?? "(sem modelo)"} | ${i.grupo ?? "-"}`;
-        const l = porModelo.get(k) ?? [];
-        l.push(mk);
-        porModelo.set(k, l);
-      }
-      const q = (a: number[], p: number) => a[Math.min(a.length - 1, Math.floor(p * a.length))];
-      const linhas = [...porModelo.entries()]
-        .map(([k, l]) => ({ k, n: l.length, s: [...l].sort((a, b) => a - b) }))
-        .filter((x) => x.n >= 3)
-        .sort((a, b) => b.n - a.n)
-        .slice(0, 60);
-      for (const x of linhas) {
+  const t1 = porTabela.get(1)!;
+  const t3 = porTabela.get(3)!;
+  const comuns = [...t3.keys()].filter((id) => (t1.get(id) ?? 0) > 0 && (t3.get(id) ?? 0) > 0);
+  console.log(`  variações com preço nas duas tabelas: ${comuns.length}`);
+
+  const info = await prisma.$queryRaw<
+    { id: string; produto: string; modelo: string | null; grupo: string | null }[]
+  >`SELECT v.id, p.id AS produto, p."modeloNome" AS modelo, p."grupoNome" AS grupo
+    FROM "VariacaoProduto" v JOIN "Produto" p ON p.id = v."produtoId"
+    WHERE v.id = ANY(${comuns}::text[])`;
+
+  // 1 observação por PRODUTO (mediana dos markups e dos preços das variações dele)
+  const med = (a: number[]) => [...a].sort((x, y) => x - y)[Math.floor(a.length / 2)];
+  const porProduto = new Map<string, { modelo: string; grupo: string; mks: number[]; precos: number[] }>();
+  for (const i of info) {
+    const o = porProduto.get(i.produto) ?? { modelo: i.modelo ?? "(sem modelo)", grupo: i.grupo ?? "-", mks: [], precos: [] };
+    o.mks.push(t3.get(i.id)! / t1.get(i.id)!);
+    o.precos.push(t3.get(i.id)!);
+    porProduto.set(i.produto, o);
+  }
+  console.log(`  produtos distintos na amostra: ${porProduto.size}`);
+
+  const q = (a: number[], p: number) => a[Math.min(a.length - 1, Math.floor(p * a.length))];
+  const agrupa = (chave: (o: { modelo: string; grupo: string }) => string, minN: number, titulo: string) => {
+    const g = new Map<string, number[]>();
+    for (const o of porProduto.values()) {
+      const k = chave(o);
+      const l = g.get(k) ?? [];
+      l.push(med(o.mks));
+      g.set(k, l);
+    }
+    console.log(`\n${titulo} (1 ponto por PRODUTO; n = produtos)`);
+    [...g.entries()]
+      .map(([k, l]) => ({ k, n: l.length, s: [...l].sort((a, b) => a - b) }))
+      .filter((x) => x.n >= minN)
+      .sort((a, b) => b.n - a.n)
+      .slice(0, 50)
+      .forEach((x) => {
         const disp = (q(x.s, 0.75) - q(x.s, 0.25)) / q(x.s, 0.5);
         console.log(
           `  ${x.k.slice(0, 46).padEnd(46)} n=${String(x.n).padStart(4)}  mediana=${q(x.s, 0.5).toFixed(2)}  p25=${q(x.s, 0.25).toFixed(2)}  p75=${q(x.s, 0.75).toFixed(2)}  ${disp <= 0.05 ? "ESTÁVEL" : disp <= 0.2 ? "médio" : "VARIA"}`
         );
-      }
-    }
+      });
+  };
+  console.log("\n==================== MARKUP DIRETO DO PDV (tabela 3 / tabela 1) ====================");
+  agrupa((o) => o.modelo, 4, "Por MODELO");
+  agrupa((o) => `${o.modelo} | ${o.grupo}`, 4, "Por MODELO | GRUPO");
+
+  // Final do preço de venda (tabela 3) por modelo.
+  console.log("\n==================== FINAL DO PREÇO (tabela 3) POR MODELO ====================");
+  const fin = new Map<string, { n: number; x999: number; x900: number; c90: number; c99: number; outro: number }>();
+  for (const o of porProduto.values()) {
+    const v = Math.round(med(o.precos) * 100);
+    const f = fin.get(o.modelo) ?? { n: 0, x999: 0, x900: 0, c90: 0, c99: 0, outro: 0 };
+    f.n++;
+    if (v % 1000 === 999) f.x999++;
+    else if (v % 1000 === 900) f.x900++;
+    else if (v % 100 === 90) f.c90++;
+    else if (v % 100 === 99) f.c99++;
+    else f.outro++;
+    fin.set(o.modelo, f);
   }
+  [...fin.entries()]
+    .filter(([, f]) => f.n >= 4)
+    .sort((a, b) => b[1].n - a[1].n)
+    .slice(0, 30)
+    .forEach(([m, f]) =>
+      console.log(`  ${m.slice(0, 30).padEnd(30)} n=${String(f.n).padStart(4)}  x9,99=${f.x999}  x9,00=${f.x900}  ,90=${f.c90}  outro,99=${f.c99}  outros=${f.outro}`)
+    );
 
   console.log("\nFim. Nada foi gravado.");
 }
