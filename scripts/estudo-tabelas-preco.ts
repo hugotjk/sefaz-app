@@ -54,7 +54,7 @@ async function main() {
   const med = (a: number[]) => [...a].sort((x, y) => x - y)[Math.floor(a.length / 2)];
   const porProduto = new Map<string, { modelo: string; grupo: string; mks: number[]; precos: number[] }>();
   for (const i of info) {
-    const o = porProduto.get(i.produto) ?? { modelo: i.modelo ?? "(sem modelo)", grupo: i.grupo ?? "-", mks: [], precos: [] };
+    const o = porProduto.get(i.produto) ?? { modelo: i.modelo ?? "(sem modelo)", grupo: i.grupo ?? "-", mks: [] as number[], precos: [] as number[] };
     o.mks.push(t3.get(i.id)! / t1.get(i.id)!);
     o.precos.push(t3.get(i.id)!);
     porProduto.set(i.produto, o);
