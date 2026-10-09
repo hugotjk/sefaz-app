@@ -1,13 +1,13 @@
 /**
  * Diagnóstico SOMENTE LEITURA: amostra páginas espalhadas da API do PDV e mede
  * quanto de cada trecho já está no banco (cobertura), por rede.
- * Uso: npx tsx --env-file=.env scripts\diagnostico-cobertura-produtos.ts [AMOSTRAS=24]
+ * Uso: npx tsx --env-file=.env scripts\diagnostico-cobertura-produtos.ts [AMOSTRAS=24] [REDES=2,4,9,14]
  */
 import { PrismaClient } from "@prisma/client";
 import { listarProdutos } from "../src/lib/pdvapi";
 const prisma = new PrismaClient();
 
-const REDES = [2, 4, 9, 14];
+const REDES = process.argv[3] ? process.argv[3].split(",").map(Number) : [2, 4, 9, 14];
 
 async function main() {
   const amostras = Number(process.argv[2] ?? 24);
@@ -26,6 +26,7 @@ async function main() {
         `SELECT id, "redeId" FROM "Produto" WHERE id = ANY($1::text[])`, ids
       );
       const set = new Set(achados.map((a) => a.id));
+      console.log(`  pág ${String(pg).padStart(4)}: ${set.size}/${ids.length} no banco | atualização mais antiga/mais nova da página: ${registros.map((r) => r.DataAtualizacao ?? "").sort()[0]?.slice(0, 10)} / ${registros.map((r) => r.DataAtualizacao ?? "").sort().slice(-1)[0]?.slice(0, 10)} | inativos: ${registros.filter((r) => r.Inativo).length}`);
       const trecho = `${Math.floor(((pg - 1) / total) * 4) * 25}-${Math.floor(((pg - 1) / total) * 4) * 25 + 25}%`;
       porTrecho[trecho] ??= { t: 0, ok: 0 };
       porTrecho[trecho].t += ids.length;
