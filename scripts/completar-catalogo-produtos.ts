@@ -74,39 +74,32 @@ async function main() {
     faltantes += falta.length;
 
     if (apply && falta.length > 0) {
-      const ops: any[] = [];
-      for (const p of falta) {
-        const campos = {
-          redeId: p.RedeId ?? redeId,
-          nome: p.Nome || null,
-          referenciaFornecedor: p.ReferenciaProdutoFornecedor || null,
-          fornecedorId: p.FornecedorId || null,
-          fornecedorNome: p.Fornecedor || null,
-          modeloId: p.ModeloId != null ? String(p.ModeloId) : null,
-          modeloNome: p.Modelo || null,
-          colecaoId: p.ColecaoId ?? null,
-          colecaoNome: p.Colecao || null,
-          grupoId: p.GrupoId ?? null,
-          grupoNome: p.Grupo || null,
-          compradorId: p.CompradorId != null ? String(p.CompradorId) : null,
-          compradorNome: p.Comprador || null,
-        };
-        ops.push(prisma.produto.upsert({ where: { id: p.Id }, create: { id: p.Id, ...campos }, update: {} }));
-        const emb = p.Variacoes ?? [];
-        for (const v of emb) {
-          ops.push(
-            prisma.variacaoProduto.upsert({
-              where: { id: v.Id },
-              create: { id: v.Id, produtoId: p.Id, redeId: p.RedeId ?? redeId },
-              update: {},
-            })
-          );
-          variacoes++;
-        }
-        if (emb.length === 0) semVariacaoEmbutida++;
-        novosIds.push(p.Id);
-      }
-      await prisma.$transaction(ops);
+      // Gravação em LOTE (2 comandos por página em vez de centenas de upserts).
+      // skipDuplicates: nunca altera o que já existe.
+      const produtosData = falta.map((p) => ({
+        id: p.Id,
+        redeId: p.RedeId ?? redeId,
+        nome: p.Nome || null,
+        referenciaFornecedor: p.ReferenciaProdutoFornecedor || null,
+        fornecedorId: p.FornecedorId || null,
+        fornecedorNome: p.Fornecedor || null,
+        modeloId: p.ModeloId != null ? String(p.ModeloId) : null,
+        modeloNome: p.Modelo || null,
+        colecaoId: p.ColecaoId ?? null,
+        colecaoNome: p.Colecao || null,
+        grupoId: p.GrupoId ?? null,
+        grupoNome: p.Grupo || null,
+        compradorId: p.CompradorId != null ? String(p.CompradorId) : null,
+        compradorNome: p.Comprador || null,
+      }));
+      const variacoesData = falta.flatMap((p) =>
+        (p.Variacoes ?? []).map((v) => ({ id: v.Id, produtoId: p.Id, redeId: p.RedeId ?? redeId }))
+      );
+      await prisma.produto.createMany({ data: produtosData, skipDuplicates: true });
+      if (variacoesData.length > 0) await prisma.variacaoProduto.createMany({ data: variacoesData, skipDuplicates: true });
+      variacoes += variacoesData.length;
+      semVariacaoEmbutida += falta.filter((p) => (p.Variacoes ?? []).length === 0).length;
+      novosIds.push(...falta.map((p) => p.Id));
       gravados += falta.length;
 
       // Produtos sem variação embutida: busca no endpoint dedicado (poucos).
