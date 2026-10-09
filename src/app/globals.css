@@ -541,8 +541,9 @@ h2 { font-size: 16px; margin: 0 0 12px; }
 .cp-grupo-topo .cp-grupo-cab { flex: 1; min-width: 0; padding-left: 8px; }
 .cp-sel { display: flex; align-items: center; padding: 0 0 0 16px; flex: none; cursor: pointer; }
 .cp-sel input { width: 16px; height: 16px; cursor: pointer; margin: 0; }
-.cp-ref-selecionavel { grid-template-columns: 22px minmax(90px, 150px) 1fr; gap: 8px 14px; padding-left: 16px; }
+.cp-ref.cp-ref-selecionavel { grid-template-columns: 16px max-content minmax(0, 1fr); gap: 0 12px; padding-left: 16px; }
 .cp-ref-selecionavel .cp-sel { padding: 0; }
+.cp-ref-selecionavel .cp-ref-ref { min-width: 64px; }
 .cp-refs { border-top: 1px solid var(--border); }
 .cp-ref {
   display: grid;
@@ -578,10 +579,10 @@ h2 { font-size: 16px; margin: 0 0 12px; }
   white-space: nowrap;
 }
 @media (max-width: 720px) {
-  .cp-ref { grid-template-columns: 1fr; padding-left: 24px; gap: 4px; }
-  .cp-ref-selecionavel { grid-template-columns: 22px 1fr; }
-  .cp-ref-selecionavel .cp-ref-desc { grid-column: 2; flex-wrap: wrap; gap: 2px 12px; }
-  .cp-ref-desc-txt { flex-basis: 100%; }
+  .cp-ref:not(.cp-ref-selecionavel) { grid-template-columns: 1fr; padding-left: 24px; gap: 4px; }
+  .cp-ref.cp-ref-selecionavel { gap: 0 8px; padding-right: 10px; }
+  .cp-ref-selecionavel .cp-ref-desc-txt { white-space: normal; }
+  .cp-ref-selecionavel .cp-ref-meta { font-size: 11px; }
 }
 
 .btn {
