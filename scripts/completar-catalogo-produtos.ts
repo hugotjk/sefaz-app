@@ -22,6 +22,22 @@ function arg(nome: string): string | undefined {
 
 const dormir = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/** Executa uma operação no banco; se a conexão cair, reconecta e tenta de novo. */
+async function comRetryDb<T>(fn: () => Promise<T>): Promise<T> {
+  let ultimo: any;
+  for (let t = 1; t <= 6; t++) {
+    try {
+      return await fn();
+    } catch (e: any) {
+      ultimo = e;
+      console.log(`  ! banco: ${String(e.code ?? e.message).slice(0, 80)} — tentativa ${t}/6, reconectando`);
+      try { await prisma.$disconnect(); } catch { /* ignora */ }
+      await dormir(Math.min(30000, 2000 * t * t));
+    }
+  }
+  throw ultimo;
+}
+
 /** Lê uma página com novas tentativas (a API do PDV às vezes dá HTTP 500 passageiro). */
 async function lerPagina(redeId: number, pagina: number) {
   let ultimoErro: any;
@@ -65,12 +81,18 @@ async function main() {
     }
     if (registros.length === 0) break;
 
-    const existentes = new Set(
-      (await prisma.$queryRawUnsafe<{ id: string }[]>(
-        `SELECT id FROM "Produto" WHERE id = ANY($1::text[])`, registros.map((r) => r.Id)
+    const ids = registros.map((r) => r.Id);
+    // Já completos = existem em Produto E têm ao menos 1 variação (ou a API não traz variações).
+    const completos = new Set(
+      (await comRetryDb(() =>
+        prisma.$queryRawUnsafe<{ id: string }[]>(
+          `SELECT p.id FROM "Produto" p WHERE p.id = ANY($1::text[])
+             AND EXISTS (SELECT 1 FROM "VariacaoProduto" v WHERE v."produtoId" = p.id)`,
+          ids
+        )
       )).map((r) => r.id)
     );
-    const falta = registros.filter((r) => !existentes.has(r.Id) && !(soAtivos && r.Inativo));
+    const falta = registros.filter((r) => !completos.has(r.Id) && !(soAtivos && r.Inativo));
     faltantes += falta.length;
 
     if (apply && falta.length > 0) {
@@ -95,8 +117,11 @@ async function main() {
       const variacoesData = falta.flatMap((p) =>
         (p.Variacoes ?? []).map((v) => ({ id: v.Id, produtoId: p.Id, redeId: p.RedeId ?? redeId }))
       );
-      await prisma.produto.createMany({ data: produtosData, skipDuplicates: true });
-      if (variacoesData.length > 0) await prisma.variacaoProduto.createMany({ data: variacoesData, skipDuplicates: true });
+      await comRetryDb(() => prisma.produto.createMany({ data: produtosData, skipDuplicates: true }));
+      for (let i = 0; i < variacoesData.length; i += 500) {
+        const fatia = variacoesData.slice(i, i + 500);
+        await comRetryDb(() => prisma.variacaoProduto.createMany({ data: fatia, skipDuplicates: true }));
+      }
       variacoes += variacoesData.length;
       semVariacaoEmbutida += falta.filter((p) => (p.Variacoes ?? []).length === 0).length;
       novosIds.push(...falta.map((p) => p.Id));
@@ -123,12 +148,13 @@ async function main() {
       console.log(`  pág ${pg}/${ate} | faltavam ${faltantes} | gravados ${gravados} | variações ${variacoes} | ${min} min`);
     }
     if (apply && novosIds.length >= 1500) {
-      const n = await vincularCadastroDeProdutos(novosIds.splice(0, novosIds.length));
+      const lote = novosIds.splice(0, novosIds.length);
+      const n = await comRetryDb(() => vincularCadastroDeProdutos(lote));
       console.log(`  (vinculados ${n} itens de nota ao catálogo)`);
     }
   }
   if (apply && novosIds.length > 0) {
-    const n = await vincularCadastroDeProdutos(novosIds);
+    const n = await comRetryDb(() => vincularCadastroDeProdutos(novosIds));
     console.log(`  (vinculados ${n} itens de nota ao catálogo)`);
   }
   if (paginasComErro.length > 0) {
