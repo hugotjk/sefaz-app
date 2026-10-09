@@ -43,3 +43,42 @@ export async function reavaliarCadastroRecentes(dias = 3): Promise<number> {
   );
   return Number(n);
 }
+
+/**
+ * Vincula NA HORA: dado um conjunto de produtos que acabou de entrar/mudar no
+ * banco, marca `temCadastro = true` nos NotaItem sem cadastro que casam com
+ * eles (referência+modelo, ou EAN das variações). Mesmo critério exato da
+ * função acima, mas restrito aos `produtoIds` (UPDATE barato, usa índices).
+ */
+export async function vincularCadastroDeProdutos(produtoIds: string[]): Promise<number> {
+  if (produtoIds.length === 0) return 0;
+  const n = await prisma.$executeRawUnsafe(
+    `
+    UPDATE "NotaItem" AS ni
+       SET "temCadastro" = true
+     WHERE ni."temCadastro" = false
+       AND (
+         (
+           ni."referenciaFornecedorIdentificada" IS NOT NULL
+           AND ni."modeloIdentificado" IS NOT NULL
+           AND EXISTS (
+             SELECT 1 FROM "Produto" p
+              WHERE p."id" = ANY($1::text[])
+                AND upper(trim(p."referenciaFornecedor")) = upper(trim(ni."referenciaFornecedorIdentificada"))
+                AND upper(trim(p."modeloNome")) = upper(trim(ni."modeloIdentificado"))
+           )
+         )
+         OR (
+           ni."ean" IS NOT NULL
+           AND EXISTS (
+             SELECT 1 FROM "VariacaoProduto" v
+              WHERE v."produtoId" = ANY($1::text[])
+                AND v."ean" = ni."ean"
+           )
+         )
+       )
+    `,
+    produtoIds
+  );
+  return Number(n);
+}

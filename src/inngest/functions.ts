@@ -8,7 +8,7 @@ import { obterXmlNota } from "@/lib/obter-xml-nota";
 import { LIMITE_TENTATIVAS_XML, DIAS_NOTA_RECENTE } from "@/lib/nota-xml-status";
 import { classificarTipoLoja } from "@/lib/classificar-tipo-loja";
 import { popularNotaItens, avaliarCadastroItens } from "@/lib/popular-nota-itens";
-import { reavaliarCadastroRecentes } from "@/lib/reavaliar-cadastro-recentes";
+import { reavaliarCadastroRecentes, vincularCadastroDeProdutos } from "@/lib/reavaliar-cadastro-recentes";
 import { upsertEstoqueBulk } from "@/lib/bulk-upsert-estoque";
 import {
   buscarNfesRecebidas,
@@ -793,6 +793,9 @@ export const syncProdutos = inngest.createFunction(
 
           if (ops.length > 0) await prisma.$transaction(ops);
           const salvos = registros.length;
+          // Vincula na hora: itens de nota "sem cadastro" que casam com os
+          // produtos desta página passam a ter cadastro assim que entram no banco.
+          await vincularCadastroDeProdutos(registros.map((p) => p.Id));
 
           // Produtos sem variação embutida que AINDA não têm nenhuma variação
           // salva — numa query só, em vez de um count por produto.
@@ -1943,6 +1946,8 @@ export const enriquecerVariacoes = inngest.createFunction(
           where: { produtoId: { in: lote.map((l) => l.produtoId) }, ean: null },
           data: { updatedAt: new Date() },
         });
+        // EANs recém-gravados: vincula na hora os itens de nota com esse EAN.
+        await vincularCadastroDeProdutos(lote.map((l) => l.produtoId));
         return atualizadas;
       });
 
