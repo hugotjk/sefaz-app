@@ -597,11 +597,25 @@ function referenciaFormula2(A: string, G: string, H: string, P: string, Q: strin
     igual(A, "R DOIS INJETADOS NORDESTE LTDA") ||
     igual(A, "R DOIS INJETADOS LTDA")
   )
+  {
+    // Reef (R2). Referência = código base + "_" + código da cor.
+    //  - código base: sem o sufixo "/N" ("RF016.0100/3" -> "RF016.0100");
+    //  - código da cor: o trecho com dígito que vem logo antes do "-" que
+    //    antecede o nome da cor (que termina em "/"), com 3 ou 4 dígitos:
+    //      "... FANNING 073 - BLACK/RASTA40=1"        -> 073
+    //      "... FANNING 3394-GRAY/LIGHT BLUE39=1"     -> 3394
+    //      "... VISION - 033-BLACK/TAN39=1"           -> 033
+    //    Sem esse padrão, cai na regra antiga (últimos 3 caracteres antes do
+    //    primeiro "-").
+    const base = G.replace(/\/\d+$/, "");
+    const m = /([0-9][0-9A-Za-z]*)\s*-\s*[A-Za-z][A-Za-z ]*\//.exec(H);
+    if (m) return base + "_" + m[1];
     return (
       G +
       "_" +
       direita(substituir(substituir(esquerda(H, localizar("-", H)), " ", ""), "-", ""), 3)
     );
+  }
   if (igual(A, "VEST SURF IND COM IMP E EXP DE ROUPAS LTDA."))
     return esquerda(H, localizar(" ", H) - 1);
   if (igual(A, "NIRUT IND E COM CALC LTDA")) return esquerda(G, localizar("-", G) - 1);
