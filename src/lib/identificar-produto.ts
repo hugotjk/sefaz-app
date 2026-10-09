@@ -779,14 +779,19 @@ function referenciaFormula2(A: string, G: string, H: string, P: string, Q: strin
   // G.R.W Confecções (Approve): código = <ref><cor><TAMANHO>, ex. "7770KKKGG"
   // (cor "KKK", tam "GG") -> "7770KKK". O tamanho é lido da descrição
   // ("... (Cor: BEGE - Tam: GG)") e removido do FIM do código; assim "7770PPPP"
-  // (cor "PPP" + tam "P") vira "7770PPP". Sem "Tam:" na descrição (item pai,
+  // (cor "PPP" + tam "P") vira "7770_PPP". Sem "Tam:" na descrição (item pai,
   // ex. "7770") o código fica como veio.
+  // O cadastro da Approve usa "REF_COR" (igual à Approve Street Wear:
+  // "7779_PPP"), então depois de tirar o tamanho insere "_" antes da cor de
+  // 3 letras: "7770KKK" -> "7770_KKK". Sem o padrão <dígito><3 letras>, não mexe.
   if (igual(A, "G.R.W CONFECCOES LTDA")) {
     const m = H.match(/Tam:\s*([^)\s]+)\s*\)/i);
     if (m) {
       const tam = m[1];
       if (G.length > tam.length && G.toUpperCase().endsWith(tam.toUpperCase())) {
-        return G.slice(0, G.length - tam.length);
+        const semTam = G.slice(0, G.length - tam.length);
+        const rc = /^(.+\d)([A-Za-z]{3})$/.exec(semTam);
+        return rc ? `${rc[1]}_${rc[2]}` : semTam;
       }
     }
     return G;
