@@ -1,0 +1,117 @@
+/**
+ * Completa o catálogo local de produtos varrendo TODA a lista da API do PDV
+ * de uma rede e gravando só o que está faltando no banco. Roda no seu PC
+ * (não usa o Inngest). Seguro para repetir: só insere produtos ausentes.
+ *
+ * Uso (simulação, não grava):  npx tsx --env-file=.env scripts\completar-catalogo-produtos.ts
+ * Para gravar:                  npx tsx --env-file=.env scripts\completar-catalogo-produtos.ts --apply
+ * Outras opções: --rede=2  --de=1  --ate=2592  --so-ativos
+ *
+ * Se interromper (Ctrl+C), retome com --de=<última página impressa>.
+ */
+import { PrismaClient } from "@prisma/client";
+import { listarProdutos, listarVariacoesProduto } from "../src/lib/pdvapi";
+import { vincularCadastroDeProdutos } from "../src/lib/reavaliar-cadastro-recentes";
+
+const prisma = new PrismaClient();
+
+function arg(nome: string): string | undefined {
+  const a = process.argv.find((x) => x.startsWith(`--${nome}=`));
+  return a?.split("=")[1];
+}
+
+async function main() {
+  const apply = process.argv.includes("--apply");
+  const soAtivos = process.argv.includes("--so-ativos");
+  const redeId = Number(arg("rede") ?? 2);
+  const de = Number(arg("de") ?? 1);
+
+  const primeira = await listarProdutos({ redeId, aPartirDe: "2000-01-01", pagina: de, tamanhoPagina: 50 });
+  const totalPaginas = primeira.paginacao?.TotalPaginas ?? 1;
+  const ate = Math.min(Number(arg("ate") ?? totalPaginas), totalPaginas);
+  console.log(`${apply ? "[APPLY]" : "[SIMULAÇÃO]"} rede ${redeId}: páginas ${de} a ${ate} de ${totalPaginas}${soAtivos ? " (só ativos)" : ""}`);
+
+  let faltantes = 0, gravados = 0, variacoes = 0, semVariacaoEmbutida = 0;
+  const novosIds: string[] = [];
+  const t0 = Date.now();
+
+  for (let pg = de; pg <= ate; pg++) {
+    const { registros } = pg === de ? primeira : await listarProdutos({ redeId, aPartirDe: "2000-01-01", pagina: pg, tamanhoPagina: 50 });
+    if (registros.length === 0) break;
+
+    const existentes = new Set(
+      (await prisma.$queryRawUnsafe<{ id: string }[]>(
+        `SELECT id FROM "Produto" WHERE id = ANY($1::text[])`, registros.map((r) => r.Id)
+      )).map((r) => r.id)
+    );
+    const falta = registros.filter((r) => !existentes.has(r.Id) && !(soAtivos && r.Inativo));
+    faltantes += falta.length;
+
+    if (apply && falta.length > 0) {
+      const ops: any[] = [];
+      for (const p of falta) {
+        const campos = {
+          redeId: p.RedeId ?? redeId,
+          nome: p.Nome || null,
+          referenciaFornecedor: p.ReferenciaProdutoFornecedor || null,
+          fornecedorId: p.FornecedorId || null,
+          fornecedorNome: p.Fornecedor || null,
+          modeloId: p.ModeloId != null ? String(p.ModeloId) : null,
+          modeloNome: p.Modelo || null,
+          colecaoId: p.ColecaoId ?? null,
+          colecaoNome: p.Colecao || null,
+          grupoId: p.GrupoId ?? null,
+          grupoNome: p.Grupo || null,
+          compradorId: p.CompradorId != null ? String(p.CompradorId) : null,
+          compradorNome: p.Comprador || null,
+        };
+        ops.push(prisma.produto.upsert({ where: { id: p.Id }, create: { id: p.Id, ...campos }, update: {} }));
+        const emb = p.Variacoes ?? [];
+        for (const v of emb) {
+          ops.push(
+            prisma.variacaoProduto.upsert({
+              where: { id: v.Id },
+              create: { id: v.Id, produtoId: p.Id, redeId: p.RedeId ?? redeId },
+              update: {},
+            })
+          );
+          variacoes++;
+        }
+        if (emb.length === 0) semVariacaoEmbutida++;
+        novosIds.push(p.Id);
+      }
+      await prisma.$transaction(ops);
+      gravados += falta.length;
+
+      // Produtos sem variação embutida: busca no endpoint dedicado (poucos).
+      for (const p of falta.filter((x) => (x.Variacoes ?? []).length === 0)) {
+        try {
+          const lista = await listarVariacoesProduto(redeId, p.Id);
+          for (const v of lista) {
+            await prisma.variacaoProduto.upsert({
+              where: { id: v.Id },
+              create: { id: v.Id, produtoId: p.Id, redeId: v.RedeId ?? redeId },
+              update: {},
+            });
+            variacoes++;
+          }
+        } catch { /* segue; o enriquecimento/sync pega depois */ }
+      }
+    }
+
+    if (pg % 25 === 0 || pg === ate) {
+      const min = ((Date.now() - t0) / 60000).toFixed(1);
+      console.log(`  pág ${pg}/${ate} | faltavam ${faltantes} | gravados ${gravados} | variações ${variacoes} | ${min} min`);
+    }
+    if (apply && novosIds.length >= 1500) {
+      const n = await vincularCadastroDeProdutos(novosIds.splice(0, novosIds.length));
+      console.log(`  (vinculados ${n} itens de nota ao catálogo)`);
+    }
+  }
+  if (apply && novosIds.length > 0) {
+    const n = await vincularCadastroDeProdutos(novosIds);
+    console.log(`  (vinculados ${n} itens de nota ao catálogo)`);
+  }
+  console.log(`\nFim. Faltavam ${faltantes} produtos${apply ? `; gravados ${gravados}, variações ${variacoes} (${semVariacaoEmbutida} produtos sem variação embutida).` : ". Nada foi gravado (simulação)."}`);
+}
+main().catch((e) => console.error(e)).finally(() => prisma.$disconnect());
