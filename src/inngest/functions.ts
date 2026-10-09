@@ -8,6 +8,7 @@ import { obterXmlNota } from "@/lib/obter-xml-nota";
 import { LIMITE_TENTATIVAS_XML, DIAS_NOTA_RECENTE } from "@/lib/nota-xml-status";
 import { classificarTipoLoja } from "@/lib/classificar-tipo-loja";
 import { popularNotaItens, avaliarCadastroItens } from "@/lib/popular-nota-itens";
+import { reavaliarCadastroRecentes } from "@/lib/reavaliar-cadastro-recentes";
 import { upsertEstoqueBulk } from "@/lib/bulk-upsert-estoque";
 import {
   buscarNfesRecebidas,
@@ -899,7 +900,14 @@ export const syncProdutos = inngest.createFunction(
       };
     }
 
-    return { redes: redes.length, resumo };
+    // Produtos recém-cadastrados/alterados no PDV: já libera o "sem cadastro"
+    // dos itens de nota correspondentes (1 UPDATE em SQL, sem esperar a
+    // reavaliação diária, que só processa 2.500 itens/dia).
+    const liberados = await step.run("reavaliar-cadastro-recentes", () =>
+      reavaliarCadastroRecentes(3)
+    );
+
+    return { redes: redes.length, resumo, itensComCadastroLiberado: liberados };
   }
 );
 
