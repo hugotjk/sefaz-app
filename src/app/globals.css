@@ -541,16 +541,16 @@ h2 { font-size: 16px; margin: 0 0 12px; }
 .cp-grupo-topo .cp-grupo-cab { flex: 1; min-width: 0; padding-left: 8px; }
 .cp-sel { display: flex; align-items: center; padding: 0 0 0 16px; flex: none; cursor: pointer; }
 .cp-sel input { width: 16px; height: 16px; cursor: pointer; margin: 0; }
-.cp-ref-selecionavel { grid-template-columns: 22px minmax(120px, 200px) 1fr; padding-left: 16px; }
+.cp-ref-selecionavel { grid-template-columns: 22px minmax(90px, 150px) 1fr; gap: 8px 14px; padding-left: 16px; }
 .cp-ref-selecionavel .cp-sel { padding: 0; }
 .cp-refs { border-top: 1px solid var(--border); }
 .cp-ref {
   display: grid;
   grid-template-columns: minmax(120px, 200px) 1fr;
   gap: 8px 18px;
-  padding: 11px 16px 11px 40px;
+  padding: 6px 16px 6px 40px;
   font-size: 13px;
-  align-items: baseline;
+  align-items: center;
 }
 .cp-ref + .cp-ref { border-top: 1px solid var(--border); }
 .cp-ref-ref {
@@ -561,26 +561,27 @@ h2 { font-size: 16px; margin: 0 0 12px; }
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.cp-ref-desc { color: var(--text); min-width: 0; }
+.cp-ref-desc { color: var(--text); min-width: 0; display: flex; align-items: center; gap: 12px; }
 .cp-ref-desc-txt {
   display: block;
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .cp-ref-desc .cp-ref-meta {
   display: block;
-  margin-top: 3px;
+  flex: none;
   color: var(--text-dim);
   font-size: 12px;
-  overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
 }
 @media (max-width: 720px) {
   .cp-ref { grid-template-columns: 1fr; padding-left: 24px; gap: 4px; }
   .cp-ref-selecionavel { grid-template-columns: 22px 1fr; }
-  .cp-ref-selecionavel .cp-ref-desc { grid-column: 2; }
+  .cp-ref-selecionavel .cp-ref-desc { grid-column: 2; flex-wrap: wrap; gap: 2px 12px; }
+  .cp-ref-desc-txt { flex-basis: 100%; }
 }
 
 .btn {
