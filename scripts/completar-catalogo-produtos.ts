@@ -5,7 +5,8 @@
  *
  * Uso (simulação, não grava):  npx tsx --env-file=.env scripts\completar-catalogo-produtos.ts
  * Para gravar:                  npx tsx --env-file=.env scripts\completar-catalogo-produtos.ts --apply
- * Outras opções: --rede=2  --de=1  --ate=2592  --so-ativos
+ * Outras opções: --rede=2  --de=1  --ate=2592  --so-ativos  --ultimos-dias=60
+ * (--ultimos-dias: só produtos cadastrados/alterados nos últimos N dias; lista pequena e rápida)
  *
  * Se interromper (Ctrl+C), retome com --de=<última página impressa>.
  */
@@ -39,11 +40,11 @@ async function comRetryDb<T>(fn: () => Promise<T>): Promise<T> {
 }
 
 /** Lê uma página com novas tentativas (a API do PDV às vezes dá HTTP 500 passageiro). */
-async function lerPagina(redeId: number, pagina: number) {
+async function lerPagina(redeId: number, pagina: number, aPartirDe = "2000-01-01") {
   let ultimoErro: any;
   for (let t = 1; t <= 6; t++) {
     try {
-      return await listarProdutos({ redeId, aPartirDe: "2000-01-01", pagina, tamanhoPagina: 50 });
+      return await listarProdutos({ redeId, aPartirDe, pagina, tamanhoPagina: 50 });
     } catch (e: any) {
       ultimoErro = e;
       const espera = Math.min(60000, 3000 * t * t);
@@ -59,11 +60,15 @@ async function main() {
   const soAtivos = process.argv.includes("--so-ativos");
   const redeId = Number(arg("rede") ?? 2);
   const de = Number(arg("de") ?? 1);
+  const ultimosDias = arg("ultimos-dias") ? Number(arg("ultimos-dias")) : null;
+  const aPartirDe = ultimosDias
+    ? new Date(Date.now() - ultimosDias * 86_400_000).toISOString().slice(0, 10)
+    : "2000-01-01";
 
-  const primeira = await lerPagina(redeId, de);
+  const primeira = await lerPagina(redeId, de, aPartirDe);
   const totalPaginas = primeira.paginacao?.TotalPaginas ?? 1;
   const ate = Math.min(Number(arg("ate") ?? totalPaginas), totalPaginas);
-  console.log(`${apply ? "[APPLY]" : "[SIMULAÇÃO]"} rede ${redeId}: páginas ${de} a ${ate} de ${totalPaginas}${soAtivos ? " (só ativos)" : ""}`);
+  console.log(`${apply ? "[APPLY]" : "[SIMULAÇÃO]"} rede ${redeId}: páginas ${de} a ${ate} de ${totalPaginas}${soAtivos ? " (só ativos)" : ""}${ultimosDias ? ` | alterados desde ${aPartirDe}` : ""}`);
 
   let faltantes = 0, gravados = 0, variacoes = 0, semVariacaoEmbutida = 0;
   const novosIds: string[] = [];
@@ -73,7 +78,7 @@ async function main() {
   for (let pg = de; pg <= ate; pg++) {
     let registros;
     try {
-      registros = (pg === de ? primeira : await lerPagina(redeId, pg)).registros;
+      registros = (pg === de ? primeira : await lerPagina(redeId, pg, aPartirDe)).registros;
     } catch {
       paginasComErro.push(pg);
       console.log(`  !! pág ${pg} PULADA após 6 tentativas (será listada no fim)`);
