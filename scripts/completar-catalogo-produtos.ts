@@ -20,23 +20,49 @@ function arg(nome: string): string | undefined {
   return a?.split("=")[1];
 }
 
+const dormir = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** Lê uma página com novas tentativas (a API do PDV às vezes dá HTTP 500 passageiro). */
+async function lerPagina(redeId: number, pagina: number) {
+  let ultimoErro: any;
+  for (let t = 1; t <= 6; t++) {
+    try {
+      return await listarProdutos({ redeId, aPartirDe: "2000-01-01", pagina, tamanhoPagina: 50 });
+    } catch (e: any) {
+      ultimoErro = e;
+      const espera = Math.min(60000, 3000 * t * t);
+      console.log(`  ! pág ${pagina}: ${String(e.message).slice(0, 90)} — tentativa ${t}/6, aguardando ${espera / 1000}s`);
+      await dormir(espera);
+    }
+  }
+  throw ultimoErro;
+}
+
 async function main() {
   const apply = process.argv.includes("--apply");
   const soAtivos = process.argv.includes("--so-ativos");
   const redeId = Number(arg("rede") ?? 2);
   const de = Number(arg("de") ?? 1);
 
-  const primeira = await listarProdutos({ redeId, aPartirDe: "2000-01-01", pagina: de, tamanhoPagina: 50 });
+  const primeira = await lerPagina(redeId, de);
   const totalPaginas = primeira.paginacao?.TotalPaginas ?? 1;
   const ate = Math.min(Number(arg("ate") ?? totalPaginas), totalPaginas);
   console.log(`${apply ? "[APPLY]" : "[SIMULAÇÃO]"} rede ${redeId}: páginas ${de} a ${ate} de ${totalPaginas}${soAtivos ? " (só ativos)" : ""}`);
 
   let faltantes = 0, gravados = 0, variacoes = 0, semVariacaoEmbutida = 0;
   const novosIds: string[] = [];
+  const paginasComErro: number[] = [];
   const t0 = Date.now();
 
   for (let pg = de; pg <= ate; pg++) {
-    const { registros } = pg === de ? primeira : await listarProdutos({ redeId, aPartirDe: "2000-01-01", pagina: pg, tamanhoPagina: 50 });
+    let registros;
+    try {
+      registros = (pg === de ? primeira : await lerPagina(redeId, pg)).registros;
+    } catch {
+      paginasComErro.push(pg);
+      console.log(`  !! pág ${pg} PULADA após 6 tentativas (será listada no fim)`);
+      continue;
+    }
     if (registros.length === 0) break;
 
     const existentes = new Set(
@@ -111,6 +137,9 @@ async function main() {
   if (apply && novosIds.length > 0) {
     const n = await vincularCadastroDeProdutos(novosIds);
     console.log(`  (vinculados ${n} itens de nota ao catálogo)`);
+  }
+  if (paginasComErro.length > 0) {
+    console.log(`\nPÁGINAS NÃO LIDAS (rode de novo para completar): ${paginasComErro.join(", ")}`);
   }
   console.log(`\nFim. Faltavam ${faltantes} produtos${apply ? `; gravados ${gravados}, variações ${variacoes} (${semVariacaoEmbutida} produtos sem variação embutida).` : ". Nada foi gravado (simulação)."}`);
 }
