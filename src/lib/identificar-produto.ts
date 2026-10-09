@@ -701,6 +701,10 @@ function referenciaFormula2(A: string, G: string, H: string, P: string, Q: strin
   //   "0087568000006" -> "87568000006"
   if (igual(A, "BB INDUSTRIA E COMERCIO DE ARTIGOS DE USO PESSOAL LTDA"))
     return G.slice(2);
+  // Next Eleven (modelo Texneo+): o código da nota termina em ".N" (índice da
+  // variação/tamanho) que NÃO faz parte da referência.
+  //   "CRF03.1" -> "CRF03"   |   "FLA08.2" -> "FLA08"   |   "CRF22" -> "CRF22"
+  if (igual(A, "NEXT ELEVEN CONFECCOES LTDA")) return G.replace(/\.\d+$/, "");
   // Grupo Thug Nine / Dubs / Brotherhood + PCF + VF Ferrari + Blue Ocean /
   // TSC / M&L Sport + Next Eleven / Cromotransfer / EMC / Tecnovex:
   // referência do fornecedor = o próprio código do produto da nota, sem
@@ -712,7 +716,6 @@ function referenciaFormula2(A: string, G: string, H: string, P: string, Q: strin
     igual(A, "BLUE OCEAN CONFECCOES S.A - FLEXCAP") ||
     igual(A, "TSC MARKETING E LICENCIAMENTO LTDA") ||
     igual(A, "M&L SPORT INNOVATION MARKETING ESPORTIVO LTDA") ||
-    igual(A, "NEXT ELEVEN CONFECCOES LTDA") ||
     igual(A, "CROMOTRANSFER INDUSTRIA DE ESTAMPAS EM TRANSFER LTDA") ||
     igual(A, "EMC TRANSFERS IMPRESSOES LTDA") ||
     igual(A, "TECNOVEX INDUSTRIA DE BANDEIRAS LTDA")
