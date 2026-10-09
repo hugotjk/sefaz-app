@@ -711,7 +711,14 @@ export const syncProdutos = inngest.createFunction(
       // aPartirDe da janela/sweep atual. No backfill, é a data da janela
       // (null = catálogo inteiro). No incremental, é a última sincronização.
       const aPartirDeAtual = (idx: number): string => {
-        if (!emBackfill) return cursor.lastSync!.slice(0, 10);
+        // Incremental: começa 3 dias ANTES da última sincronização. A sobreposição
+        // faz o sync se autocorrigir quando uma página/execução falha (produto
+        // que escapou num dia volta a ser pego nos dias seguintes). Re-gravar
+        // alguns centenas de produtos é barato; perder produto não.
+        if (!emBackfill) {
+          const base = Date.parse(cursor.lastSync!);
+          return new Date(base - 3 * 86_400_000).toISOString().slice(0, 10);
+        }
         const dias = JANELAS_BACKFILL_PRODUTOS_DIAS[idx];
         if (dias == null) return PRODUTOS_DATA_BACKFILL;
         return new Date(Date.now() - dias * 86_400_000).toISOString().slice(0, 10);
