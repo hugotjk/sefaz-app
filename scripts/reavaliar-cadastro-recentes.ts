@@ -6,7 +6,10 @@ import { reavaliarCadastroRecentes } from "../src/lib/reavaliar-cadastro-recente
 
 async function main() {
   const dias = Number(process.argv[2] ?? 7);
+  console.log(`Reavaliando produtos alterados nos últimos ${dias} dias...`);
+  const t0 = Date.now();
   const n = await reavaliarCadastroRecentes(dias);
+  console.log(`(${((Date.now() - t0) / 1000).toFixed(1)}s)`);
   console.log(`NotaItem que passaram a ter cadastro (produtos alterados nos últimos ${dias} dias): ${n}`);
 }
 main().then(() => process.exit(0));
