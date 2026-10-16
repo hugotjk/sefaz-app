@@ -7,6 +7,7 @@ interface Resultado {
   ok: boolean;
   cnpj?: string;
   erro?: string;
+  aviso?: string;
 }
 
 interface CertificadoSalvo {
@@ -152,7 +153,10 @@ export default function CertificadosPage() {
               <div key={r.fileName} className="file-row">
                 <span>{r.fileName}</span>
                 {r.ok ? (
-                  <span className="status-ok">✓ CNPJ {r.cnpj} validado</span>
+                  <span className="status-ok" title={r.aviso}>
+                    ✓ CNPJ {r.cnpj} validado
+                    {r.aviso ? " — salvo (sincronização imediata não disparada)" : ""}
+                  </span>
                 ) : (
                   <span className="status-erro">
                     ✗ {r.erro === "SENHA_INCORRETA" ? "Senha incorreta" : r.erro}

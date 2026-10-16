@@ -12,6 +12,7 @@ interface ResultadoArquivo {
   ok: boolean;
   cnpj?: string;
   erro?: string;
+  aviso?: string;
 }
 
 function formatarData(d: Date): string {
@@ -103,12 +104,23 @@ export async function POST(req: NextRequest) {
         },
       });
 
-      await inngest.send({
-        name: "sefaz/certificate.uploaded",
-        data: { certificateId: certificado.id },
-      });
+      // O certificado JÁ está salvo. Se o disparo da sincronização imediata
+      // falhar (ex.: INNGEST_EVENT_KEY ausente), não tratamos como erro do
+      // upload: avisamos, e a sincronização agendada pega o certificado depois.
+      let aviso: string | undefined;
+      try {
+        await inngest.send({
+          name: "sefaz/certificate.uploaded",
+          data: { certificateId: certificado.id },
+        });
+      } catch (e: any) {
+        aviso =
+          "Certificado salvo, mas a sincronização imediata não foi disparada " +
+          "(verifique INNGEST_EVENT_KEY). A sincronização agendada fará a leitura.";
+        console.error("[upload certificado] falha ao enviar evento ao Inngest:", e?.message ?? e);
+      }
 
-      resultados.push({ fileName, ok: true, cnpj: info.cnpj });
+      resultados.push({ fileName, ok: true, cnpj: info.cnpj, ...(aviso ? { aviso } : {}) });
     } catch (err: any) {
       resultados.push({ fileName, ok: false, erro: err?.message ?? "Erro desconhecido." });
     }
