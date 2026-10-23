@@ -11,6 +11,10 @@ import { PrismaClient } from "@prisma/client";
 import { buscarEventosNfe } from "../src/lib/qive";
 
 const prisma = new PrismaClient();
+const LOGISTICA = new Set([
+  "110130", "110131", "110192", "110193",
+  "610130", "610131", "610600", "610601", "610614", "610615",
+]);
 
 const NOMES: Record<string, string> = {
   "110110": "Carta de correção",
@@ -20,6 +24,16 @@ const NOMES: Record<string, string> = {
   "110131": "Cancelamento do comprovante de entrega",
   "110192": "Insucesso na entrega",
   "110193": "Cancelamento do insucesso na entrega",
+  "610600": "CT-e autorizado para a NF-e",
+  "610601": "CT-e cancelado para a NF-e",
+  "610610": "MDF-e autorizado",
+  "610614": "MDF-e autorizado com CT-e",
+  "610615": "MDF-e cancelado (com CT-e)",
+  "610130": "Comprovante de entrega do CT-e",
+  "610131": "Cancelamento do comprovante de entrega do CT-e",
+  "510630": "Registro de passagem (MDF-e)",
+  "610500": "Registro de passagem (autorização)",
+  "610514": "Registro de passagem propagado (MDF-e/CT-e)",
   "210200": "Confirmação da operação",
   "210210": "Ciência da operação",
   "210220": "Desconhecimento da operação",
@@ -43,7 +57,7 @@ async function main() {
   console.log(`Eventos da Qive com created_at de ${desde} a ${ate} (máx. 60 páginas de 50)...\n`);
 
   const porTipo = new Map<string, number>();
-  const entrega: { chave: string; tipo: string; data: string | null; texto: string | null }[] = [];
+  const entrega: { chave: string; tipo: string; data: string | null; texto: string | null; xml: string }[] = [];
   let total = 0;
   let cursor = 0;
   // 1 amostra de cada tipo fora da tabela NOMES (para descobrir o que é).
@@ -57,8 +71,9 @@ async function main() {
       const cod = ev.type || tag(xml, "tpEvento") || "?";
       porTipo.set(cod, (porTipo.get(cod) ?? 0) + 1);
       if (!NOMES[cod] && !amostras.has(cod)) amostras.set(cod, { chave: ev.access_key, xml });
-      if (["110130", "110131", "110192", "110193"].includes(cod)) {
+      if (LOGISTICA.has(cod)) {
         entrega.push({
+          xml,
           chave: ev.access_key,
           tipo: cod,
           data: tag(xml, "dhEvento"),
@@ -95,42 +110,68 @@ async function main() {
     console.log(`   XML (início): ${a.xml.replace(/\s+/g, " ").slice(0, 500)}`);
   }
 
-  console.log(`\n=== Eventos de ENTREGA / INSUCESSO: ${entrega.length} ===`);
+  console.log(`\n=== Eventos de LOGÍSTICA (CT-e, MDF-e, entrega): ${entrega.length} ===`);
   if (entrega.length === 0) {
-    console.log("Nenhum. A Qive não entregou eventos de entrega nesta janela.");
+    console.log("Nenhum nesta janela.");
     return;
   }
 
-  const chaves = [...new Set(entrega.map((e) => e.chave))];
-  const notas = await prisma.note.findMany({
-    where: { chaveAcesso: { in: chaves } },
-    select: { chaveAcesso: true, numero: true, emitenteNome: true },
-  });
-  const porChave = new Map(notas.map((n) => [n.chaveAcesso, n]));
+  // Datas dos eventos (para saber se são recentes).
+  const datas = entrega.map((e) => e.data).filter(Boolean).sort() as string[];
+  console.log(`Datas dos eventos: de ${datas[0]} até ${datas[datas.length - 1]}`);
 
-  const porEmitente = new Map<string, number>();
-  for (const e of entrega) {
-    const nome = porChave.get(e.chave)?.emitenteNome ?? "(nota fora do banco)";
-    porEmitente.set(nome, (porEmitente.get(nome) ?? 0) + 1);
+  // Detalhe de um comprovante de entrega (campos úteis: data, recebedor...).
+  const ex = entrega.find((e) => e.tipo === "610130");
+  if (ex) {
+    const det = ex.xml.match(/<detEvento[\s\S]*?<\/detEvento>/);
+    console.log("\nDetalhe de um 610130 (comprovante de entrega do CT-e):");
+    console.log("  " + (det ? det[0] : ex.xml).replace(/\s+/g, " ").slice(0, 1200));
   }
-  console.log("\nPor emitente:");
-  [...porEmitente.entries()]
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 20)
-    .forEach(([n, q]) => console.log(`  ${String(q).padStart(5)}  ${n}`));
 
-  console.log(`\nExemplos (destaque: emitente com "${forn}"):`);
-  const destaque = entrega.filter((e) =>
-    (porChave.get(e.chave)?.emitenteNome ?? "").toUpperCase().includes(forn)
-  );
-  const amostra = (destaque.length ? destaque : entrega).slice(0, 15);
-  for (const e of amostra) {
-    const n = porChave.get(e.chave);
-    console.log(
-      `  ${e.tipo} ${NOMES[e.tipo] ?? ""} | NF ${n?.numero ?? "?"} | ${n?.emitenteNome ?? "?"} | ${e.data ?? ""} | ${e.texto ?? ""}`
+  // Agrupa por nota e cruza com o banco.
+  const porNotaEv = new Map<string, Set<string>>();
+  for (const e of entrega) {
+    if (!porNotaEv.has(e.chave)) porNotaEv.set(e.chave, new Set());
+    porNotaEv.get(e.chave)!.add(e.tipo);
+  }
+  const chaves = [...porNotaEv.keys()];
+  const notasEv: any[] = [];
+  for (let k = 0; k < chaves.length; k += 2000) {
+    notasEv.push(
+      ...(await prisma.note.findMany({
+        where: { chaveAcesso: { in: chaves.slice(k, k + 2000) } },
+        select: { chaveAcesso: true, numero: true, emitenteNome: true },
+      }))
     );
   }
-  if (!destaque.length) console.log(`\n(Nenhum evento de entrega de emitente com "${forn}".)`);
+  console.log(`\nNotas com evento de logística: ${chaves.length} | dessas, no nosso banco: ${notasEv.length}`);
+
+  // Funil das notas do fornecedor em foco (emitidas nos últimos `dias` dias).
+  const doForn = await prisma.note.findMany({
+    where: {
+      emitenteNome: { contains: forn, mode: "insensitive" },
+      dataEmissao: { gte: new Date(Date.now() - dias * 86_400_000) },
+    },
+    select: { chaveAcesso: true, numero: true, dataEmissao: true },
+    orderBy: { dataEmissao: "desc" },
+  });
+  let comCte = 0, comMdfe = 0, entregues = 0;
+  for (const n of doForn) {
+    const t = porNotaEv.get(n.chaveAcesso);
+    if (!t) continue;
+    if (t.has("610600")) comCte++;
+    if (t.has("610614")) comMdfe++;
+    if (t.has("610130") && !t.has("610131")) entregues++;
+  }
+  console.log(`\n=== Notas "${forn}" emitidas nos últimos ${dias} dias: ${doForn.length} ===`);
+  console.log(`  com CT-e autorizado (610600):        ${comCte}`);
+  console.log(`  com MDF-e (em transporte) (610614):   ${comMdfe}`);
+  console.log(`  com comprovante de entrega (610130):  ${entregues}`);
+  console.log("\nExemplos (as 15 mais recentes):");
+  for (const n of doForn.slice(0, 15)) {
+    const t = [...(porNotaEv.get(n.chaveAcesso) ?? [])].map((c) => NOMES[c] ?? c).join("; ");
+    console.log(`  NF ${n.numero} | ${n.dataEmissao?.toISOString().slice(0, 10)} | ${t || "(sem eventos de logística)"}`);
+  }
 }
 
 main()
