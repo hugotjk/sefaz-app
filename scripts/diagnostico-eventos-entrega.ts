@@ -46,6 +46,8 @@ async function main() {
   const entrega: { chave: string; tipo: string; data: string | null; texto: string | null }[] = [];
   let total = 0;
   let cursor = 0;
+  // 1 amostra de cada tipo fora da tabela NOMES (para descobrir o que é).
+  const amostras = new Map<string, { chave: string; xml: string }>();
 
   for (let i = 0; i < 60; i++) {
     const pag = await buscarEventosNfe(desde, ate, cursor);
@@ -54,6 +56,7 @@ async function main() {
       const xml = Buffer.from(ev.xml ?? "", "base64").toString("utf8");
       const cod = ev.type || tag(xml, "tpEvento") || "?";
       porTipo.set(cod, (porTipo.get(cod) ?? 0) + 1);
+      if (!NOMES[cod] && !amostras.has(cod)) amostras.set(cod, { chave: ev.access_key, xml });
       if (["110130", "110131", "110192", "110193"].includes(cod)) {
         entrega.push({
           chave: ev.access_key,
@@ -78,6 +81,19 @@ async function main() {
   [...porTipo.entries()]
     .sort((a, b) => b[1] - a[1])
     .forEach(([c, n]) => console.log(`${c}  ${(NOMES[c] ?? "(outro)").padEnd(40)} ${n}`));
+
+  console.log("\n=== Amostra de cada tipo desconhecido ===");
+  for (const [cod, a] of amostras) {
+    const modelo = a.chave.slice(20, 22); // 55 = NF-e, 57 = CT-e, 58 = MDF-e
+    const campos = ["descEvento", "xEvento", "xJust", "xObs", "dhEvento", "tpEvento", "nProt"]
+      .map((t) => [t, tag(a.xml, t)] as const)
+      .filter(([, v]) => v)
+      .map(([t, v]) => `${t}=${String(v).slice(0, 90)}`)
+      .join(" | ");
+    console.log(`\n[${cod}] modelo da chave: ${modelo} | chave: ${a.chave}`);
+    console.log(`   ${campos || "(sem campos conhecidos)"}`);
+    console.log(`   XML (início): ${a.xml.replace(/\s+/g, " ").slice(0, 500)}`);
+  }
 
   console.log(`\n=== Eventos de ENTREGA / INSUCESSO: ${entrega.length} ===`);
   if (entrega.length === 0) {
