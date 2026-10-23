@@ -84,6 +84,7 @@ export interface ItemNFe {
   baseCalcIcms: string;
   valorIcms: string;
   valorIpi: string;
+  valorIcmsSt: string; // vICMSST (ICMS ST do item; vazio se não houver)
   aliqIcms: string;
   aliqIpi: string;
   /** det/infAdProd — informações adicionais DO ITEM (livre, por produto).
@@ -236,6 +237,7 @@ function extrairCampos(infNFe: any, protNFe: any): NFeParaExibir {
       baseCalcIcms: n(icmsGrupo.vBC),
       valorIcms: n(icmsGrupo.vICMS),
       valorIpi: n(ipiGrupo.vIPI),
+      valorIcmsSt: n(icmsGrupo.vICMSST),
       aliqIcms: n(icmsGrupo.pICMS),
       aliqIpi: n(ipiGrupo.pIPI),
       infAdProd: n(det.infAdProd),

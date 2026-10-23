@@ -26,6 +26,13 @@ const RELATORIOS: CardRelatorio[] = [
     etiqueta: "Notas Fiscais",
   },
   {
+    href: "/relatorios/itens-resumido",
+    titulo: "Itens Resumido",
+    descricao:
+      "Uma linha por item das notas recebidas (últimos 30 dias por padrão), com filtros de fornecedor, gestor e loja, para baixar em Excel.",
+    etiqueta: "Notas Fiscais",
+  },
+  {
     href: "/relatorios/conferencia-sem-ean",
     titulo: "Conferência de Produtos Sem EAN",
     descricao:
