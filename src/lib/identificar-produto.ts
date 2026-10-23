@@ -853,7 +853,7 @@ function referenciaFormula3(A: string, G: string, H: string, P: string, Q: strin
   if (igual(A, "ALPAR  DO BRASIL IND.COM.LTDA"))
     return substituir(esquerda(H, localizar("-", H) - 2), "REF: ", "");
   if (igual(A, "BRANDILI TEXTIL LTDA")) return esquerda(G, 12);
-  if (igual(A, "NEW ERA BRASIL LTDA")) return esquerda(G, 15);
+  if (igual(A, "NEW ERA BRASIL LTDA")) return G.trim().split(/\s+/)[0] ?? "";
   if (igual(A, "1QA+ Confeccoes Eireli (Torcida Baby)"))
     return esquerda(G, localizar(".FLA", G) - 1);
   if (igual(A, "MALHARIA RIKAM LTDA")) return substituir(substituir(G, ".JV", ""), ".", "");
