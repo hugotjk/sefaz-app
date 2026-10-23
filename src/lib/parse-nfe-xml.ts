@@ -86,6 +86,8 @@ export interface ItemNFe {
   baseCalcIcms: string;
   valorIcms: string;
   valorIpi: string;
+  /** vIPI como veio na nota; "" quando o item não tem grupo de IPI. */
+  valorIpiOriginal: string;
   valorIcmsSt: string; // vICMSST (ICMS ST do item; vazio se não houver)
   aliqIcms: string;
   aliqIpi: string;
@@ -240,6 +242,7 @@ function extrairCampos(infNFe: any, protNFe: any): NFeParaExibir {
       baseCalcIcms: n(icmsGrupo.vBC),
       valorIcms: n(icmsGrupo.vICMS),
       valorIpi: n(ipiGrupo.vIPI),
+      valorIpiOriginal: ipiGrupo.vIPI === undefined || ipiGrupo.vIPI === null ? "" : String(ipiGrupo.vIPI),
       valorIcmsSt: n(icmsGrupo.vICMSST),
       aliqIcms: n(icmsGrupo.pICMS),
       aliqIpi: n(ipiGrupo.pIPI),
