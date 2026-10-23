@@ -1,7 +1,7 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   experimental: {
-    serverComponentsExternalPackages: ["node-forge", "@prisma/client", "pdfmake"],
+    serverComponentsExternalPackages: ["node-forge", "@prisma/client", "pdfmake", "exceljs"],
   },
 };
 
