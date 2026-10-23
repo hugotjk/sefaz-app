@@ -901,7 +901,7 @@ function referenciaFormula3(A: string, G: string, H: string, P: string, Q: strin
     const i = G.indexOf("-");
     return i > 0 ? G.slice(0, i) : G;
   }
-  if (igual(A, "PUMA SPORTS LTDA")) return esquerda(G, G.length - ultimoNome(H).length);
+  if (igual(A, "PUMA SPORTS LTDA")) return esquerda(G, 8);
   if (
     igual(A, "COOPERSHOES COOP.TRAB.IND.CALC.JOANETENSE LTDA") ||
     igual(A, "COOPERSHOES COOP.TRAB.IND.CAL.JOANETENSE LTDA") ||
