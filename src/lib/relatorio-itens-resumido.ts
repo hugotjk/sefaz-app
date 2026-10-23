@@ -58,9 +58,10 @@ function soDigitos(s: string) {
   return s.replace(/\D/g, "");
 }
 
+// Datas no horário de Brasília (-03:00), como o dia de emissão impresso na nota.
 function sqlDatas(f: Pick<FiltrosItensResumido, "dataInicial" | "dataFinal">) {
-  const gte = f.dataInicial ? new Date(`${f.dataInicial}T00:00:00.000Z`) : null;
-  const lte = f.dataFinal ? new Date(`${f.dataFinal}T23:59:59.999Z`) : null;
+  const gte = f.dataInicial ? new Date(`${f.dataInicial}T00:00:00.000-03:00`) : null;
+  const lte = f.dataFinal ? new Date(`${f.dataFinal}T23:59:59.999-03:00`) : null;
   return [
     gte && !Number.isNaN(gte.getTime()) ? Prisma.sql`AND n."dataEmissao" >= ${gte}` : Prisma.empty,
     lte && !Number.isNaN(lte.getTime()) ? Prisma.sql`AND n."dataEmissao" <= ${lte}` : Prisma.empty,
@@ -154,6 +155,19 @@ export async function opcoesItensResumido(
   };
 }
 
+/** Como o Arquivei: desconto/ST/IPI zerados ou ausentes saem em branco. */
+function numeroOuVazio(s: string): number | null {
+  const v = numero(s);
+  return v === null || v === 0 ? null : v;
+}
+
+/** Dia de emissão como aparece na nota (dhEmi, fuso -03:00), à meia-noite UTC. */
+function diaEmissao(dhEmi: string, fallback: Date | null): Date | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(dhEmi || "");
+  if (m) return new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
+  return fallback;
+}
+
 function numero(s: string): number | null {
   if (s === "" || s == null) return null;
   const v = Number(s);
@@ -231,20 +245,20 @@ export function gerarXlsxItensResumido(f: FiltrosItensResumido): PassThrough {
             nota.emitenteNome ?? nfe.emitente.nome,
             nota.cnpjDestino,
             nota.chaveAcesso,
-            nota.dataEmissao,
+            diaEmissao(nfe.dataEmissao, nota.dataEmissao),
             nota.numero ?? nfe.numero,
             nfe.natOp,
             it.codigo,
             it.descricao,
-            it.ean,
+            it.eanOriginal || it.ean,
             it.ncm,
             numero(it.quantidade),
             numero(it.valorUnitario),
-            numero(it.valorDesconto),
-            numero(it.valorIcmsSt),
-            numero(it.valorIpi),
-            it.infAdProd,
-            nfe.informacoesComplementares,
+            numeroOuVazio(it.valorDesconto),
+            numeroOuVazio(it.valorIcmsSt),
+            numeroOuVazio(it.valorIpi),
+            it.infAdProd === "0" ? "" : it.infAdProd,
+            nfe.informacoesComplementares === "0" ? "" : nfe.informacoesComplementares,
           ]).commit();
         }
       }

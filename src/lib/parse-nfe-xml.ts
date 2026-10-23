@@ -72,6 +72,8 @@ function eanValido(v: any): string {
 export interface ItemNFe {
   codigo: string;
   descricao: string;
+  /** cEAN exatamente como veio na nota (inclui "SEM GTIN"); "" se ausente. */
+  eanOriginal: string;
   ean: string; // GTIN/EAN do item (cEAN, ou cEANTrib se cEAN vier vazio/"SEM GTIN")
   ncm: string;
   cfop: string;
@@ -225,6 +227,7 @@ function extrairCampos(infNFe: any, protNFe: any): NFeParaExibir {
     return {
       codigo: n(prod.cProd),
       descricao: n(prod.xProd),
+      eanOriginal: prod.cEAN === undefined || prod.cEAN === null ? "" : String(prod.cEAN).trim(),
       ean: eanValido(prod.cEAN) || eanValido(prod.cEANTrib),
       ncm: n(prod.NCM),
       cfop: n(prod.CFOP),
