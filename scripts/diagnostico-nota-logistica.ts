@@ -22,6 +22,20 @@ function bloco(xml: string, nome: string): string | null {
 }
 const dia = (d: Date) => d.toISOString().slice(0, 10);
 
+// Repete a chamada quando a conexão cai (ECONNRESET etc.).
+async function eventosComRetry(desde: string, ate: string, cursor: number) {
+  let ultimo: unknown;
+  for (let t = 1; t <= 6; t++) {
+    try {
+      return await buscarEventosNfe(desde, ate, cursor);
+    } catch (e) {
+      ultimo = e;
+      await new Promise((r) => setTimeout(r, 2000 * t));
+    }
+  }
+  throw ultimo;
+}
+
 async function main() {
   const args = process.argv.slice(2).filter((a) => !a.startsWith("--"));
   const qive = process.argv.includes("--qive");
@@ -80,11 +94,15 @@ async function main() {
 
     if (qive) {
       console.log("\n--- Varrendo a fila de eventos da Qive (pode demorar) ---");
-      const desde = dia(new Date(Date.now() - 90 * 86_400_000));
+      // começa na data de emissão (os eventos de logística vêm depois dela)
+      const base = n.dataEmissao ? n.dataEmissao.getTime() : Date.now() - 90 * 86_400_000;
+      const desde = dia(new Date(base - 86_400_000));
       const ate = dia(new Date(Date.now() + 86_400_000));
-      let cursor = 0, lidos = 0, achou = 0, fim = false;
+      let cursor = Number((process.argv.find((a) => a.startsWith("--cursor=")) ?? "--cursor=0").split("=")[1]) || 0;
+      let lidos = 0, achou = 0, fim = false;
+      console.log(`  janela created_at: ${desde} a ${ate}, cursor inicial ${cursor}`);
       for (let i = 0; i < 3000; i++) {
-        const pag = await buscarEventosNfe(desde, ate, cursor);
+        const pag = await eventosComRetry(desde, ate, cursor);
         for (const ev of pag.notas) {
           lidos++;
           if (ev.access_key !== n.chaveAcesso) continue;
@@ -97,7 +115,7 @@ async function main() {
         }
         if (!pag.notas.length || pag.proximoCursor == null || pag.proximoCursor === cursor) { fim = true; break; }
         cursor = pag.proximoCursor;
-        if ((i + 1) % 25 === 0) console.log(`  ... ${lidos} eventos lidos, ${achou} desta nota`);
+        if ((i + 1) % 25 === 0) console.log(`  ... ${lidos} eventos lidos, ${achou} desta nota (cursor ${cursor})`);
       }
       console.log(`  Total lidos: ${lidos} | eventos desta nota: ${achou} | ${fim ? "fila lida até o fim" : "parou no limite"}`);
     }
