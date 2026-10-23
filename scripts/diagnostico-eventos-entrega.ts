@@ -54,7 +54,16 @@ async function main() {
   const forn = (process.argv[3] ?? "ADIDAS").toUpperCase();
   const desde = dia(new Date(Date.now() - dias * 86_400_000));
   const ate = dia(new Date(Date.now() + 86_400_000));
-  console.log(`Eventos da Qive com created_at de ${desde} a ${ate} (máx. 60 páginas de 50)...\n`);
+  const maxPaginas = parseInt(process.argv[4] ?? "2000", 10) || 2000;
+  console.log(`Eventos da Qive com created_at de ${desde} a ${ate} (máx. ${maxPaginas} páginas)...`);
+
+  // Só guardamos eventos de notas que estão no nosso banco (economiza memória).
+  const noBanco = new Set(
+    (await prisma.note.findMany({ select: { chaveAcesso: true } })).map((n) => n.chaveAcesso)
+  );
+  console.log(`Notas no banco: ${noBanco.size}\n`);
+  let fimDaFila = false;
+  let ultimaData = "";
 
   const porTipo = new Map<string, number>();
   const entrega: { chave: string; tipo: string; data: string | null; texto: string | null; xml: string }[] = [];
@@ -63,7 +72,7 @@ async function main() {
   // 1 amostra de cada tipo fora da tabela NOMES (para descobrir o que é).
   const amostras = new Map<string, { chave: string; xml: string }>();
 
-  for (let i = 0; i < 60; i++) {
+  for (let i = 0; i < maxPaginas; i++) {
     const pag = await buscarEventosNfe(desde, ate, cursor);
     for (const ev of pag.notas) {
       total++;
@@ -71,7 +80,9 @@ async function main() {
       const cod = ev.type || tag(xml, "tpEvento") || "?";
       porTipo.set(cod, (porTipo.get(cod) ?? 0) + 1);
       if (!NOMES[cod] && !amostras.has(cod)) amostras.set(cod, { chave: ev.access_key, xml });
-      if (LOGISTICA.has(cod)) {
+      const dh0 = tag(xml, "dhEvento");
+      if (dh0) ultimaData = dh0;
+      if (LOGISTICA.has(cod) && noBanco.has(ev.access_key)) {
         entrega.push({
           xml,
           chave: ev.access_key,
@@ -86,10 +97,15 @@ async function main() {
         });
       }
     }
-    if (pag.notas.length === 0 || pag.proximoCursor == null || pag.proximoCursor === cursor) break;
+    if (pag.notas.length === 0 || pag.proximoCursor == null || pag.proximoCursor === cursor) {
+      fimDaFila = true;
+      break;
+    }
     cursor = pag.proximoCursor;
-    if ((i + 1) % 10 === 0) console.log(`  ... ${total} eventos lidos`);
+    if ((i + 1) % 20 === 0)
+      console.log(`  ... ${total} eventos lidos | último evento: ${ultimaData.slice(0, 10)} | de notas do banco: ${entrega.length}`);
   }
+  console.log(fimDaFila ? "\n(Fila lida até o fim.)" : "\n(ATENÇÃO: parou no limite de páginas; a fila tem mais eventos.)");
 
   console.log(`\nTotal de eventos lidos: ${total}`);
   console.log("\n=== Eventos por tipo ===");
