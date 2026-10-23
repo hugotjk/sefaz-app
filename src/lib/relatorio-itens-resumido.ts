@@ -256,9 +256,9 @@ export function gerarXlsxItensResumido(f: FiltrosItensResumido): PassThrough {
             numero(it.valorUnitario),
             numeroOuVazio(it.valorDesconto),
             numeroOuVazio(it.valorIcmsSt),
-            numeroOuVazio(it.valorIpi),
+            numero(it.valorIpiOriginal), // como o Arquivei: 0 se o item tem IPI zerado, vazio se não tem IPI
             it.infAdProd === "0" ? "" : it.infAdProd,
-            nfe.informacoesComplementares === "0" ? "" : nfe.informacoesComplementares,
+            nfe.informacoesComplementares === "0" ? "" : nfe.informacoesComplementares.replace(/<br\s*\/?>/gi, ""),
           ]).commit();
         }
       }
