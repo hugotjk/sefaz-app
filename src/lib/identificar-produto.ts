@@ -664,6 +664,9 @@ function referenciaFormula2(A: string, G: string, H: string, P: string, Q: strin
   ) {
     // SEERRO(primario; fallback)
     try {
+      // No Excel, LOCALIZAR("-";G) sem hífen dá #VALOR! e a fórmula cai no
+      // SEERRO (fallback). Aqui localizar() devolve 0, então forçamos o mesmo.
+      if (localizar("-", G) === 0) throw new Error("código sem hífen");
       const p = localizar("-", G) + 5;
       const pref = esquerda(G, p);
       const l3 = direita(pref, 3);
