@@ -70,6 +70,8 @@ export default function ConferenciaProdutosPage() {
   // Persiste entre páginas da lista e ao recarregar (localStorage, com try/catch).
   const [selecionados, setSelecionados] = useState<Set<string>>(new Set());
   const [selecaoCarregada, setSelecaoCarregada] = useState(false);
+  const [exportando, setExportando] = useState(false);
+  const [msgExport, setMsgExport] = useState<string | null>(null);
   useEffect(() => {
     try {
       const raw = localStorage.getItem(CHAVE_SELECAO);
@@ -96,6 +98,48 @@ export default function ConferenciaProdutosPage() {
     }, 400);
     return () => clearTimeout(id);
   }, [emitente]);
+
+  // Baixa o .xlsx (padrão do Guia de Importação WQS) dos produtos marcados.
+  async function exportarSelecionados() {
+    if (selecionados.size === 0 || exportando) return;
+    setExportando(true);
+    setMsgExport(null);
+    try {
+      const res = await fetch("/api/relatorios/conferencia-produtos/exportar", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ chaves: [...selecionados] }),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        throw new Error(j.error || "Erro ao gerar o arquivo.");
+      }
+      const nome = res.headers.get("X-Nome-Arquivo") || "CADASTRO.xlsx";
+      const r = JSON.parse(decodeURIComponent(res.headers.get("X-Resumo") || "{}"));
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = nome;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      const avisos: string[] = [];
+      if (r.semTamanho) avisos.push(`${r.semTamanho} sem tamanho identificado (Tamanhos/EANs em branco)`);
+      if (r.semEan) avisos.push(`${r.semEan} com EAN faltando`);
+      if (r.eanRepetido) avisos.push(`${r.eanRepetido} EAN repetido`);
+      if (r.fornecedorDaNota) avisos.push(`${r.fornecedorDaNota} com fornecedor igual ao da nota (modelo novo no PDV)`);
+      setMsgExport(
+        `${nome}: ${r.linhas ?? "?"} linha${r.linhas === 1 ? "" : "s"}` +
+          (avisos.length ? ` · atenção: ${avisos.join("; ")}` : "")
+      );
+    } catch (e: any) {
+      setMsgExport(`Erro: ${e.message}`);
+    } finally {
+      setExportando(false);
+    }
+  }
 
   const buscar = useCallback(async () => {
     setCarregando(true);
@@ -423,6 +467,20 @@ export default function ConferenciaProdutosPage() {
                 )}
                 <button
                   type="button"
+                  className="btn"
+                  style={{ padding: "5px 12px", fontSize: 12 }}
+                  disabled={selecionados.size === 0 || exportando}
+                  title={
+                    selecionados.size === 0
+                      ? "Marque os produtos que quer cadastrar"
+                      : "Baixar a planilha de importação (padrão WQS)"
+                  }
+                  onClick={exportarSelecionados}
+                >
+                  {exportando ? "Gerando…" : "⬇ Exportar planilha"}
+                </button>
+                <button
+                  type="button"
                   className="btn-secundario"
                   style={{ padding: "5px 10px", fontSize: 12 }}
                   onClick={alternarTodos}
@@ -431,6 +489,17 @@ export default function ConferenciaProdutosPage() {
                 </button>
               </div>
             </div>
+            {msgExport && (
+              <p
+                style={{
+                  fontSize: 12,
+                  margin: "-4px 0 12px",
+                  color: msgExport.startsWith("Erro") ? "var(--red)" : "var(--text-dim)",
+                }}
+              >
+                {msgExport}
+              </p>
+            )}
 
             <div className="cp-grupos">
               {grupos.map((g) => {

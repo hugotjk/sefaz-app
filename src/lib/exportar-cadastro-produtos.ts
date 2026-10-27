@@ -1,0 +1,431 @@
+import { Prisma } from "@prisma/client";
+import ExcelJS from "exceljs";
+import { prisma } from "@/lib/db";
+import { parseNFeXml } from "@/lib/parse-nfe-xml";
+import {
+  canonicalizarTamanho,
+  identificarTamanho,
+  tamanhoGenerico,
+} from "@/lib/identificar-tamanho";
+
+/**
+ * Exporta, no padrão do "Guia do Usuário — Importação de Produtos WQS", os
+ * produtos SEM CADASTRO que foram marcados na Conferência de Produtos.
+ *
+ * Uma linha = uma referência (modelo + referência do fornecedor + descrição
+ * sem o tamanho). Tamanhos e EANs vão na mesma ordem, separados por ";".
+ * O que o app ainda não sabe fica EM BRANCO (Grupo, Linha, Coleção, Cor,
+ * Comprador, Preco3...) para ser ensinado depois.
+ */
+
+export const COLUNAS_CADASTRO = [
+  "Referencia",
+  "Grupo",
+  "Modelo",
+  "Linha",
+  "Colecao",
+  "Fornecedor",
+  "Grade",
+  "Descricao",
+  "Unidade",
+  "ReferenciaFornecedor",
+  "Cor",
+  "Tamanhos",
+  "TabelaPreco1",
+  "Preco1",
+  "TabelaPreco2",
+  "Preco2",
+  "TabelaPreco3",
+  "Preco3",
+  "TabelaPreco4",
+  "Preco4",
+  "TabelaPreco5",
+  "Preco5",
+  "NCM",
+  "CEST",
+  "EANs",
+  "TipoProduto",
+  "Comprador (SubGrupo)",
+] as const;
+
+// Códigos das tabelas de preço do PDV, nas 5 posições (1 custo bruto, 2 custo
+// total, 3 varejo, 7 e 9 conforme combinado).
+const TABELAS = [1, 2, 3, 7, 9];
+
+export interface ParProduto {
+  modelo: string | null;
+  referencia: string | null;
+}
+
+export interface ResumoExportacao {
+  produtosSelecionados: number;
+  linhas: number;
+  semTamanho: number; // linhas com algum tamanho não identificado (Tamanhos/EANs ficam em branco)
+  semEan: number; // linhas com EAN faltando em algum tamanho
+  eanRepetido: number;
+  fornecedorDoPdv: number;
+  fornecedorDaNota: number;
+}
+
+export function parseChaves(chaves: unknown): ParProduto[] {
+  if (!Array.isArray(chaves)) return [];
+  const out: ParProduto[] = [];
+  for (const c of chaves) {
+    if (typeof c !== "string") continue;
+    try {
+      const [m, r] = JSON.parse(c);
+      out.push({ modelo: m ?? null, referencia: r ?? null });
+    } catch {
+      /* chave inválida: ignora */
+    }
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+const semAcento = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "");
+const norm = (s: string | null | undefined) => semAcento(s ?? "").toUpperCase();
+
+function temPalavra(texto: string, palavras: string[]): boolean {
+  const t = ` ${norm(texto).replace(/[^A-Z0-9]+/g, " ")} `;
+  return palavras.some((p) => t.includes(` ${p} `));
+}
+
+const ORDEM_LETRAS = ["4PP", "3PP", "2PP", "PP", "P", "M", "G", "GG", "XG", "XGG", "EG", "EGG", "2G", "3G", "4G", "5G"];
+function chaveOrdem(t: string): [number, number, string] {
+  const num = /^(\d+(?:[.,]\d+)?)/.exec(t);
+  if (num && !ORDEM_LETRAS.includes(t)) return [1, parseFloat(num[1].replace(",", ".")), t];
+  const i = ORDEM_LETRAS.indexOf(t);
+  if (i >= 0) return [0, i, t];
+  return [2, 0, t];
+}
+function compararTamanhos(a: string, b: string) {
+  const x = chaveOrdem(a);
+  const y = chaveOrdem(b);
+  return x[0] - y[0] || x[1] - y[1] || x[2].localeCompare(y[2]);
+}
+
+function descricaoSemTamanho(desc: string, tam: string | null): string {
+  let d = desc.replace(/\s+/g, " ").trim();
+  d = d.replace(/\s*[-–/]?\s*\bTAM(?:ANHO)?\.?\s*:?\s*[A-Z0-9/.,]+\s*$/i, "");
+  if (tam) {
+    const esc = tam.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    d = d.replace(new RegExp(`(?:\\s*[-–/]\\s*|\\s+)${esc}\\s*$`, "i"), "");
+  }
+  return d.trim().toUpperCase();
+}
+
+function soDigitos(s: string | null | undefined) {
+  return (s ?? "").replace(/\D/g, "");
+}
+
+const ROUPAS = ["CAMISA", "CAMISETA", "BERMUDA", "SHORT", "SHORTS", "JAQUETA", "MOLETOM", "CALCA", "BLUSA", "REGATA", "VESTIDO", "BODY", "MACACAO", "SAIA", "COLETE", "CORTA", "VENTO", "POLO", "CONJUNTO", "BIQUINI", "MAIO", "SUNGA", "CUECA", "LEGGING", "TOP", "T", "SHIRT", "TSHIRT", "CASACO", "AGASALHO", "JERSEY"];
+
+interface ItemBase {
+  id: string;
+  noteId: string;
+  codigo: string;
+  descricao: string;
+  ean: string | null;
+  ncm: string | null;
+  infAdProd: string | null;
+  quantidade: number;
+  valorUnitario: number;
+  valorTotal: number;
+  modelo: string | null;
+  referencia: string | null;
+  emitente: string | null;
+  data: Date | null;
+}
+
+interface DetalheXml {
+  unidade: string;
+  desconto: number;
+  ipi: number;
+  icmsSt: number;
+}
+
+async function carregarItens(pares: ParProduto[]): Promise<ItemBase[]> {
+  const modelos = pares.map((p) => p.modelo);
+  const refs = pares.map((p) => p.referencia);
+  const rows = await prisma.$queryRaw<any[]>(Prisma.sql`
+    SELECT i.id, i."noteId" AS note_id,
+           regexp_replace(i."codigoProduto", '[^[:print:]]', ' ', 'g') AS codigo,
+           regexp_replace(i."descricao", '[^[:print:]]', ' ', 'g') AS descricao,
+           i.ean, i.ncm,
+           regexp_replace(COALESCE(i."infAdProd", ''), '[^[:print:]]', ' ', 'g') AS inf_ad,
+           i.quantidade::float8 AS qtd, i."valorUnitario"::float8 AS vun, i."valorTotal"::float8 AS vtot,
+           i."modeloIdentificado" AS modelo, i."referenciaFornecedorIdentificada" AS referencia,
+           regexp_replace(COALESCE(n."emitenteNome", ''), '[^[:print:]]', ' ', 'g') AS emitente,
+           n."dataEmissao" AS data
+    FROM "NotaItem" i
+    JOIN "Note" n ON n.id = i."noteId"
+    JOIN unnest(${modelos}::text[], ${refs}::text[]) AS p(m, r)
+      ON p.m IS NOT DISTINCT FROM i."modeloIdentificado"
+     AND p.r IS NOT DISTINCT FROM i."referenciaFornecedorIdentificada"
+    WHERE i."temCadastro" = false
+    ORDER BY n."dataEmissao" DESC NULLS LAST, i.id
+  `);
+  return rows.map((r) => ({
+    id: r.id,
+    noteId: r.note_id,
+    codigo: r.codigo ?? "",
+    descricao: r.descricao ?? "",
+    ean: r.ean,
+    ncm: r.ncm,
+    infAdProd: r.inf_ad || null,
+    quantidade: Number(r.qtd),
+    valorUnitario: Number(r.vun),
+    valorTotal: Number(r.vtot),
+    modelo: r.modelo,
+    referencia: r.referencia,
+    emitente: r.emitente || null,
+    data: r.data,
+  }));
+}
+
+/** Lê o XML das notas e devolve, por item, unidade/desconto/IPI/ICMS ST. */
+async function detalhesDoXml(itens: ItemBase[]): Promise<Map<string, DetalheXml>> {
+  const out = new Map<string, DetalheXml>();
+  const porNota = new Map<string, ItemBase[]>();
+  for (const it of itens) {
+    const l = porNota.get(it.noteId) ?? [];
+    l.push(it);
+    porNota.set(it.noteId, l);
+  }
+  const ids = [...porNota.keys()];
+  for (let i = 0; i < ids.length; i += 50) {
+    const lote = ids.slice(i, i + 50);
+    const notas = await prisma.$queryRaw<{ id: string; xml: string }[]>(Prisma.sql`
+      SELECT id, regexp_replace("xmlCompleto", '[^[:print:]]', ' ', 'g') AS xml
+      FROM "Note" WHERE id = ANY(${lote}::text[]) AND "xmlCompleto" <> ''
+    `);
+    for (const n of notas) {
+      let nfe;
+      try {
+        nfe = parseNFeXml(n.xml);
+      } catch {
+        continue;
+      }
+      // casa NotaItem x item do XML por código + descrição + valor total
+      const disponiveis = [...nfe.itens];
+      for (const it of porNota.get(n.id) ?? []) {
+        const k = disponiveis.findIndex(
+          (x) =>
+            x.codigo.trim() === it.codigo.trim() &&
+            Math.abs(Number(x.valorTotal) - it.valorTotal) < 0.005 &&
+            Math.abs(Number(x.quantidade) - it.quantidade) < 0.0005
+        );
+        if (k < 0) continue;
+        const x = disponiveis.splice(k, 1)[0];
+        out.set(it.id, {
+          unidade: (x.unidade || "").trim().toUpperCase(),
+          desconto: Number(x.valorDesconto) || 0,
+          ipi: Number(x.valorIpi) || 0,
+          icmsSt: Number(x.valorIcmsSt) || 0,
+        });
+      }
+    }
+  }
+  return out;
+}
+
+/** Fornecedor do PDV mais usado por modelo (aprendido do catálogo já sincronizado). */
+async function fornecedorPorModelo(modelos: string[]): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  if (!modelos.length) return out;
+  const rows = await prisma.$queryRaw<{ modelo: string; fornecedor: string }[]>(Prisma.sql`
+    SELECT upper(trim("modeloNome")) AS modelo,
+           mode() WITHIN GROUP (ORDER BY "fornecedorNome") AS fornecedor
+    FROM "Produto"
+    WHERE "fornecedorNome" IS NOT NULL AND trim("fornecedorNome") <> ''
+      AND upper(trim("modeloNome")) = ANY(${modelos.map((m) => m.toUpperCase().trim())}::text[])
+    GROUP BY 1
+  `);
+  for (const r of rows) out.set(r.modelo, r.fornecedor);
+  return out;
+}
+
+function arred2(v: number) {
+  return Math.round(v * 100) / 100;
+}
+
+export async function gerarCadastroXlsx(
+  pares: ParProduto[]
+): Promise<{ buffer: Buffer; resumo: ResumoExportacao }> {
+  const itens = pares.length ? await carregarItens(pares) : [];
+  const detalhes = await detalhesDoXml(itens);
+  const fornPdv = await fornecedorPorModelo([
+    ...new Set(itens.map((i) => i.modelo).filter((m): m is string => !!m)),
+  ]);
+
+  // ---- agrupa em linhas: modelo + referência + descrição sem tamanho --------
+  interface ItemComTam extends ItemBase {
+    tam: string | null; // tamanho já na grafia do PDV
+    tamBruto: string | null;
+  }
+  const grupos = new Map<string, ItemComTam[]>();
+  for (const it of itens) {
+    const tamBruto =
+      identificarTamanho({
+        emitente: it.emitente ?? "",
+        modelo: it.modelo,
+        codigo: it.codigo,
+        descricao: it.descricao,
+        ean: it.ean,
+        infAdProd: it.infAdProd,
+        referencia: it.referencia,
+      }) ??
+      tamanhoGenerico({ codigo: it.codigo, descricao: it.descricao, infAdProd: it.infAdProd });
+    const tam = tamBruto ? canonicalizarTamanho(tamBruto) : null;
+    const desc = descricaoSemTamanho(it.descricao, tamBruto);
+    const chave = JSON.stringify([it.modelo, it.referencia, desc]);
+    const l = grupos.get(chave) ?? [];
+    l.push({ ...it, tam, tamBruto });
+    grupos.set(chave, l);
+  }
+
+  const resumo: ResumoExportacao = {
+    produtosSelecionados: pares.length,
+    linhas: 0,
+    semTamanho: 0,
+    semEan: 0,
+    eanRepetido: 0,
+    fornecedorDoPdv: 0,
+    fornecedorDaNota: 0,
+  };
+
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet("Sheet");
+  ws.addRow([...COLUNAS_CADASTRO]);
+  ws.getRow(1).font = { bold: true };
+  // colunas que precisam continuar como TEXTO (zeros à esquerda, sem notação científica)
+  for (const nome of ["Referencia", "ReferenciaFornecedor", "NCM", "CEST", "EANs", "Tamanhos"]) {
+    ws.getColumn(COLUNAS_CADASTRO.indexOf(nome as any) + 1).numFmt = "@";
+  }
+  ws.columns.forEach((c, i) => (c.width = Math.max(12, COLUNAS_CADASTRO[i].length + 2)));
+  ws.getColumn(COLUNAS_CADASTRO.indexOf("Descricao") + 1).width = 48;
+
+  const eansVistos = new Map<string, number>();
+  const linhas: any[][] = [];
+
+  for (const [chave, lista] of grupos) {
+    const [modelo, referencia, descricao] = JSON.parse(chave) as [string | null, string | null, string];
+    const maisRecente = lista[0]; // já vem ordenado por data desc
+    const emitente = maisRecente.emitente ?? "";
+    const ehAdidas = norm(emitente).includes("ADIDAS");
+    const texto = `${descricao} ${modelo ?? ""}`;
+
+    // ---- tamanhos e EANs (mesma ordem; um EAN por tamanho) -------------------
+    const todosComTamanho = lista.every((i) => !!i.tam);
+    let tamanhos = "";
+    let eans = "";
+    let eanFaltando = false;
+    if (todosComTamanho) {
+      const porTam = new Map<string, string>();
+      for (const it of lista) {
+        const t = it.tam!;
+        const ean = /^\d{8,14}$/.test(it.ean ?? "") ? it.ean! : "";
+        if (!porTam.has(t) || (!porTam.get(t) && ean)) porTam.set(t, ean);
+      }
+      const ordem = [...porTam.keys()].sort(compararTamanhos);
+      tamanhos = ordem.join(";");
+      eans = ordem.map((t) => porTam.get(t) ?? "").join(";");
+      eanFaltando = ordem.some((t) => !porTam.get(t));
+      if (eanFaltando) resumo.semEan++;
+      for (const t of ordem) {
+        const e = porTam.get(t);
+        if (e) eansVistos.set(e, (eansVistos.get(e) ?? 0) + 1);
+      }
+    } else {
+      resumo.semTamanho++;
+    }
+
+    // ---- grade / unidade / tipo ------------------------------------------------
+    const ehCalcado = temPalavra(texto, ["TENIS", "CHINELO", "SANDALIA", "SLIDE", "CHUTEIRA"]);
+    const grade = ehCalcado ? "TENIS" : "PMG";
+    const det = detalhes.get(maisRecente.id);
+    let unidade = "";
+    if (ehCalcado) unidade = "PAR";
+    else if (temPalavra(texto, ROUPAS)) unidade = "PC";
+    else if (det?.unidade === "PC" || det?.unidade === "PAR") unidade = det.unidade;
+    const tipoProduto = ehAdidas
+      ? temPalavra(texto, ["BOLSA", "MOCHILA"]) ? 5 : 1
+      : temPalavra(texto, ["MOCHILA", "CAMERA"]) ? 5 : 1;
+
+    // ---- fornecedor ------------------------------------------------------------
+    let fornecedor = modelo ? fornPdv.get(modelo.toUpperCase().trim()) ?? "" : "";
+    if (fornecedor) resumo.fornecedorDoPdv++;
+    else {
+      fornecedor = emitente;
+      resumo.fornecedorDaNota++;
+    }
+
+    // ---- preços ----------------------------------------------------------------
+    const qtd = maisRecente.quantidade || 1;
+    const preco1 = arred2(maisRecente.valorUnitario);
+    const preco2 = det
+      ? arred2((maisRecente.valorTotal - det.desconto + det.ipi + det.icmsSt) / qtd)
+      : null;
+    // Preco3 (markup do modelo) ainda não aprendido -> em branco.
+    // Preco4: 0 para o que não é Flamengo/Fluminense; Fla/Flu repete/soma sobre o Preco3 (em branco).
+    const flaFlu = temPalavra(texto, ["FLAMENGO", "FLA", "CRF", "FLUMINENSE", "FLU"]);
+    const preco4: number | null = flaFlu ? null : 0;
+
+    const ncm = soDigitos(maisRecente.ncm);
+    linhas.push([
+      "", // Referencia: em branco -> o sistema gera a próxima referência da rede
+      "", // Grupo (a ensinar)
+      modelo ?? "",
+      "", // Linha (a ensinar)
+      "", // Colecao (a ensinar)
+      fornecedor,
+      grade,
+      descricao,
+      unidade,
+      referencia ?? "",
+      "", // Cor (a ensinar)
+      tamanhos,
+      TABELAS[0], preco1,
+      TABELAS[1], preco2,
+      TABELAS[2], null,
+      TABELAS[3], preco4,
+      TABELAS[4], 0,
+      ncm.length === 8 ? ncm : "",
+      "0",
+      eans,
+      tipoProduto,
+      "", // Comprador (SubGrupo) = Grupo (a ensinar)
+    ]);
+  }
+
+  // ordena por modelo, referência, descrição
+  linhas.sort(
+    (a, b) =>
+      String(a[2]).localeCompare(String(b[2]), "pt-BR") ||
+      String(a[9]).localeCompare(String(b[9]), "pt-BR") ||
+      String(a[7]).localeCompare(String(b[7]), "pt-BR")
+  );
+  for (const l of linhas) ws.addRow(l);
+  resumo.linhas = linhas.length;
+  resumo.eanRepetido = [...eansVistos.values()].filter((n) => n > 1).length;
+
+  const buffer = Buffer.from(await wb.xlsx.writeBuffer());
+  return { buffer, resumo };
+}
+
+/** CADASTRO_27_10_2026__16_41 (dia_mês_ano__hora_minuto, horário de Brasília). */
+export function nomeArquivoCadastro(d = new Date()): string {
+  const p = new Intl.DateTimeFormat("pt-BR", {
+    timeZone: "America/Sao_Paulo",
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(d);
+  const g = (t: string) => p.find((x) => x.type === t)?.value ?? "00";
+  const hh = g("hour") === "24" ? "00" : g("hour");
+  return `CADASTRO_${g("day")}_${g("month")}_${g("year")}__${hh}_${g("minute")}.xlsx`;
+}
