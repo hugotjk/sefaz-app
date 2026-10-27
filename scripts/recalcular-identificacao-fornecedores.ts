@@ -77,6 +77,8 @@ const EMPRESAS_CORRECOES = [
 // Regras novas de Modelo + Referência.
 const EMPRESAS_NOVAS = [
   "NEXT ELEVEN CONFECCOES LTDA",
+  "NEW ERA BRASIL LTDA", // referência = código até o 1º espaço
+  "PUMA SPORTS LTDA", // referência = 8 primeiros caracteres do código
   "DEVANLAY VENTURES DO BRASIL COMERCIO, IMPORTACAO, EXPORTACAO",
   "DEVANLAY VENTURES DO BRASIL COM. IMP. EXP. E PART. LTDA",
   "DEVANLAY VENTURES DO BRASIL COM IMP EXP E PART LTDA",
