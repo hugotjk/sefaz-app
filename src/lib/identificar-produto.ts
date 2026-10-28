@@ -717,10 +717,10 @@ function referenciaFormula2(A: string, G: string, H: string, P: string, Q: strin
     const i = G.lastIndexOf("-");
     return i > 0 ? G.slice(0, i) : G;
   }
-  // BB Industria: código sem os 2 primeiros caracteres (sempre "00").
-  //   "0087568000006" -> "87568000006"
+  // BB Industria (Go Case): tira os zeros à esquerda (1 ou 2, no máx. 2).
+  //   "0087568000006" -> "87568000006"   |   "0103836000003" -> "103836000003"
   if (igual(A, "BB INDUSTRIA E COMERCIO DE ARTIGOS DE USO PESSOAL LTDA"))
-    return G.slice(2);
+    return G.replace(/^0{1,2}/, "");
   // Next Eleven (modelo Texneo+): o código da nota termina em ".N" (índice da
   // variação/tamanho) que NÃO faz parte da referência.
   //   "CRF03.1" -> "CRF03"   |   "FLA08.2" -> "FLA08"   |   "CRF22" -> "CRF22"
