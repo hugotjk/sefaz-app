@@ -532,7 +532,7 @@ export async function gerarCadastroXlsx(
       tipoProduto,
       comprador,
     ];
-    nova.nomeProd = nomeProd;
+    (nova as any).nomeProd = nomeProd;
     linhas.push(nova);
   }
 
