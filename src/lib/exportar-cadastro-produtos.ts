@@ -472,7 +472,7 @@ export async function gerarCadastroXlsx(
       String(a[9]).localeCompare(String(b[9]), "pt-BR") ||
       String(a[7]).localeCompare(String(b[7]), "pt-BR")
   );
-  for (const l of linhas) ws.addRow(l);
+  for (const l of linhas) ws.addRow(l.map((v) => (typeof v === "string" ? v.toUpperCase() : v)));
   resumo.linhas = linhas.length;
   resumo.eanRepetido = [...eansVistos.values()].filter((n) => n > 1).length;
 
