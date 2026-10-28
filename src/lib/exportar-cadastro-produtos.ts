@@ -547,7 +547,7 @@ export async function gerarCadastroXlsx(
       TABELAS[3], preco4,
       TABELAS[4], 0,
       ncm.length === 8 ? ncm : "",
-      "0",
+      "", // CEST: sempre vazio
       eans,
       tipoProduto,
       comprador,
@@ -602,6 +602,7 @@ export async function gerarCadastroXlsx(
   ws.eachRow((row, n) => {
     if (n === 1) return;
     for (let c = 2; c <= COLUNAS_CADASTRO.length; c++) {
+      if (COLUNAS_CADASTRO[c - 1] === "CEST") continue; // CEST vazio é normal: sem amarelo
       const cell = row.getCell(c);
       const v: any = cell.value;
       if (v == null || v === "") cell.fill = amarelo as any;
