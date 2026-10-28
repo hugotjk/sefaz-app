@@ -284,8 +284,8 @@ export function formulasLacoste(r: number) {
     colecao: bin("PRODUTO", "COLECAO"),
     cor: `dbsleek("MOSTRA","LACOSTE.BIN","PRODUTO_COR","DESC_COR_PRODUTO","PRODUTO_COR","=",${ref})`,
     tamanhos: tamanhosJoin,
-    preco3: `dbsleek("MOSTRA","LACOSTE.BIN","PRODUTO_COR","PRECO","PRODUTO_COR","=",${ref})`,
-    preco12: `R${r}/2.4`,
+    preco3: `ROUND(dbsleek("MOSTRA","LACOSTE.BIN","PRODUTO_COR","PRECO","PRODUTO_COR","=",${ref}),2)`,
+    preco12: `ROUND(R${r}/2.4,2)`,
     comprador: bin("PRODUTO", "GRUPO"),
     eans,
   };
@@ -445,6 +445,7 @@ export async function gerarCadastroXlsx(
     let grupo = "";
     let linha = "";
     let cor = "";
+    let colecao = "";
     if (modeloU === "LACOSTE") {
       const tg = tipoEGrupoLacoste(descricao);
       if (tg) {
@@ -462,6 +463,8 @@ export async function gerarCadastroXlsx(
       const r = nomeECorKenner(descricao, modeloU.includes("KENNER") ? "KENNER" : "REDLEY");
       nomeProd = r.nome;
       cor = r.cor;
+      linha = "UNISSEX";
+      colecao = "PERMANENTE";
     }
     // ME LEVA FARM: descrição da nota + código do produto na nota.
     const descricaoFinal =
@@ -497,14 +500,23 @@ export async function gerarCadastroXlsx(
     const custoTotUn = det
       ? (maisRecente.valorTotal - det.desconto + det.ipi + det.icmsSt) / qtd
       : null;
-    let preco1: number | null = arred2(custoUn);
-    let preco2: number | null = custoTotUn == null ? null : arred2(custoTotUn);
-    let preco3: number | null = null; // markup do modelo ainda não aprendido (exceto ME LEVA FARM)
+    // Cálculos com o valor cheio; só no fim arredonda para 2 casas.
+    let preco1: number | null = custoUn;
+    let preco2: number | null = custoTotUn;
+    let preco3: number | null = null; // markup do modelo ainda não aprendido
     if (modeloU === "ME LEVA FARM") {
-      preco1 = arred2(custoUn * 1.5);
-      preco2 = custoTotUn == null ? null : arred2(custoTotUn * 1.5);
+      preco1 = custoUn * 1.5;
+      preco2 = custoTotUn == null ? null : custoTotUn * 1.5;
       preco3 = preco2 == null ? null : fim999(preco2 * 2.2);
+    } else if (ehKennerRedley && preco2 != null) {
+      // x2,5 ou x2,55: o que ficar mais perto de um valor terminado em 9,99
+      const cand = [preco2 * 2.5, preco2 * 2.55].map((v) => ({ v, f: fim999(v) }));
+      cand.sort((a, b) => Math.abs(a.v - a.f) - Math.abs(b.v - b.f));
+      preco3 = cand[0].f;
     }
+    preco1 = preco1 == null ? null : arred2(preco1);
+    preco2 = preco2 == null ? null : arred2(preco2);
+    preco3 = preco3 == null ? null : arred2(preco3);
     // Preco4: 0 para o que não é Flamengo/Fluminense. Fla/Flu: Preco3 + 10%
     // (adidas Fla e Puma repetem o Preco3); em branco enquanto o Preco3 não existe.
     const flaFlu = temPalavra(texto, ["FLAMENGO", "FLA", "CRF", "FLUMINENSE", "FLU"]);
@@ -521,7 +533,7 @@ export async function gerarCadastroXlsx(
       grupo,
       modelo ?? "",
       linha,
-      "", // Colecao (a ensinar)
+      colecao,
       fornecedor,
       grade,
       descricaoFinal,
@@ -553,6 +565,10 @@ export async function gerarCadastroXlsx(
   );
   for (const l of linhas) {
     const row = ws.addRow(l.map((v) => (typeof v === "string" ? v.toUpperCase() : v)));
+    // Comprador (SubGrupo) = Grupo, sempre como fórmula (=B2, =B3...)
+    const cc = row.getCell(27);
+    cc.numFmt = "General";
+    cc.value = { formula: `B${row.number}` } as any;
     const mU = norm(String(l[2]));
     if (mU.includes("KENNER") || mU.includes("REDLEY")) {
       // GRUPO [NOME DO PRODUTO] REFERENCIAFORNECEDOR COR MODELO (fórmula: acompanha o que você preencher)
@@ -578,7 +594,6 @@ export async function gerarCadastroXlsx(
       put(16, f.preco12);
       put(18, f.preco3);
       put(25, f.eans);
-      put(27, f.comprador);
     }
   }
   resumo.linhas = linhas.length;
