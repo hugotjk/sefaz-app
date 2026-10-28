@@ -250,6 +250,11 @@ const tokensDe = (t: string) =>
  * na descrição/infAdProd -> última palavra da descrição -> sufixo do código
  * (depois de "-", "_" ou "."). Devolve null se nada parecer tamanho.
  */
+/** O texto parece um tamanho de verdade (P/M/G, 38, 10A, 40/41...)? */
+export function tamanhoPlausivel(t: string | null | undefined): boolean {
+  return !!t && VOCAB_TAMANHO.test(t.trim());
+}
+
 export function tamanhoGenerico(e: Pick<EntradaTamanho, "codigo" | "descricao" | "infAdProd">): string | null {
   const textos = [e.descricao ?? "", e.infAdProd ?? ""];
   for (const t of textos) {

@@ -6,7 +6,9 @@ import {
   canonicalizarTamanho,
   identificarTamanho,
   tamanhoGenerico,
+  tamanhoPlausivel,
 } from "@/lib/identificar-tamanho";
+import { tipoEGrupoLacoste } from "@/lib/lacoste-grupos";
 
 /**
  * Exporta, no padrão do "Guia do Usuário — Importação de Produtos WQS", os
@@ -250,6 +252,32 @@ function arred2(v: number) {
   return Math.round(v * 100) / 100;
 }
 
+/** Arredonda para o valor mais próximo que termina em 9,99 (mínimo 9,99). */
+function fim999(v: number) {
+  if (v <= 9.99) return 9.99;
+  const k = Math.round((v - 9.99) / 10);
+  return arred2(k * 10 + 9.99);
+}
+
+/** ME LEVA FARM: Grupo = 1ª palavra da descrição (PORTA JOIA = 2 palavras; MAXI/MINI são ignorados). */
+function grupoMeLeva(desc: string): string {
+  const p = norm(desc).replace(/[^A-Z0-9 ]+/g, " ").trim().split(/\s+/).filter(Boolean);
+  let i = 0;
+  while (i < p.length && (p[i] === "MAXI" || p[i] === "MINI")) i++;
+  const w = p.slice(i);
+  if (w[0] === "PORTA" && /^JOIAS?$/.test(w[1] ?? "")) return "PORTA JOIA";
+  return w[0] ?? "";
+}
+
+function normalizarUnidade(u: string | undefined): string {
+  const v = (u ?? "").trim().toUpperCase();
+  if (!v) return "";
+  if (["UND", "UNID", "UNIDADE", "UN."].includes(v)) return "UN";
+  if (["PR", "PAR", "PARES"].includes(v)) return "PAR";
+  if (["PÇ", "PEÇA", "PECA", "PCS", "PC"].includes(v)) return "PC";
+  return v;
+}
+
 export async function gerarCadastroXlsx(
   pares: ParProduto[]
 ): Promise<{ buffer: Buffer; resumo: ResumoExportacao }> {
@@ -277,11 +305,15 @@ export async function gerarCadastroXlsx(
         referencia: it.referencia,
       }) ??
       tamanhoGenerico({ codigo: it.codigo, descricao: it.descricao, infAdProd: it.infAdProd });
-    const tam = tamBruto ? canonicalizarTamanho(tamBruto) : null;
+    // Lacoste: a regra antiga devolve a referência do fim da descrição, não o
+    // tamanho. Só aceita se parecer tamanho de verdade (senão fica em branco).
+    const tamBrutoOk =
+      tamBruto && norm(it.modelo) === "LACOSTE" && !tamanhoPlausivel(tamBruto) ? null : tamBruto;
+    const tam = tamBrutoOk ? canonicalizarTamanho(tamBrutoOk) : null;
     const desc = descricaoSemTamanho(it.descricao, tamBruto);
     const chave = JSON.stringify([it.modelo, it.referencia, desc]);
     const l = grupos.get(chave) ?? [];
-    l.push({ ...it, tam, tamBruto });
+    l.push({ ...it, tam, tamBruto: tamBrutoOk });
     grupos.set(chave, l);
   }
 
@@ -341,17 +373,38 @@ export async function gerarCadastroXlsx(
       resumo.semTamanho++;
     }
 
+    // ---- regras por modelo (Grupo, Linha, Cor) --------------------------------
+    const modeloU = norm(modelo);
+    let grupo = "";
+    let linha = "";
+    let cor = "";
+    if (modeloU === "LACOSTE") {
+      const tg = tipoEGrupoLacoste(descricao);
+      if (tg) {
+        grupo = tg.grupo;
+        linha = tg.tipo;
+      }
+    } else if (modeloU === "ME LEVA FARM") {
+      grupo = grupoMeLeva(descricao);
+      linha = "FEMININA";
+      cor = "UNICA";
+    }
+    const comprador = grupo; // regra geral: Comprador = Grupo
+
     // ---- grade / unidade / tipo ------------------------------------------------
-    const ehCalcado = temPalavra(texto, ["TENIS", "CHINELO", "SANDALIA", "SLIDE", "CHUTEIRA"]);
+    const ehCalcado = grupo
+      ? ["TENIS", "TENIS INF", "CHINELO"].includes(grupo)
+      : temPalavra(texto, ["TENIS", "CHINELO", "SANDALIA", "SLIDE", "CHUTEIRA"]);
     const grade = ehCalcado ? "TENIS" : "PMG";
     const det = detalhes.get(maisRecente.id);
-    let unidade = "";
+    // Unidade: calçado = PAR; roupa = PC; senão a da nota; sem unidade na nota = PC.
+    let unidade: string;
     if (ehCalcado) unidade = "PAR";
     else if (temPalavra(texto, ROUPAS)) unidade = "PC";
-    else if (det?.unidade === "PC" || det?.unidade === "PAR") unidade = det.unidade;
+    else unidade = normalizarUnidade(det?.unidade) || "PC";
     const tipoProduto = ehAdidas
       ? temPalavra(texto, ["BOLSA", "MOCHILA"]) ? 5 : 1
-      : temPalavra(texto, ["MOCHILA", "CAMERA"]) ? 5 : 1;
+      : temPalavra(texto, ["MOCHILA", "CAMERA"]) || grupo === "MOCHILA" ? 5 : 1;
 
     // ---- fornecedor ------------------------------------------------------------
     let fornecedor = modelo ? fornPdv.get(modelo.toUpperCase().trim()) ?? "" : "";
@@ -363,39 +416,52 @@ export async function gerarCadastroXlsx(
 
     // ---- preços ----------------------------------------------------------------
     const qtd = maisRecente.quantidade || 1;
-    const preco1 = arred2(maisRecente.valorUnitario);
-    const preco2 = det
-      ? arred2((maisRecente.valorTotal - det.desconto + det.ipi + det.icmsSt) / qtd)
+    const custoUn = maisRecente.valorUnitario;
+    const custoTotUn = det
+      ? (maisRecente.valorTotal - det.desconto + det.ipi + det.icmsSt) / qtd
       : null;
-    // Preco3 (markup do modelo) ainda não aprendido -> em branco.
-    // Preco4: 0 para o que não é Flamengo/Fluminense; Fla/Flu repete/soma sobre o Preco3 (em branco).
+    let preco1: number | null = arred2(custoUn);
+    let preco2: number | null = custoTotUn == null ? null : arred2(custoTotUn);
+    let preco3: number | null = null; // markup do modelo ainda não aprendido (exceto ME LEVA FARM)
+    if (modeloU === "ME LEVA FARM") {
+      preco1 = arred2(custoUn * 1.5);
+      preco2 = custoTotUn == null ? null : arred2(custoTotUn * 1.5);
+      preco3 = preco2 == null ? null : fim999(preco2 * 2.2);
+    }
+    // Preco4: 0 para o que não é Flamengo/Fluminense. Fla/Flu: Preco3 + 10%
+    // (adidas Fla e Puma repetem o Preco3); em branco enquanto o Preco3 não existe.
     const flaFlu = temPalavra(texto, ["FLAMENGO", "FLA", "CRF", "FLUMINENSE", "FLU"]);
-    const preco4: number | null = flaFlu ? null : 0;
+    let preco4: number | null = 0;
+    if (flaFlu) {
+      if (preco3 == null) preco4 = null;
+      else if (modeloU === "PUMA" || modeloU.includes("ADIDAS")) preco4 = preco3;
+      else preco4 = arred2(preco3 * 1.1);
+    }
 
     const ncm = soDigitos(maisRecente.ncm);
     linhas.push([
       "", // Referencia: em branco -> o sistema gera a próxima referência da rede
-      "", // Grupo (a ensinar)
+      grupo,
       modelo ?? "",
-      "", // Linha (a ensinar)
+      linha,
       "", // Colecao (a ensinar)
       fornecedor,
       grade,
       descricao,
       unidade,
       referencia ?? "",
-      "", // Cor (a ensinar)
+      cor,
       tamanhos,
       TABELAS[0], preco1,
       TABELAS[1], preco2,
-      TABELAS[2], null,
+      TABELAS[2], preco3,
       TABELAS[3], preco4,
       TABELAS[4], 0,
       ncm.length === 8 ? ncm : "",
       "0",
       eans,
       tipoProduto,
-      "", // Comprador (SubGrupo) = Grupo (a ensinar)
+      comprador,
     ]);
   }
 
