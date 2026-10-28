@@ -196,20 +196,22 @@ async function detalhesDoXml(itens: ItemBase[]): Promise<Map<string, DetalheXml>
     porNota.set(it.noteId, l);
   }
   const ids = [...porNota.keys()];
-  for (let i = 0; i < ids.length; i += 50) {
-    const lote = ids.slice(i, i + 50);
+  const lotes: string[][] = [];
+  for (let i = 0; i < ids.length; i += 40) lotes.push(ids.slice(i, i + 40));
+
+  const processar = async (lote: string[]) => {
     const notas = await prisma.$queryRaw<{ id: string; xml: string }[]>(Prisma.sql`
-      SELECT id, regexp_replace("xmlCompleto", '[^[:print:]]', ' ', 'g') AS xml
+      SELECT id, "xmlCompleto" AS xml
       FROM "Note" WHERE id = ANY(${lote}::text[]) AND "xmlCompleto" <> ''
     `);
     for (const n of notas) {
       let nfe;
       try {
-        nfe = parseNFeXml(n.xml);
+        nfe = parseNFeXml(n.xml.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, " "));
       } catch {
         continue;
       }
-      // casa NotaItem x item do XML por código + descrição + valor total
+      // casa NotaItem x item do XML por código + valor total + quantidade
       const disponiveis = [...nfe.itens];
       for (const it of porNota.get(n.id) ?? []) {
         const k = disponiveis.findIndex(
@@ -228,6 +230,11 @@ async function detalhesDoXml(itens: ItemBase[]): Promise<Map<string, DetalheXml>
         });
       }
     }
+  };
+
+  // 3 lotes por vez (sem estourar as conexões do banco gratuito).
+  for (let i = 0; i < lotes.length; i += 3) {
+    await Promise.all(lotes.slice(i, i + 3).map(processar));
   }
   return out;
 }
@@ -341,11 +348,6 @@ export async function gerarCadastroXlsx(
   pares: ParProduto[]
 ): Promise<{ buffer: Buffer; resumo: ResumoExportacao }> {
   const itens = pares.length ? await carregarItens(pares) : [];
-  const detalhes = await detalhesDoXml(itens);
-  const fornPdv = await fornecedorPorModelo([
-    ...new Set(itens.map((i) => i.modelo).filter((m): m is string => !!m)),
-  ]);
-
   // ---- agrupa em linhas: modelo + referência + descrição sem tamanho --------
   interface ItemComTam extends ItemBase {
     tam: string | null; // tamanho já na grafia do PDV
@@ -375,6 +377,12 @@ export async function gerarCadastroXlsx(
     l.push({ ...it, tam, tamBruto: tamBrutoOk });
     grupos.set(chave, l);
   }
+
+  // XML só do item mais recente de cada linha (era de todos) + fornecedores em paralelo.
+  const [detalhes, fornPdv] = await Promise.all([
+    detalhesDoXml([...grupos.values()].map((l) => l[0])),
+    fornecedorPorModelo([...new Set(itens.map((i) => i.modelo).filter((m): m is string => !!m))]),
+  ]);
 
   const resumo: ResumoExportacao = {
     produtosSelecionados: pares.length,
