@@ -596,6 +596,17 @@ export async function gerarCadastroXlsx(
       put(25, f.eans);
     }
   }
+  // Células vazias que precisam ser preenchidas: fundo amarelo (Referencia fica
+  // vazia de propósito: o sistema gera a próxima).
+  const amarelo = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFF2A8" } } as const;
+  ws.eachRow((row, n) => {
+    if (n === 1) return;
+    for (let c = 2; c <= COLUNAS_CADASTRO.length; c++) {
+      const cell = row.getCell(c);
+      const v: any = cell.value;
+      if (v == null || v === "") cell.fill = amarelo as any;
+    }
+  });
   resumo.linhas = linhas.length;
   resumo.eanRepetido = [...eansVistos.values()].filter((n) => n > 1).length;
 
