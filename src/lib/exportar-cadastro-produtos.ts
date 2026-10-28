@@ -284,6 +284,33 @@ export function formulasLacoste(r: number) {
   };
 }
 
+const PARAR_NOME = new Set([
+  "POLIESTER", "POLIESTE", "LAM", "LAMINADO", "SINT", "SINTETICO", "PVC", "EVA", "PU", "TEXTIL",
+  "COURO", "BORRACHA", "NEOPRENE", "FORRO", "DOTS", "TECIDO", "NYLON", "LONA", "ALGODAO",
+  "MICROFIBRA", "ELASTANO", "+", "C/", "COM", "E",
+]);
+
+/** Kenner/Redley: separa nome do produto e cor da descrição da nota (null = não identificou). */
+function nomeECorKenner(descricao: string, marca: string): { nome: string; cor: string } {
+  let p = norm(descricao).replace(/\s+/g, " ").trim().split(" ");
+  if (p.length > 1 && /^\d{1,3}$/.test(p[p.length - 1])) p = p.slice(0, -1); // tamanho final
+  // cor: da palavra com "/" até o fim (ex.: CREPE/CAQUI BURBERRY)
+  const iSlash = p.findIndex((w) => /^[A-Z]+\/[A-Z]+/.test(w));
+  const cor = iSlash >= 0 ? p.slice(iSlash).join(" ") : "";
+  const fim = iSlash >= 0 ? iSlash : p.length;
+  const iMarca = p.findIndex((w) => w === marca);
+  let nome = "";
+  if (iMarca >= 0) {
+    const t: string[] = [];
+    for (let i = iMarca + 1; i < fim && t.length < 3; i++) {
+      if (PARAR_NOME.has(p[i]) || /^\d+$/.test(p[i])) break;
+      t.push(p[i]);
+    }
+    nome = t.join(" ");
+  }
+  return { nome, cor };
+}
+
 /** Arredonda para o valor mais próximo que termina em 9,99 (mínimo 9,99). */
 function fim999(v: number) {
   if (v <= 9.99) return 9.99;
@@ -421,6 +448,16 @@ export async function gerarCadastroXlsx(
       linha = "FEMININA";
       cor = "UNICA";
     }
+    let nomeProd = "";
+    const ehKennerRedley = modeloU.includes("KENNER") || modeloU.includes("REDLEY");
+    if (ehKennerRedley) {
+      const r = nomeECorKenner(descricao, modeloU.includes("KENNER") ? "KENNER" : "REDLEY");
+      nomeProd = r.nome;
+      cor = r.cor;
+    }
+    // ME LEVA FARM: descrição da nota + código do produto na nota.
+    const descricaoFinal =
+      modeloU === "ME LEVA FARM" ? `${descricao} ${maisRecente.codigo.trim()}`.trim() : descricao;
     const comprador = grupo; // regra geral: Comprador = Grupo
 
     // ---- grade / unidade / tipo ------------------------------------------------
@@ -471,7 +508,7 @@ export async function gerarCadastroXlsx(
     }
 
     const ncm = soDigitos(maisRecente.ncm);
-    linhas.push([
+    const nova: any[] = [
       "", // Referencia: em branco -> o sistema gera a próxima referência da rede
       grupo,
       modelo ?? "",
@@ -479,7 +516,7 @@ export async function gerarCadastroXlsx(
       "", // Colecao (a ensinar)
       fornecedor,
       grade,
-      descricao,
+      descricaoFinal,
       unidade,
       referencia ?? "",
       cor,
@@ -494,7 +531,9 @@ export async function gerarCadastroXlsx(
       eans,
       tipoProduto,
       comprador,
-    ]);
+    ];
+    nova.nomeProd = nomeProd;
+    linhas.push(nova);
   }
 
   // ordena por modelo, referência, descrição
@@ -506,6 +545,15 @@ export async function gerarCadastroXlsx(
   );
   for (const l of linhas) {
     const row = ws.addRow(l.map((v) => (typeof v === "string" ? v.toUpperCase() : v)));
+    const mU = norm(String(l[2]));
+    if (mU.includes("KENNER") || mU.includes("REDLEY")) {
+      // GRUPO [NOME DO PRODUTO] REFERENCIAFORNECEDOR COR MODELO (fórmula: acompanha o que você preencher)
+      const n = row.number;
+      const nome = (l as any).nomeProd ? `"${String((l as any).nomeProd).replace(/"/g, "")}"` : '""';
+      const c = row.getCell(8);
+      c.numFmt = "General";
+      c.value = { formula: `TRIM(B${n}&" "&${nome}&" "&J${n}&" "&K${n}&" "&C${n})` } as any;
+    }
     if (norm(String(l[2])) === "LACOSTE") {
       const f = formulasLacoste(row.number);
       const put = (col: number, formula: string) => {
