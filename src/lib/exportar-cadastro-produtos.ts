@@ -252,6 +252,38 @@ function arred2(v: number) {
   return Math.round(v * 100) / 100;
 }
 
+/**
+ * Lacoste: os dados vêm do LACOSTE.BIN via add-in dbsleek (que existe no Excel do
+ * Hugo). Gera fórmulas (nomes em inglês, como o xlsx guarda) apontando para a
+ * célula da ReferenciaFornecedor ($J) da própria linha.
+ */
+export function formulasLacoste(r: number) {
+  const ref = `$J${r}`;
+  const prod = `LEFT(TRIM(${ref}),SEARCH(".",TRIM(${ref}))-1)`;
+  const cor3 = `RIGHT(TRIM(${ref}),3)&"%%"`;
+  const prodSimples = `LEFT(${ref},SEARCH(".",${ref})-1)`;
+  const tam = (n: number) =>
+    `IFERROR(dbsleek("lista","lacoste.bin","codigo_barra","tamanho","produto","=",${prod},"cor_produto","=",${cor3},${n}),"")`;
+  const tokens = Array.from({ length: 15 }, (_, i) => i + 1);
+  const tamanhosJoin = `SUBSTITUTE(TRIM(${tokens.map((n) => tam(n)).join('&" "&')})," ",";")`;
+  const tok = (n: number) => `TRIM(MID(SUBSTITUTE($L${r},";",REPT(" ",100)),${(n - 1) * 100 + 1},100))`;
+  const ean = (n: number) =>
+    `IF(${tok(n)}="","",IFERROR(dbsleek("MOSTRA","LACOSTE.BIN","CODIGO_BARRA","CODIGO_BARRA","produto","=",${prodSimples},"cor_produto","=",RIGHT(${ref},3)&"%%","tamanho","=",${tok(n)}),""))`;
+  const eans = `SUBSTITUTE(TRIM(${tokens.map((n) => ean(n)).join('&" "&')})," ",";")`;
+  const bin = (tab: string, col: string) =>
+    `dbsleek("MOSTRA","LACOSTE.BIN","${tab}","${col}","${tab}","=",${prodSimples})`;
+  return {
+    linha: bin("PRODUTO", "TIPO"),
+    colecao: bin("PRODUTO", "COLECAO"),
+    cor: `dbsleek("MOSTRA","LACOSTE.BIN","PRODUTO_COR","DESC_COR_PRODUTO","PRODUTO_COR","=",${ref})`,
+    tamanhos: tamanhosJoin,
+    preco3: `dbsleek("MOSTRA","LACOSTE.BIN","PRODUTO_COR","PRECO","PRODUTO_COR","=",${ref})`,
+    preco12: `R${r}/2.4`,
+    comprador: bin("PRODUTO", "GRUPO"),
+    eans,
+  };
+}
+
 /** Arredonda para o valor mais próximo que termina em 9,99 (mínimo 9,99). */
 function fim999(v: number) {
   if (v <= 9.99) return 9.99;
@@ -472,7 +504,27 @@ export async function gerarCadastroXlsx(
       String(a[9]).localeCompare(String(b[9]), "pt-BR") ||
       String(a[7]).localeCompare(String(b[7]), "pt-BR")
   );
-  for (const l of linhas) ws.addRow(l.map((v) => (typeof v === "string" ? v.toUpperCase() : v)));
+  for (const l of linhas) {
+    const row = ws.addRow(l.map((v) => (typeof v === "string" ? v.toUpperCase() : v)));
+    if (norm(String(l[2])) === "LACOSTE") {
+      const f = formulasLacoste(row.number);
+      const put = (col: number, formula: string) => {
+        const c = row.getCell(col);
+        c.numFmt = "General";
+        c.value = { formula } as any;
+      };
+      put(4, f.linha);
+      put(8, `B${row.number}&" "&J${row.number}&" "&K${row.number}&" "&C${row.number}`);
+      put(5, f.colecao);
+      put(11, f.cor);
+      put(12, f.tamanhos);
+      put(14, f.preco12);
+      put(16, f.preco12);
+      put(18, f.preco3);
+      put(25, f.eans);
+      put(27, f.comprador);
+    }
+  }
   resumo.linhas = linhas.length;
   resumo.eanRepetido = [...eansVistos.values()].filter((n) => n > 1).length;
 
