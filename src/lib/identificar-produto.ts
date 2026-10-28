@@ -675,6 +675,9 @@ function referenciaFormula2(A: string, G: string, H: string, P: string, Q: strin
     } catch {
       /* cai no fallback */
     }
+    // Código sem hífen (ex.: TJ26761663A): 6 primeiros caracteres + "." + 3 seguintes.
+    const gt = G.trim();
+    if (gt.length >= 9) return gt.slice(0, 6) + "." + gt.slice(6, 9);
     return ultimoNome(H) + "." + esquerda(substituir(G, ultimoNome(H), ""), 3);
   }
   // INPU-IND: código puro, igual às outras do grupo Thug/Dubs (tratado no
