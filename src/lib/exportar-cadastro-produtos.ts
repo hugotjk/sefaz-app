@@ -543,8 +543,14 @@ export async function gerarCadastroXlsx(
       if (grupo === "TENIS" || grupo === "CHINELO") colecao = "PERMANENTE";
     }
     // ME LEVA FARM: descrição da nota + código do produto na nota.
-    const descricaoFinal =
-      modeloU === "ME LEVA FARM" ? `${descricao} ${maisRecente.codigo.trim()}`.trim() : descricao;
+    // New Balance: sem o 1º trecho (antes do hífen), sem hífens, sem o tamanho, + código da nota no fim.
+    let descricaoFinal = descricao;
+    if (modeloU === "ME LEVA FARM") descricaoFinal = `${descricao} ${maisRecente.codigo.trim()}`.trim();
+    else if (modeloU === "NEW BALANCE") {
+      const seg = descricao.split("-").map((x) => x.trim()).filter(Boolean);
+      const meio = seg.length > 1 ? seg.slice(1) : seg;
+      descricaoFinal = `${meio.join(" ")} ${maisRecente.codigo.trim()}`.replace(/\s+/g, " ").trim();
+    }
     const comprador = grupo; // regra geral: Comprador = Grupo
 
     // ---- grade / unidade / tipo ------------------------------------------------
@@ -649,8 +655,8 @@ export async function gerarCadastroXlsx(
     cc.value = { formula: `B${row.number}` } as any;
     const mU = norm(String(l[2]));
     // Descrição padrão (fórmula): GRUPO [NOME] REFERENCIAFORNECEDOR COR MODELO.
-    // Exceção: ME LEVA FARM (descrição da nota + código).
-    if (mU !== "ME LEVA FARM") {
+    // Exceções: ME LEVA FARM e NEW BALANCE (descrição montada a partir da nota, valor fixo).
+    if (mU !== "ME LEVA FARM" && mU !== "NEW BALANCE") {
       const n = row.number;
       const lit = (t: unknown) => `"${String(t ?? "").replace(/"/g, "")}"`;
       const inicio = `B${n}`;
