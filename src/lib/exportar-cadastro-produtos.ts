@@ -326,13 +326,19 @@ function primeiraPalavraGrupo(desc: string): string {
   return w === "CAMISETA" ? "TSHIRT" : w;
 }
 
-/** Hurley / Rip Curl: cor = última palavra da descrição sem o tamanho (OFF WHITE = 2 palavras). */
+/**
+ * Hurley / Rip Curl: cor = o que vem depois de JUV/INF (se houver) ou a última
+ * palavra da descrição sem o tamanho; cores de 2 palavras (OFF WHITE, BLUE BELL).
+ */
+const PREFIXO_COR = new Set(["OFF", "BLUE", "DARK", "LIGHT", "DEEP", "SKY", "NAVY"]);
 function corUltimaPalavra(desc: string): string {
   const p = norm(desc).replace(/\s+/g, " ").trim().split(" ");
+  const iJuv = p.findIndex((w) => ["JUV", "JUVENIL", "INF", "INFANTIL"].includes(w));
+  if (iJuv >= 0 && iJuv < p.length - 1) return p.slice(iJuv + 1).join(" ");
   const u = p[p.length - 1] ?? "";
-  if (!u || /^\d+$/.test(u) || PALAVRAS_SEM_COR.has(u)) return "";
-  if (u === "WHITE" && p[p.length - 2] === "OFF") return "OFF WHITE";
-  return p.length > 1 ? u : "";
+  if (p.length < 2 || !u || /^\d+$/.test(u) || PALAVRAS_SEM_COR.has(u)) return "";
+  const ant = p[p.length - 2];
+  return PREFIXO_COR.has(ant) ? `${ant} ${u}` : u;
 }
 
 /** Hurley / Rip Curl: Linha pelos tamanhos (P-GG e 36-48 = masculina; 8-16 ou JUV/INF = infanto). */
