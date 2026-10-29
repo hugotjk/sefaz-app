@@ -318,6 +318,50 @@ function nomeECorKenner(descricao: string, marca: string): { nome: string; cor: 
   return { nome, cor };
 }
 
+const PALAVRAS_SEM_COR = new Set(["IMP", "UN", "UNI", "UNICO", "UNICA"]);
+
+/** 1ª palavra da descrição (CAMISETA vira TSHIRT). */
+function primeiraPalavraGrupo(desc: string): string {
+  const w = norm(desc).replace(/[^A-Z0-9 ]+/g, " ").trim().split(/\s+/)[0] ?? "";
+  return w === "CAMISETA" ? "TSHIRT" : w;
+}
+
+/** Hurley / Rip Curl: cor = última palavra da descrição sem o tamanho (OFF WHITE = 2 palavras). */
+function corUltimaPalavra(desc: string): string {
+  const p = norm(desc).replace(/\s+/g, " ").trim().split(" ");
+  const u = p[p.length - 1] ?? "";
+  if (!u || /^\d+$/.test(u) || PALAVRAS_SEM_COR.has(u)) return "";
+  if (u === "WHITE" && p[p.length - 2] === "OFF") return "OFF WHITE";
+  return p.length > 1 ? u : "";
+}
+
+/** Hurley / Rip Curl: Linha pelos tamanhos (P-GG e 36-48 = masculina; 8-16 ou JUV/INF = infanto). */
+function linhaPorTamanhos(desc: string, tams: (string | null)[]): string {
+  if (/\b(JUV|JUVENIL|INF|INFANTIL|KIDS?)\b/.test(norm(desc))) return "INFANTO";
+  const ts = tams.filter((t): t is string => !!t);
+  if (!ts.length) return "MASCULINA";
+  const nums = ts.map((t) => (/^\d{1,2}$/.test(t.trim()) ? parseInt(t, 10) : NaN));
+  if (nums.every((n) => !Number.isNaN(n))) {
+    if (nums.every((n) => n >= 8 && n <= 16)) return "INFANTO";
+    if (nums.every((n) => n >= 36 && n <= 48)) return "MASCULINA";
+    return ""; // outro padrão numérico: a ensinar
+  }
+  return "MASCULINA"; // letras (P, M, G, GG, 2GG...) e UN
+}
+
+/** New Balance: "U9060R-TENIS NB 9060R UNISSEX-PTO/BCO-U906076M" -> grupo, linha, cor. */
+function dadosNewBalance(desc: string): { grupo: string; linha: string; cor: string } {
+  const seg = norm(desc).split("-").map((x) => x.trim());
+  const rx = /\b(FEMININ[OA]|MASCULIN[OA]|UNISSEX|UNISEX)\b/;
+  const i = seg.findIndex((x) => rx.test(x));
+  if (i < 0) return { grupo: primeiraPalavraGrupo(seg[seg.length > 2 ? 1 : 0] ?? ""), linha: "", cor: "" };
+  const w = seg[i].match(rx)![1];
+  const linha = w.startsWith("FEM") ? "FEMININA" : w.startsWith("MASC") ? "MASCULINA" : "UNISSEX";
+  const prox = seg[i + 1] ?? "";
+  const cor = prox && !/\d/.test(prox) ? prox : "";
+  return { grupo: primeiraPalavraGrupo(seg[i]), linha, cor };
+}
+
 /** Arredonda para o valor mais próximo que termina em 9,99 (mínimo 9,99). */
 function fim999(v: number) {
   if (v <= 9.99) return 9.99;
@@ -376,6 +420,20 @@ export async function gerarCadastroXlsx(
     const l = grupos.get(chave) ?? [];
     l.push({ ...it, tam, tamBruto: tamBrutoOk });
     grupos.set(chave, l);
+  }
+
+  // New Balance: cada loja paga um custo; o Preço 3 vale o do custo "padrão" (o
+  // mais comum entre as notas; empate = o maior). Põe esse item na frente.
+  for (const [, lista] of grupos) {
+    if (norm(lista[0].modelo) !== "NEW BALANCE" || lista.length < 2) continue;
+    const cont = new Map<number, number>();
+    for (const i of lista) {
+      const k = Math.round(i.valorUnitario * 100);
+      cont.set(k, (cont.get(k) ?? 0) + 1);
+    }
+    const [melhor] = [...cont.entries()].sort((a, b) => b[1] - a[1] || b[0] - a[0])[0];
+    const idx = lista.findIndex((i) => Math.round(i.valorUnitario * 100) === melhor);
+    if (idx > 0) lista.unshift(...lista.splice(idx, 1));
   }
 
   // XML só do item mais recente de cada linha (era de todos) + fornecedores em paralelo.
@@ -466,6 +524,18 @@ export async function gerarCadastroXlsx(
       linha = "UNISSEX";
       colecao = "PERMANENTE";
     }
+    const ehHurleyRC = modeloU === "HURLEY" || modeloU === "RIP CURL";
+    if (ehHurleyRC) {
+      grupo = primeiraPalavraGrupo(descricao);
+      cor = corUltimaPalavra(descricao);
+      linha = linhaPorTamanhos(descricao, lista.map((i) => i.tam));
+    } else if (modeloU === "NEW BALANCE") {
+      const nb = dadosNewBalance(descricao);
+      grupo = nb.grupo;
+      linha = nb.linha;
+      cor = nb.cor;
+      if (grupo === "TENIS" || grupo === "CHINELO") colecao = "PERMANENTE";
+    }
     // ME LEVA FARM: descrição da nota + código do produto na nota.
     const descricaoFinal =
       modeloU === "ME LEVA FARM" ? `${descricao} ${maisRecente.codigo.trim()}`.trim() : descricao;
@@ -514,6 +584,8 @@ export async function gerarCadastroXlsx(
       cand.sort((a, b) => Math.abs(a.v - a.f) - Math.abs(b.v - b.f));
       preco3 = cand[0].f;
     }
+    const mult = modeloU === "HURLEY" ? 2.9 : modeloU === "RIP CURL" ? 2.4 : modeloU === "NEW BALANCE" ? 2.3 : 0;
+    if (mult && preco2 != null) preco3 = fim999(preco2 * mult);
     preco1 = preco1 == null ? null : arred2(preco1);
     preco2 = preco2 == null ? null : arred2(preco2);
     preco3 = preco3 == null ? null : arred2(preco3);
