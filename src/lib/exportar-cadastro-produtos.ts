@@ -631,7 +631,6 @@ export async function gerarCadastroXlsx(
       comprador,
     ];
     (nova as any).nomeProd = nomeProd;
-    (nova as any).prefixoDesc = norm(descricao).split("-")[0].trim();
     linhas.push(nova);
   }
 
@@ -650,12 +649,11 @@ export async function gerarCadastroXlsx(
     cc.value = { formula: `B${row.number}` } as any;
     const mU = norm(String(l[2]));
     // Descrição padrão (fórmula): GRUPO [NOME] REFERENCIAFORNECEDOR COR MODELO.
-    // Exceções: ME LEVA FARM (descrição da nota + código) e New Balance (no lugar do
-    // GRUPO vai o 1º trecho da descrição antes do hífen, ex.: WS327).
+    // Exceção: ME LEVA FARM (descrição da nota + código).
     if (mU !== "ME LEVA FARM") {
       const n = row.number;
       const lit = (t: unknown) => `"${String(t ?? "").replace(/"/g, "")}"`;
-      const inicio = mU === "NEW BALANCE" ? lit((l as any).prefixoDesc) : `B${n}`;
+      const inicio = `B${n}`;
       const nome = (l as any).nomeProd ? `${lit((l as any).nomeProd)}&" "&` : "";
       const c = row.getCell(8);
       c.numFmt = "General";
