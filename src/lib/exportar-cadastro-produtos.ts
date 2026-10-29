@@ -631,6 +631,7 @@ export async function gerarCadastroXlsx(
       comprador,
     ];
     (nova as any).nomeProd = nomeProd;
+    (nova as any).prefixoDesc = norm(descricao).split("-")[0].trim();
     linhas.push(nova);
   }
 
@@ -648,13 +649,17 @@ export async function gerarCadastroXlsx(
     cc.numFmt = "General";
     cc.value = { formula: `B${row.number}` } as any;
     const mU = norm(String(l[2]));
-    if (mU.includes("KENNER") || mU.includes("REDLEY")) {
-      // GRUPO [NOME DO PRODUTO] REFERENCIAFORNECEDOR COR MODELO (fórmula: acompanha o que você preencher)
+    // Descrição padrão (fórmula): GRUPO [NOME] REFERENCIAFORNECEDOR COR MODELO.
+    // Exceções: ME LEVA FARM (descrição da nota + código) e New Balance (no lugar do
+    // GRUPO vai o 1º trecho da descrição antes do hífen, ex.: WS327).
+    if (mU !== "ME LEVA FARM") {
       const n = row.number;
-      const nome = (l as any).nomeProd ? `"${String((l as any).nomeProd).replace(/"/g, "")}"` : '""';
+      const lit = (t: unknown) => `"${String(t ?? "").replace(/"/g, "")}"`;
+      const inicio = mU === "NEW BALANCE" ? lit((l as any).prefixoDesc) : `B${n}`;
+      const nome = (l as any).nomeProd ? `${lit((l as any).nomeProd)}&" "&` : "";
       const c = row.getCell(8);
       c.numFmt = "General";
-      c.value = { formula: `TRIM(B${n}&" "&${nome}&" "&J${n}&" "&K${n}&" "&C${n})` } as any;
+      c.value = { formula: `TRIM(${inicio}&" "&${nome}J${n}&" "&K${n}&" "&C${n})` } as any;
     }
     if (norm(String(l[2])) === "LACOSTE") {
       const f = formulasLacoste(row.number);
