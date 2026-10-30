@@ -649,7 +649,7 @@ export async function gerarCadastroXlsx(
   );
   for (const l of linhas) {
     const row = ws.addRow(l.map((v) => (typeof v === "string" ? v.toUpperCase() : v)));
-    // Comprador (SubGrupo) = Grupo, sempre como fórmula (=B2, =B3...)
+    // Comprador (SubGrupo) = Grupo, como fórmula (=B2, =B3...); Lacoste usa o GRUPO do BIN
     const cc = row.getCell(27);
     cc.numFmt = "General";
     cc.value = { formula: `B${row.number}` } as any;
@@ -681,6 +681,7 @@ export async function gerarCadastroXlsx(
       put(16, f.preco12);
       put(18, f.preco3);
       put(25, f.eans);
+      put(27, f.comprador); // Lacoste: Comprador = GRUPO do BIN (não =B)
     }
   }
   // Células vazias que precisam ser preenchidas: fundo amarelo (Referencia fica
