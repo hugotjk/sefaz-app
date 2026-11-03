@@ -239,6 +239,31 @@ async function detalhesDoXml(itens: ItemBase[]): Promise<Map<string, DetalheXml>
   return out;
 }
 
+/**
+ * Oakley: o código da cor são os 3 últimos caracteres da referência (ex.: FOA40808102E
+ * -> 02E). O nome da cor é aprendido dos cadastros que já existem no PDV
+ * (VariacaoProduto.cor mais usada por código); 02E = BLACKOUT já é conhecido.
+ */
+async function coresOakley(): Promise<Map<string, string>> {
+  const out = new Map<string, string>([["02E", "BLACKOUT"]]);
+  try {
+    const rows = await prisma.$queryRaw<{ cod: string; cor: string }[]>(Prisma.sql`
+      SELECT right(upper(trim(p."referenciaFornecedor")), 3) AS cod,
+             mode() WITHIN GROUP (ORDER BY upper(trim(v.cor))) AS cor
+      FROM "Produto" p
+      JOIN "VariacaoProduto" v ON v."produtoId" = p.id
+      WHERE upper(trim(p."modeloNome")) = 'OAKLEY'
+        AND upper(trim(p."referenciaFornecedor")) ~ '^FO[A-Z][0-9]{6}[0-9A-Z]{3}$'
+        AND v.cor IS NOT NULL AND trim(v.cor) <> ''
+      GROUP BY 1
+    `);
+    for (const r of rows) if (r.cod && r.cor && !out.has(r.cod)) out.set(r.cod, r.cor);
+  } catch {
+    /* sem catálogo: só os códigos conhecidos */
+  }
+  return out;
+}
+
 /** Fornecedor do PDV mais usado por modelo (aprendido do catálogo já sincronizado). */
 async function fornecedorPorModelo(modelos: string[]): Promise<Map<string, string>> {
   const out = new Map<string, string>();
@@ -443,9 +468,11 @@ export async function gerarCadastroXlsx(
   }
 
   // XML só do item mais recente de cada linha (era de todos) + fornecedores em paralelo.
-  const [detalhes, fornPdv] = await Promise.all([
+  const temOakley = itens.some((i) => norm(i.modelo) === "OAKLEY");
+  const [detalhes, fornPdv, coresOak] = await Promise.all([
     detalhesDoXml([...grupos.values()].map((l) => l[0])),
     fornecedorPorModelo([...new Set(itens.map((i) => i.modelo).filter((m): m is string => !!m))]),
+    temOakley ? coresOakley() : Promise.resolve(new Map<string, string>()),
   ]);
 
   const resumo: ResumoExportacao = {
@@ -542,6 +569,12 @@ export async function gerarCadastroXlsx(
       cor = nb.cor;
       if (grupo === "TENIS" || grupo === "CHINELO") colecao = "PERMANENTE";
     }
+    if (modeloU === "OAKLEY") {
+      if (/\bTEE$/.test(norm(descricao))) grupo = "TSHIRT";
+      linha = "MASCULINA";
+      const cod = norm(referencia).replace(/\s+/g, "").slice(-3);
+      cor = coresOak.get(cod) ?? "";
+    }
     // ME LEVA FARM: descrição da nota + código do produto na nota.
     // New Balance: sem o 1º trecho (antes do hífen), sem hífens, sem o tamanho, + código da nota no fim.
     let descricaoFinal = descricao;
@@ -587,8 +620,11 @@ export async function gerarCadastroXlsx(
     let preco2: number | null = custoTotUn;
     let preco3: number | null = null; // markup do modelo ainda não aprendido
     if (modeloU === "ME LEVA FARM") {
-      preco1 = custoUn * 1.5;
-      preco2 = custoTotUn == null ? null : custoTotUn * 1.5;
+      // Faturado pela CIDADE MARAVILHOSA: Preço 1 = NF e Preço 2 = custo+impostos-desconto
+      // (sem multiplicar); nos demais fornecedores os dois levam x1,50.
+      const fator = norm(emitente).includes("CIDADE MARAVILHOSA") ? 1 : 1.5;
+      preco1 = custoUn * fator;
+      preco2 = custoTotUn == null ? null : custoTotUn * fator;
       preco3 = preco2 == null ? null : fim999(preco2 * 2.2);
     } else if (ehKennerRedley && preco2 != null) {
       // x2,5 ou x2,55: o que ficar mais perto de um valor terminado em 9,99
