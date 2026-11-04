@@ -9,6 +9,7 @@ import {
   tamanhoPlausivel,
 } from "@/lib/identificar-tamanho";
 import { tipoEGrupoLacoste } from "@/lib/lacoste-grupos";
+import { CORES_OAKLEY, PRECOS_OAKLEY } from "@/lib/oakley-base";
 
 /**
  * Exporta, no padrão do "Guia do Usuário — Importação de Produtos WQS", os
@@ -245,7 +246,7 @@ async function detalhesDoXml(itens: ItemBase[]): Promise<Map<string, DetalheXml>
  * (VariacaoProduto.cor mais usada por código); 02E = BLACKOUT já é conhecido.
  */
 async function coresOakley(): Promise<Map<string, string>> {
-  const out = new Map<string, string>([["02E", "BLACKOUT"]]);
+  const out = new Map<string, string>(Object.entries(CORES_OAKLEY));
   try {
     const rows = await prisma.$queryRaw<{ cod: string; cor: string }[]>(Prisma.sql`
       SELECT right(upper(trim(p."referenciaFornecedor")), 3) AS cod,
@@ -631,6 +632,17 @@ export async function gerarCadastroXlsx(
       const cand = [preco2 * 2.5, preco2 * 2.55].map((v) => ({ v, f: fim999(v) }));
       cand.sort((a, b) => Math.abs(a.v - a.f) - Math.abs(b.v - b.f));
       preco3 = cand[0].f;
+    }
+    if (modeloU === "OAKLEY") {
+      // Preço 3: "PDV R$" da planilha da Oakley (estilo = 9 primeiros caracteres); sem o
+      // estilo, markup sobre o Preço 2 (roupa FOA x2,72; calçado/óculos FOF x2,45). Termina em ,99.
+      const estilo = norm(referencia).replace(/\s+/g, "").slice(0, 9);
+      const tabela = PRECOS_OAKLEY[estilo];
+      if (tabela != null) preco3 = fim999(tabela);
+      else if (preco2 != null) {
+        const m = estilo.startsWith("FOA") ? 2.72 : estilo.startsWith("FOF") ? 2.45 : 0;
+        if (m) preco3 = fim999(preco2 * m);
+      }
     }
     const mult = modeloU === "HURLEY" ? 2.9 : modeloU === "RIP CURL" ? 2.4 : modeloU === "NEW BALANCE" ? 2.3 : 0;
     if (mult && preco2 != null) preco3 = fim999(preco2 * mult);
