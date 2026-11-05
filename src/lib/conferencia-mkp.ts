@@ -51,8 +51,8 @@ export function parseFiltrosConferenciaMkp(sp: URLSearchParams): FiltrosConferen
   };
 }
 
-// Depois desse tempo sem preço no app, vira alerta (produto 2h até o app + preço 2h).
-export const JANELA_AGUARDANDO_PRECO_H = 4;
+// Sem histórico da varredura de preços, usa esta janela (a varredura roda 1x por dia).
+export const JANELA_AGUARDANDO_PRECO_H = 26;
 
 const up = (s: string | null | undefined) => (s ?? "").trim().toUpperCase();
 
@@ -140,6 +140,16 @@ export async function montarConferenciaMkp(f: FiltrosConferenciaMkp): Promise<Re
   const achouProduto = new Set<string>();
   const nomePdv = new Map<string, string>();
   const primeiroSync = new Map<string, number>(); // menor "primeiroSyncEm" por referência
+  // Início da última varredura de preços concluída: produto visto depois disso ainda
+  // não passou por uma varredura completa, então o preço pode chegar.
+  const est = await prisma.syncState.findUnique({ where: { chave: "precos:ultimaVarredura" } });
+  let inicioUltimaVarredura: number | null = null;
+  try {
+    const j = est ? JSON.parse(est.valor) : null;
+    if (j?.inicio && j?.fim) inicioUltimaVarredura = new Date(j.inicio).getTime();
+  } catch {
+    /* sem histórico */
+  }
   if (refs.length) {
     const pr = await prisma.$queryRaw<{ ref: string; nome: string | null; preco: number | null; primeiro: Date }[]>(Prisma.sql`
       SELECT UPPER(BTRIM(p."referenciaFornecedor")) AS ref, p.nome AS nome, pv.preco::float8 AS preco,
@@ -188,9 +198,13 @@ export async function montarConferenciaMkp(f: FiltrosConferenciaMkp): Promise<Re
     if (p.preco3 == null) status = p.preco2 == null ? "SEM_XML" : "OK";
     else if (!achouProduto.has(ref)) status = "SEM_PRODUTO_PDV";
     else if (precoPdv == null) {
-      // Cadastrado há menos de JANELA_AGUARDANDO_PRECO_H horas: o preço ainda pode chegar.
-      const idade = Date.now() - (primeiroSync.get(ref) ?? 0);
-      status = idade < JANELA_AGUARDANDO_PRECO_H * 3600000 ? "AGUARDANDO_PRECO" : "SEM_PRECO_PDV";
+      // Cadastrado depois do início da última varredura de preços: o preço chega na próxima madrugada.
+      const visto = primeiroSync.get(ref) ?? 0;
+      const aguardando =
+        inicioUltimaVarredura != null
+          ? visto > inicioUltimaVarredura
+          : Date.now() - visto < JANELA_AGUARDANDO_PRECO_H * 3600000;
+      status = aguardando ? "AGUARDANDO_PRECO" : "SEM_PRECO_PDV";
     }
     else if (Math.abs(precoPdv - p.preco3) > 0.005) status = "ERRO";
     else status = distintos.length > 1 ? "PRECOS_DIVERGENTES" : "OK";

@@ -543,7 +543,6 @@ const ESTOQUE_VARIACOES_POR_LOTE = 6; // por step.run (~6 x 6s = ~40s)
 const FILIAIS_POR_EXECUCAO = 600; // lojas processadas por disparo diário
 const FILIAIS_POR_LOTE = 30; // por step.run
 // --- preços ---
-const MAX_PAGINAS_PRECOS_POR_EXECUCAO = 400; // ~20k preços/disparo (~402 steps)
 const PDV_TABELA_PRECO_VAREJO_FALLBACK = 3; // "3 VAREJO" (confirmado na API)
 // --- vendas: detalhe recente x resumo mensal ---
 const VENDAS_MESES_DETALHE = 12; // mantém 12 meses em VendaItemSync
@@ -1268,13 +1267,27 @@ export const syncFiliais = inngest.createFunction(
 );
 
 // ---------------------------------------------------------------------------
-// syncPrecos — 1x por dia. Varre a tabela de preço "VAREJO" inteira (não tem
-// filtro incremental) por cursor de página e faz upsert em PrecoVariacao.
+// syncPrecos — 1x por dia, de madrugada (03:45 UTC). Varre a tabela de preço
+// "VAREJO" inteira (a API não filtra por data e não vem ordenada por data), mas só
+// GRAVA o que mudou nas últimas 24h (+2 dias de folga) ou o que ainda não existe
+// no banco. A 1ª varredura (sem histórico) grava tudo. Lê 30 páginas por passo
+// (5 em paralelo) para gastar poucos passos do Inngest (~500 por noite).
+// Guarda quando a última varredura COMEÇOU ("precos:ultimaVarredura"): o relatório de
+// MKP usa isso para saber se um produto novo ainda está "aguardando preço".
 // ---------------------------------------------------------------------------
 
 interface CursorPrecos {
   pagina: number;
+  inicio: string | null; // início da varredura em andamento
 }
+interface UltimaVarreduraPrecos {
+  inicio: string | null;
+  fim: string | null;
+}
+
+const PAGINAS_POR_PASSO_PRECOS = 30;
+const PARALELO_PRECOS = 5;
+const MARGEM_DIAS_PRECOS = 2;
 
 async function descobrirTabelaVarejo(): Promise<number> {
   try {
@@ -1302,147 +1315,92 @@ export const syncPrecos = inngest.createFunction(
   async ({ step }) => {
     const tabelaId = await step.run("descobrir-tabela-varejo", descobrirTabelaVarejo);
 
-    const cursor = await step.run("cursor-precos", () =>
-      lerSyncState<CursorPrecos>("precos:cursor", { pagina: 1 })
-    );
-
-    let pagina = cursor.pagina > 0 ? cursor.pagina : 1;
-    let paginasNestaExec = 0;
-    let precosSalvos = 0;
-    let concluiu = false;
-
-    while (paginasNestaExec < MAX_PAGINAS_PRECOS_POR_EXECUCAO) {
-      paginasNestaExec++;
-      const paginaAtual = pagina;
-
-      const lote = await step.run(`precos-t${tabelaId}-p${paginaAtual}`, async () => {
-        const { registros, paginacao } = await listarPrecos(tabelaId, {
-          pagina: paginaAtual,
-          tamanhoPagina: PDV_TAM_PAGINA,
-        });
-        let salvos = 0;
-        for (const p of registros) {
-          const preco = Number(p.PrecoOriginal ?? 0);
-          await prisma.precoVariacao.upsert({
-            where: { variacaoId: String(p.VariacaoId) },
-            create: { variacaoId: String(p.VariacaoId), preco },
-            update: { preco },
-          });
-          salvos++;
-        }
-        return {
-          salvos,
-          temProxima: paginacao?.TemProximaPagina ?? registros.length > 0,
-        };
+    // Estado fixado num passo (o corpo da função roda de novo a cada passo, então
+    // `new Date()` fora de um passo mudaria a cada vez).
+    const estado = await step.run("estado", async () => {
+      const cur = await lerSyncState<CursorPrecos>("precos:cursor", { pagina: 1, inicio: null });
+      const ult = await lerSyncState<UltimaVarreduraPrecos>("precos:ultimaVarredura", {
+        inicio: null,
+        fim: null,
       });
-
-      precosSalvos += lote.salvos;
-      pagina = paginaAtual + 1;
-
-      if (!lote.temProxima) {
-        concluiu = true;
-        break;
-      }
-      await gravarSyncState("precos:cursor", { pagina });
-    }
-
-    // Terminou a tabela -> recomeça na próxima execução diária.
-    await gravarSyncState("precos:cursor", { pagina: concluiu ? 1 : pagina });
-
-    return { tabelaId, precosSalvos, concluiu, proximaPagina: concluiu ? 1 : pagina };
-  }
-);
-
-// ---------------------------------------------------------------------------
-// syncPrecosRecentes — de 2 em 2 horas (06:30-20:30). A tabela de preços do PDV vem
-// ordenada por DataAtualizacao crescente (o mais novo fica nas ÚLTIMAS páginas),
-// então lemos de trás pra frente até chegar em preços mais antigos que a última
-// execução (com folga de 2 dias). Assim, preço de produto novo/editado entra no
-// app em ~1h, sem esperar a varredura completa do syncPrecos (que leva semanas).
-// Trava de segurança: se a última página não tiver datas recentes (ordem
-// inesperada), não grava nada.
-// ---------------------------------------------------------------------------
-
-const MAX_PAGINAS_PRECOS_RECENTES = 80; // 80 x 50 = 4.000 preços por execução (no máx.)
-const DIAS_FOLGA_PRECOS_RECENTES = 2;
-
-export const syncPrecosRecentes = inngest.createFunction(
-  {
-    id: "pdv-sync-precos-recentes",
-    concurrency: [
-      { scope: "account", key: '"sefaz-pdv-sync"', limit: 4 },
-      { limit: 1 },
-    ],
-    retries: 2,
-  },
-  { cron: "TZ=America/Sao_Paulo 30 6-20/2 * * *" }, // 2 em 2 horas (06:30, 08:30, ... 20:30)
-  async ({ step }) => {
-    const tabelaId = await step.run("descobrir-tabela-varejo", descobrirTabelaVarejo);
-    const ultimo = await step.run("ultimo-sync", () =>
-      lerSyncState<{ iso: string | null }>("precos-recentes:ultimo", { iso: null })
-    );
-    const inicioExecucao = new Date();
-    const base = ultimo.iso ? new Date(ultimo.iso) : new Date(inicioExecucao.getTime() - 3 * 86400000);
-    const limite = new Date(base.getTime() - DIAS_FOLGA_PRECOS_RECENTES * 86400000);
-
-    const total = await step.run("total-paginas", async () => {
-      const { paginacao } = await listarPrecos(tabelaId, { pagina: 1, tamanhoPagina: PDV_TAM_PAGINA });
-      return paginacao?.TotalPaginas ?? 0;
+      const retomando = cur.inicio != null && cur.pagina > 1; // varredura anterior não terminou
+      const inicio = retomando ? (cur.inicio as string) : new Date().toISOString();
+      // Só grava o que mudou desde a última varredura (menos a margem). Sem histórico = grava tudo.
+      const limite = ult.inicio
+        ? new Date(new Date(ult.inicio).getTime() - MARGEM_DIAS_PRECOS * 86400000).toISOString()
+        : null;
+      return { pagina: retomando ? cur.pagina : 1, inicio, limite };
     });
-    if (!total) return { tabelaId, aviso: "sem paginação" };
 
-    let pagina = total;
-    let salvos = 0;
+    let pagina = estado.pagina;
+    let concluiu = false;
     let paginasLidas = 0;
-    let parou = "limite de páginas";
+    let gravados = 0;
+    const limiteMs = estado.limite ? new Date(estado.limite).getTime() : null;
 
-    while (paginasLidas < MAX_PAGINAS_PRECOS_RECENTES && pagina >= 1) {
-      const paginaAtual = pagina;
-      const r = await step.run(`recentes-t${tabelaId}-p${paginaAtual}`, async () => {
-        const { registros } = await listarPrecos(tabelaId, {
-          pagina: paginaAtual,
-          tamanhoPagina: PDV_TAM_PAGINA,
-        });
-        const datas = registros
-          .map((x) => (x.DataAtualizacao ? new Date(x.DataAtualizacao).getTime() : NaN))
-          .filter((t) => !Number.isNaN(t));
-        const maxData = datas.length ? Math.max(...datas) : null;
-        // Trava: a 1ª página lida (a última da tabela) tem que ter datas recentes.
-        if (paginaAtual === total && maxData != null && maxData < inicioExecucao.getTime() - 45 * 86400000) {
-          return { salvos: 0, tudoAntigo: true, ordemInesperada: true };
+    while (!concluiu) {
+      const ini = pagina;
+      const r = await step.run(`precos-p${ini}`, async () => {
+        const numeros = Array.from({ length: PAGINAS_POR_PASSO_PRECOS }, (_, i) => ini + i);
+        const registros: { id: string; preco: number; data: number | null }[] = [];
+        let fim = false;
+        for (let i = 0; i < numeros.length && !fim; i += PARALELO_PRECOS) {
+          const grupo = numeros.slice(i, i + PARALELO_PRECOS);
+          const respostas = await Promise.all(
+            grupo.map((n) => listarPrecos(tabelaId, { pagina: n, tamanhoPagina: PDV_TAM_PAGINA }))
+          );
+          for (const resp of respostas) {
+            if (resp.registros.length === 0) fim = true; // a API devolve 404/vazio depois da última página
+            else if (resp.paginacao && resp.paginacao.PaginaAtual >= resp.paginacao.TotalPaginas) fim = true;
+            for (const x of resp.registros) {
+              registros.push({
+                id: String(x.VariacaoId),
+                preco: Number(x.PrecoOriginal ?? 0),
+                data: x.DataAtualizacao ? new Date(x.DataAtualizacao).getTime() : null,
+              });
+            }
+          }
         }
-        if (registros.length) {
-          const ids = registros.map((x) => String(x.VariacaoId));
-          const precos = registros.map((x) => Number(x.PrecoOriginal ?? 0));
+        // O que gravar: mudou recentemente (ou sem data) OU ainda não está no banco.
+        let gravar = registros;
+        if (limiteMs != null) {
+          const velhos = registros.filter((x) => x.data != null && x.data < limiteMs);
+          if (velhos.length) {
+            const existentes = await prisma.$queryRaw<{ id: string }[]>(Prisma.sql`
+              SELECT "variacaoId" AS id FROM "PrecoVariacao" WHERE "variacaoId" = ANY(${velhos.map((x) => x.id)}::text[])
+            `);
+            const jaTem = new Set(existentes.map((e) => e.id));
+            const naoGravar = new Set(velhos.filter((x) => jaTem.has(x.id)).map((x) => x.id));
+            gravar = registros.filter((x) => !naoGravar.has(x.id));
+          }
+        }
+        // Mesmo id repetido na leva: fica o último.
+        const porId = new Map(gravar.map((x) => [x.id, x.preco]));
+        if (porId.size) {
           await prisma.$executeRaw(Prisma.sql`
             INSERT INTO "PrecoVariacao" ("variacaoId", "preco", "updatedAt")
-            SELECT v, p, NOW() FROM unnest(${ids}::text[], ${precos}::numeric[]) AS t(v, p)
+            SELECT v, p, NOW() FROM unnest(${[...porId.keys()]}::text[], ${[...porId.values()]}::numeric[]) AS t(v, p)
             ON CONFLICT ("variacaoId") DO UPDATE SET "preco" = EXCLUDED."preco", "updatedAt" = NOW()
           `);
         }
-        // Página vazia (a última pode dar 404 na API) não indica "acabou": segue pra trás.
-        const tudoAntigo = maxData != null && maxData < limite.getTime();
-        return { salvos: registros.length, tudoAntigo, ordemInesperada: false };
+        // Cursor no mesmo passo (poupa passos do Inngest): se cair, a próxima execução retoma daqui.
+        if (!fim) await gravarSyncState("precos:cursor", { pagina: ini + PAGINAS_POR_PASSO_PRECOS, inicio: estado.inicio });
+        return { gravados: porId.size, fim };
       });
-      paginasLidas++;
-      salvos += r.salvos;
-      if (r.ordemInesperada) {
-        parou = "ordem inesperada (nada gravado)";
-        break;
-      }
-      if (r.tudoAntigo) {
-        parou = "chegou em preços antigos";
-        break;
-      }
-      pagina--;
+
+      paginasLidas += PAGINAS_POR_PASSO_PRECOS;
+      gravados += r.gravados;
+      pagina = ini + PAGINAS_POR_PASSO_PRECOS;
+      if (r.fim) concluiu = true;
     }
 
-    if (!parou.startsWith("ordem")) {
-      await step.run("gravar-ultimo", () =>
-        gravarSyncState("precos-recentes:ultimo", { iso: inicioExecucao.toISOString() })
-      );
-    }
-    return { tabelaId, totalPaginas: total, paginasLidas, salvos, parou };
+    // Terminou: guarda o início desta varredura e zera o cursor.
+    await step.run("concluir", async () => {
+      await gravarSyncState("precos:ultimaVarredura", { inicio: estado.inicio, fim: new Date().toISOString() });
+      await gravarSyncState("precos:cursor", { pagina: 1, inicio: null });
+    });
+
+    return { tabelaId, inicio: estado.inicio, paginasLidas, gravados, concluiu };
   }
 );
 
