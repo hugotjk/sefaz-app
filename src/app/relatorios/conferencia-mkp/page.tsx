@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 
-type Status = "OK" | "ERRO" | "PRECOS_DIVERGENTES" | "SEM_PRECO_PDV" | "SEM_PRODUTO_PDV" | "SEM_XML";
+type Status = "OK" | "ERRO" | "PRECOS_DIVERGENTES" | "AGUARDANDO_PRECO" | "SEM_PRECO_PDV" | "SEM_PRODUTO_PDV" | "SEM_XML";
 
 interface Linha {
   modelo: string;
@@ -27,6 +27,7 @@ interface Resposta {
   linhas: Linha[];
   total: number;
   comAlerta: number;
+  aguardandoPreco: number;
   modelosSemRegra: string[];
 }
 
@@ -39,7 +40,8 @@ const ROTULO: Record<Status, string> = {
   OK: "OK",
   ERRO: "⚠ PREÇO ERRADO",
   PRECOS_DIVERGENTES: "⚠ VARIAÇÕES COM PREÇOS DIFERENTES",
-  SEM_PRECO_PDV: "AGUARDANDO PREÇO DO PDV",
+  SEM_PRECO_PDV: "⚠ SEM PREÇO NO PDV",
+  AGUARDANDO_PRECO: "AGUARDANDO PREÇO (CADASTRO RECENTE)",
   SEM_PRODUTO_PDV: "⚠ NÃO ACHADO NO PDV",
   SEM_XML: "XML INCOMPLETO",
 };
@@ -141,6 +143,9 @@ export default function ConferenciaMkpPage() {
           <>
             <p>
               <strong>{dados.comAlerta}</strong> com alerta de {dados.total} produtos conferidos.
+              {dados.aguardandoPreco > 0 && (
+                <span style={{ color: "var(--text-dim)" }}> {dados.aguardandoPreco} cadastrado(s) há menos de 4 horas aguardando o preço (sem alerta por enquanto).</span>
+              )}
               {dados.modelosSemRegra.length > 0 && (
                 <span style={{ color: "var(--text-dim)" }}>
                   {" "}
@@ -171,7 +176,7 @@ export default function ConferenciaMkpPage() {
                   </thead>
                   <tbody>
                     {dados.linhas.map((l) => (
-                      <tr key={l.modelo + "|" + l.referencia} style={l.status === "ERRO" || l.status === "PRECOS_DIVERGENTES" || l.status === "SEM_PRODUTO_PDV" ? { background: "rgba(231,76,60,.10)" } : undefined}>
+                      <tr key={l.modelo + "|" + l.referencia} style={l.status === "ERRO" || l.status === "PRECOS_DIVERGENTES" || l.status === "SEM_PRECO_PDV" || l.status === "SEM_PRODUTO_PDV" ? { background: "rgba(231,76,60,.10)" } : undefined}>
                         <td style={{ ...TD, fontWeight: 600 }}>{ROTULO[l.status]}</td>
                         <td style={TD}>{l.modelo}</td>
                         <td style={TD}>{l.referencia}</td>

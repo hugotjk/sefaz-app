@@ -1354,7 +1354,7 @@ export const syncPrecos = inngest.createFunction(
 );
 
 // ---------------------------------------------------------------------------
-// syncPrecosRecentes — de hora em hora (6h-20h). A tabela de preços do PDV vem
+// syncPrecosRecentes — de 2 em 2 horas (06:30-20:30). A tabela de preços do PDV vem
 // ordenada por DataAtualizacao crescente (o mais novo fica nas ÚLTIMAS páginas),
 // então lemos de trás pra frente até chegar em preços mais antigos que a última
 // execução (com folga de 2 dias). Assim, preço de produto novo/editado entra no
@@ -1375,7 +1375,7 @@ export const syncPrecosRecentes = inngest.createFunction(
     ],
     retries: 2,
   },
-  { cron: "TZ=America/Sao_Paulo 30 6-20 * * *" },
+  { cron: "TZ=America/Sao_Paulo 30 6-20/2 * * *" }, // 2 em 2 horas (06:30, 08:30, ... 20:30)
   async ({ step }) => {
     const tabelaId = await step.run("descobrir-tabela-varejo", descobrirTabelaVarejo);
     const ultimo = await step.run("ultimo-sync", () =>
