@@ -1,10 +1,15 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useState } from "react";
 
-type Status = "OK" | "ERRO" | "PRECOS_DIVERGENTES" | "AGUARDANDO_PRECO" | "SEM_PRECO_PDV" | "SEM_PRODUTO_PDV" | "SEM_XML";
+type Status = "OK" | "ERRO" | "PRECOS_DIVERGENTES" | "AGUARDANDO_PRECO" | "EM_PROMOCAO" | "SEM_PRECO_PDV" | "SEM_PRODUTO_PDV" | "SEM_XML";
+
+interface Variacao { codigo: string; tamanho: string | null; cor: string | null; preco: number | null; promo: number | null }
 
 interface Linha {
+  rede: string;
+  variacoes: Variacao[];
+  emPromocao: boolean;
   modelo: string;
   referencia: string;
   descricao: string;
@@ -39,10 +44,11 @@ const mkp = (v: number | null) => (v == null ? "—" : mkpFmt.format(v));
 const ROTULO: Record<Status, string> = {
   OK: "OK",
   ERRO: "⚠ PREÇO ERRADO",
-  PRECOS_DIVERGENTES: "⚠ VARIAÇÕES COM PREÇOS DIFERENTES",
-  SEM_PRECO_PDV: "⚠ SEM PREÇO NO PDV",
-  AGUARDANDO_PRECO: "AGUARDANDO PREÇO (CADASTRO RECENTE)",
-  SEM_PRODUTO_PDV: "⚠ NÃO ACHADO NO PDV",
+  PRECOS_DIVERGENTES: "⚠ PREÇOS DIFERENTES",
+  EM_PROMOCAO: "⚠ EM PROMOÇÃO",
+  SEM_PRECO_PDV: "⚠ SEM PREÇO",
+  AGUARDANDO_PRECO: "AGUARDANDO PREÇO",
+  SEM_PRODUTO_PDV: "⚠ NÃO ACHADO",
   SEM_XML: "XML INCOMPLETO",
 };
 
@@ -65,6 +71,8 @@ function intervaloPadrao() {
 export default function ConferenciaMkpPage() {
   const [emitente, setEmitente] = useState("");
   const [modelo, setModelo] = useState("");
+  const [rede, setRede] = useState("");
+  const [abertas, setAbertas] = useState<Set<string>>(new Set());
   const [dataInicial, setDataInicial] = useState(() => intervaloPadrao().inicio);
   const [dataFinal, setDataFinal] = useState(() => intervaloPadrao().fim);
   const [somenteAlerta, setSomenteAlerta] = useState(true);
@@ -79,6 +87,7 @@ export default function ConferenciaMkpPage() {
       const qs = new URLSearchParams();
       if (emitente.trim()) qs.set("emitente", emitente.trim());
       if (modelo.trim()) qs.set("modelo", modelo.trim());
+      if (rede.trim()) qs.set("rede", rede.trim());
       if (dataInicial) qs.set("dataInicial", dataInicial);
       if (dataFinal) qs.set("dataFinal", dataFinal);
       if (somenteAlerta) qs.set("somenteAlerta", "1");
@@ -91,7 +100,7 @@ export default function ConferenciaMkpPage() {
     } finally {
       setCarregando(false);
     }
-  }, [emitente, modelo, dataInicial, dataFinal, somenteAlerta]);
+  }, [emitente, modelo, rede, dataInicial, dataFinal, somenteAlerta]);
 
   useEffect(() => {
     buscar();
@@ -115,6 +124,10 @@ export default function ConferenciaMkpPage() {
           <label style={{ fontSize: 12 }}>
             Modelo
             <input style={{ display: "block", width: 130 }} value={modelo} onChange={(e) => setModelo(e.target.value)} />
+          </label>
+          <label style={{ fontSize: 12 }}>
+            Rede
+            <input style={{ display: "block", width: 110 }} value={rede} placeholder="ex.: MULTI" onChange={(e) => setRede(e.target.value)} />
           </label>
           <label style={{ fontSize: 12 }}>
             Emissão de
@@ -161,6 +174,7 @@ export default function ConferenciaMkpPage() {
                   <thead>
                     <tr>
                       <th style={TH}>Alerta</th>
+                      <th style={TH}>Rede</th>
                       <th style={TH}>Modelo</th>
                       <th style={TH}>Referência</th>
                       <th style={TH}>Descrição</th>
@@ -175,13 +189,26 @@ export default function ConferenciaMkpPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {dados.linhas.map((l) => (
-                      <tr key={l.modelo + "|" + l.referencia} style={l.status === "ERRO" || l.status === "PRECOS_DIVERGENTES" || l.status === "SEM_PRECO_PDV" || l.status === "SEM_PRODUTO_PDV" ? { background: "rgba(231,76,60,.10)" } : undefined}>
+                    {dados.linhas.map((l) => {
+                      const chave = l.rede + "|" + l.modelo + "|" + l.referencia;
+                      const aberta = abertas.has(chave);
+                      return (
+                      <Fragment key={chave}>
+                      <tr style={l.status === "ERRO" || l.status === "EM_PROMOCAO" || l.status === "PRECOS_DIVERGENTES" || l.status === "SEM_PRECO_PDV" || l.status === "SEM_PRODUTO_PDV" ? { background: "rgba(231,76,60,.10)" } : undefined}>
                         <td style={{ ...TD, fontWeight: 600 }}>{ROTULO[l.status]}</td>
+                        <td style={TD}>{l.rede}</td>
                         <td style={TD}>{l.modelo}</td>
-                        <td style={TD}>{l.referencia}</td>
+                        <td style={TD}>
+                          {l.variacoes.length > 0 && (
+                            <button type="button" title="Ver variações" style={{ width: "auto", padding: "0 6px", marginRight: 6, fontSize: 11 }}
+                              onClick={() => setAbertas((a) => { const n = new Set(a); if (n.has(chave)) n.delete(chave); else n.add(chave); return n; })}>
+                              {aberta ? "−" : "+"}
+                            </button>
+                          )}
+                          {l.referencia}
+                        </td>
                         <td style={CORTA(340)} title={l.descricao}>{l.descricao}</td>
-                        <td style={CORTA(200)} title={l.emitente}>{l.emitente}</td>
+                        <td style={CORTA(140)} title={l.emitente}>{l.emitente}</td>
                         <td style={TD} title={`${l.nNotas} nota(s); última em ${l.data ?? "—"}`}>{l.nf}</td>
                         <td style={DIR}>{dinheiro(l.custoBruto)}</td>
                         <td style={DIR}>{dinheiro(l.custoTotal)}</td>
@@ -194,7 +221,27 @@ export default function ConferenciaMkpPage() {
                         <td style={DIR}>{mkp(l.mkpEsperado)}</td>
                         <td style={{ ...DIR, fontWeight: l.status === "ERRO" ? 700 : 400 }}>{dinheiro(l.precoCorreto)}</td>
                       </tr>
-                    ))}
+                      {aberta && (
+                        <tr>
+                          <td colSpan={13} style={{ padding: "4px 8px 10px 40px", fontSize: 12 }}>
+                            <table style={{ borderCollapse: "collapse" }}>
+                              <thead><tr><th style={TH}>Código</th><th style={TH}>Tamanho</th><th style={TH}>Cor</th><th style={{ ...TH, textAlign: "right" }}>Preço</th><th style={{ ...TH, textAlign: "right" }}>Promoção</th></tr></thead>
+                              <tbody>
+                                {l.variacoes.map((v) => (
+                                  <tr key={v.codigo}>
+                                    <td style={TD}>{v.codigo}</td><td style={TD}>{v.tamanho ?? "—"}</td><td style={TD}>{v.cor ?? "—"}</td>
+                                    <td style={DIR}>{dinheiro(v.preco)}</td>
+                                    <td style={{ ...DIR, fontWeight: v.promo ? 700 : 400 }}>{v.promo ? dinheiro(v.promo) : "—"}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </td>
+                        </tr>
+                      )}
+                      </Fragment>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>

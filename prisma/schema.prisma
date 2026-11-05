@@ -73,7 +73,7 @@ model RedeSync {
 // ---------------------------------------------------------------------------
 
 model Produto {
-  id                   String   @id // Id do produto na API do PDV
+  id                   String   @id // chave = "redeId:codigo da API" (o código só é único dentro da rede)
   redeId               Int
   nome                 String?
   referenciaFornecedor String?
@@ -92,7 +92,8 @@ model Produto {
   // Quando o app viu o produto pela 1ª vez (updatedAt muda a cada sync). Produtos que já
   // existiam na criação do campo ficam com 2000-01-01.
   primeiroSyncEm       DateTime @default(now())
-  variacoes            VariacaoProduto[]
+  // DataAtualizacao que vem do PDV (muda ao cadastrar/editar, inclusive preço).
+  dataAtualizacaoPdv   DateTime?
 
   @@index([redeId])
   // Filtros do relatório de Movimentação Resumida (equality + SELECT DISTINCT).
@@ -105,8 +106,7 @@ model Produto {
 
 model VariacaoProduto {
   id        String   @id // Id da variação na API do PDV
-  produtoId String
-  produto   Produto  @relation(fields: [produtoId], references: [id])
+  produtoId String // chave do produto: "redeId:codigo" (sem FK)
   redeId    Int
   // Enriquecidos aos poucos por `enriquecerVariacoes` (listarVariacoesProduto).
   ean       String?
@@ -165,6 +165,8 @@ model EstoqueVariacaoSync {
 model PrecoVariacao {
   variacaoId String   @id
   preco      Decimal  @db.Decimal(14, 2)
+  // Preço promocional fixo da tabela (0/null = sem promoção).
+  precoPromocional Decimal? @db.Decimal(14, 2)
   updatedAt  DateTime @updatedAt
 }
 

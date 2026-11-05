@@ -2,19 +2,33 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { EMPRESAS_BANIDAS } from "@/lib/identificar-produto";
 import { detalhesDoXml, type ItemBase } from "@/lib/exportar-cadastro-produtos";
+import { REDES_ATIVAS } from "@/lib/redes-ativas";
 import { arred2, calcularPrecosModelo, modeloTemRegraDePreco } from "@/lib/precos-modelo";
 
 export interface FiltrosConferenciaMkp {
   emitente: string;
   modelo: string;
+  rede: string;
   dataInicial: string;
   dataFinal: string;
   somenteAlerta: boolean;
 }
 
-export type StatusMkp = "OK" | "ERRO" | "PRECOS_DIVERGENTES" | "AGUARDANDO_PRECO" | "SEM_PRECO_PDV" | "SEM_PRODUTO_PDV" | "SEM_XML";
+export type StatusMkp = "OK" | "ERRO" | "PRECOS_DIVERGENTES" | "AGUARDANDO_PRECO" | "EM_PROMOCAO" | "SEM_PRECO_PDV" | "SEM_PRODUTO_PDV" | "SEM_XML";
+
+export interface VariacaoMkp {
+  codigo: string;
+  tamanho: string | null;
+  cor: string | null;
+  preco: number | null;
+  promo: number | null;
+}
 
 export interface LinhaMkp {
+  redeId: number | null;
+  rede: string;
+  variacoes: VariacaoMkp[];
+  emPromocao: boolean;
   modelo: string;
   referencia: string;
   descricao: string;
@@ -45,6 +59,7 @@ export function parseFiltrosConferenciaMkp(sp: URLSearchParams): FiltrosConferen
   return {
     emitente: (sp.get("emitente") ?? "").trim(),
     modelo: (sp.get("modelo") ?? "").trim(),
+    rede: (sp.get("rede") ?? "").trim(),
     dataInicial: (sp.get("dataInicial") ?? "").trim(),
     dataFinal: (sp.get("dataFinal") ?? "").trim(),
     somenteAlerta: sp.get("somenteAlerta") === "1",
@@ -134,34 +149,37 @@ export async function montarConferenciaMkp(f: FiltrosConferenciaMkp): Promise<Re
   }));
   const detalhes = itensBase.length ? await detalhesDoXml(itensBase) : new Map();
 
-  // Preços que estão no PDV, por referência do fornecedor.
+  // Produtos no PDV por (referência, modelo, rede) — o código só vale dentro da rede.
+  interface Prod { redeId: number; nome: string | null; primeiro: number; vars: VariacaoMkp[] }
   const refs = [...new Set(reps.map(({ r }) => up(r.referencia)))];
-  const precosPdv = new Map<string, number[]>();
-  const achouProduto = new Set<string>();
-  const nomePdv = new Map<string, string>();
-  const primeiroSync = new Map<string, number>(); // menor "primeiroSyncEm" por referência
+  const prodsPorChave = new Map<string, Map<number, Prod>>(); // "REF|MODELO" -> rede -> produto
+  const nomesRede = new Map<number, string>();
+  for (const x of await prisma.redeSync.findMany()) nomesRede.set(x.id, x.nome);
   if (refs.length) {
-    const pr = await prisma.$queryRaw<{ ref: string; nome: string | null; preco: number | null; primeiro: Date }[]>(Prisma.sql`
-      SELECT UPPER(BTRIM(p."referenciaFornecedor")) AS ref, p.nome AS nome, pv.preco::float8 AS preco,
-             p."primeiroSyncEm" AS primeiro
+    const pr = await prisma.$queryRaw<any[]>(Prisma.sql`
+      SELECT UPPER(BTRIM(p."referenciaFornecedor")) AS ref, UPPER(BTRIM(p."modeloNome")) AS modelo,
+             p."redeId" AS rede, p.nome AS nome, p."primeiroSyncEm" AS primeiro,
+             v.id AS vid, v.tamanho, v.cor, pv.preco::float8 AS preco, pv."precoPromocional"::float8 AS promo
       FROM "Produto" p
       LEFT JOIN "VariacaoProduto" v ON v."produtoId" = p.id
       LEFT JOIN "PrecoVariacao" pv ON pv."variacaoId" = v.id
       WHERE UPPER(BTRIM(p."referenciaFornecedor")) = ANY(${refs}::text[])
+        AND p."redeId" = ANY(${REDES_ATIVAS}::int[])
     `);
     for (const x of pr) {
-      achouProduto.add(x.ref);
-      if (x.nome && !nomePdv.has(x.ref)) nomePdv.set(x.ref, x.nome.trim());
+      const k = `${x.ref}|${x.modelo}`;
+      const porRede = prodsPorChave.get(k) ?? new Map<number, Prod>();
+      prodsPorChave.set(k, porRede);
       const t = new Date(x.primeiro).getTime();
-      primeiroSync.set(x.ref, Math.min(primeiroSync.get(x.ref) ?? t, t));
-      if (x.preco == null) continue;
-      const l = precosPdv.get(x.ref) ?? [];
-      l.push(arred2(Number(x.preco)));
-      precosPdv.set(x.ref, l);
+      const pd = porRede.get(x.rede) ?? { redeId: x.rede, nome: x.nome?.trim() ?? null, primeiro: t, vars: [] };
+      pd.primeiro = Math.min(pd.primeiro, t);
+      if (x.vid) pd.vars.push({ codigo: x.vid, tamanho: x.tamanho, cor: x.cor, preco: x.preco == null ? null : arred2(x.preco), promo: x.promo ? arred2(x.promo) : null });
+      porRede.set(x.rede, pd);
     }
   }
 
-  const linhas: LinhaMkp[] = reps.map(({ r, n }) => {
+  const linhas: LinhaMkp[] = [];
+  for (const { r, n } of reps) {
     const det = detalhes.get(r.id);
     const qtd = Number(r.qtd) || 1;
     const custoUn = Number(r.vun);
@@ -175,55 +193,75 @@ export async function montarConferenciaMkp(f: FiltrosConferenciaMkp): Promise<Re
       custoTotUn,
     });
     const ref = up(r.referencia);
-    const lista = precosPdv.get(ref) ?? [];
-    // Preço "do sistema" = o mais comum entre as variações (empate: o menor).
-    const cont = new Map<number, number>();
-    for (const v of lista) cont.set(v, (cont.get(v) ?? 0) + 1);
-    const precoPdv = lista.length
-      ? [...cont.entries()].sort((a, b) => b[1] - a[1] || a[0] - b[0])[0][0]
-      : null;
-    const distintos = [...cont.keys()].sort((a, b) => a - b);
+    const porRede = prodsPorChave.get(`${ref}|${up(r.modelo)}`);
+    const alvos: (Prod | null)[] = porRede && porRede.size ? [...porRede.values()].sort((a, b) => a.redeId - b.redeId) : [null];
 
-    let status: StatusMkp;
-    if (p.preco3 == null) status = p.preco2 == null ? "SEM_XML" : "OK";
-    else if (!achouProduto.has(ref)) status = "SEM_PRODUTO_PDV";
-    else if (precoPdv == null) {
-      // Cadastrado há menos de JANELA_AGUARDANDO_PRECO_H horas: o preço ainda pode chegar.
-      const idade = Date.now() - (primeiroSync.get(ref) ?? 0);
-      status = idade < JANELA_AGUARDANDO_PRECO_H * 3600000 ? "AGUARDANDO_PRECO" : "SEM_PRECO_PDV";
+    for (const pd of alvos) {
+      const vars = pd?.vars ?? [];
+      const comPreco = vars.filter((v) => v.preco != null);
+      const moda = (vals: number[]) => {
+        const c = new Map<number, number>();
+        for (const v of vals) c.set(v, (c.get(v) ?? 0) + 1);
+        return c;
+      };
+      // Preço efetivo = promocional (se diferente de zero) senão varejo.
+      const efetivos = comPreco.map((v) => (v.promo ? v.promo : (v.preco as number)));
+      const contEf = moda(efetivos);
+      const ordenado = [...contEf.entries()].sort((a, b) => b[1] - a[1] || a[0] - b[0]);
+      const precoPdv = ordenado.length ? ordenado[0][0] : null;
+      const contVarejo = moda(comPreco.map((v) => v.preco as number));
+      const varejo = contVarejo.size ? [...contVarejo.entries()].sort((a, b) => b[1] - a[1] || a[0] - b[0])[0][0] : null;
+      const emPromocao = comPreco.some((v) => v.promo);
+
+      let status: StatusMkp;
+      if (p.preco3 == null) status = p.preco2 == null ? "SEM_XML" : "OK";
+      else if (!pd) status = "SEM_PRODUTO_PDV";
+      else if (varejo == null) {
+        const idade = Date.now() - pd.primeiro;
+        status = idade < JANELA_AGUARDANDO_PRECO_H * 3600000 ? "AGUARDANDO_PRECO" : "SEM_PRECO_PDV";
+      }
+      else if (Math.abs(varejo - p.preco3) > 0.005) status = "ERRO";
+      else if (contVarejo.size > 1) status = "PRECOS_DIVERGENTES";
+      else status = emPromocao ? "EM_PROMOCAO" : "OK";
+
+      const base = p.preco2;
+      const razao = (v: number | null) => (v != null && base ? Math.round((v / base) * 100) / 100 : null);
+      linhas.push({
+        redeId: pd?.redeId ?? null,
+        rede: pd ? (nomesRede.get(pd.redeId) ?? `Rede ${pd.redeId}`) : "—",
+        variacoes: [...vars].sort((a, b) => (a.tamanho ?? "").localeCompare(b.tamanho ?? "", "pt-BR", { numeric: true }) || (a.cor ?? "").localeCompare(b.cor ?? "")),
+        emPromocao,
+        modelo: r.modelo,
+        referencia: r.referencia,
+        descricao: pd?.nome ?? r.descricao,
+        emitente: r.emitente,
+        nf: r.numero ?? "",
+        data: r.data ? new Date(r.data).toISOString().slice(0, 10) : null,
+        nNotas: n,
+        custoBruto: p.preco1,
+        custoTotal: p.preco2,
+        precoPdv,
+        precosPdvDistintos: ordenado.map((e) => e[0]).sort((a, b) => a - b),
+        precosPdvDetalhe: ordenado.map(([preco, q]) => ({ preco, qtd: q })),
+        mkpAtual: razao(precoPdv),
+        mkpEsperado: razao(p.preco3),
+        precoCorreto: p.preco3,
+        status,
+      });
     }
-    else if (Math.abs(precoPdv - p.preco3) > 0.005) status = "ERRO";
-    else status = distintos.length > 1 ? "PRECOS_DIVERGENTES" : "OK";
+  }
 
-    const base = p.preco2;
-    const razao = (v: number | null) => (v != null && base ? Math.round((v / base) * 100) / 100 : null);
-    return {
-      modelo: r.modelo,
-      referencia: r.referencia,
-      descricao: nomePdv.get(ref) ?? r.descricao,
-      emitente: r.emitente,
-      nf: r.numero ?? "",
-      data: r.data ? new Date(r.data).toISOString().slice(0, 10) : null,
-      nNotas: n,
-      custoBruto: p.preco1,
-      custoTotal: p.preco2,
-      precoPdv,
-      precosPdvDistintos: distintos,
-      precosPdvDetalhe: [...cont.entries()].sort((a, b) => b[1] - a[1] || a[0] - b[0]).map(([preco, qtd]) => ({ preco, qtd })),
-      mkpAtual: razao(precoPdv),
-      mkpEsperado: razao(p.preco3),
-      precoCorreto: p.preco3,
-      status,
-    };
-  });
-
-  const peso: Record<StatusMkp, number> = { ERRO: 0, PRECOS_DIVERGENTES: 0, AGUARDANDO_PRECO: 5, SEM_PRECO_PDV: 1, SEM_PRODUTO_PDV: 2, SEM_XML: 3, OK: 4 };
+  const peso: Record<StatusMkp, number> = { ERRO: 0, PRECOS_DIVERGENTES: 0, EM_PROMOCAO: 0, AGUARDANDO_PRECO: 5, SEM_PRECO_PDV: 1, SEM_PRODUTO_PDV: 2, SEM_XML: 3, OK: 4 };
   linhas.sort(
     (a, b) =>
       peso[a.status] - peso[b.status] ||
       a.modelo.localeCompare(b.modelo) ||
       a.referencia.localeCompare(b.referencia)
   );
+  if (f.rede) {
+    const alvo = f.rede.toUpperCase();
+    for (let i = linhas.length - 1; i >= 0; i--) if (!linhas[i].rede.toUpperCase().includes(alvo)) linhas.splice(i, 1);
+  }
   const aguardandoPreco = linhas.filter((l) => l.status === "AGUARDANDO_PRECO").length;
   const ehAlerta = (l: LinhaMkp) => l.status !== "OK" && l.status !== "AGUARDANDO_PRECO" && l.status !== "SEM_XML";
   const comAlerta = linhas.filter(ehAlerta).length;

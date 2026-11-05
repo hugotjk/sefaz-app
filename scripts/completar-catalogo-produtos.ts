@@ -13,6 +13,7 @@
 import { PrismaClient } from "@prisma/client";
 import { listarProdutos, listarVariacoesProduto } from "../src/lib/pdvapi";
 import { vincularCadastroDeProdutos } from "../src/lib/reavaliar-cadastro-recentes";
+import { chaveProduto, idApiDoProduto } from "../src/lib/produto-id";
 
 const prisma = new PrismaClient();
 
@@ -86,7 +87,8 @@ async function main() {
     }
     if (registros.length === 0) break;
 
-    const ids = registros.map((r) => r.Id);
+    const chaveDe = (r: { Id: string; RedeId?: number | null }) => chaveProduto(r.RedeId ?? redeId, r.Id);
+    const ids = registros.map((r) => chaveDe(r));
     // Já completos = existem em Produto E têm ao menos 1 variação (ou a API não traz variações).
     const completos = new Set(
       (await comRetryDb(() =>
@@ -97,14 +99,16 @@ async function main() {
         )
       )).map((r) => r.id)
     );
-    const falta = registros.filter((r) => !completos.has(r.Id) && !(soAtivos && r.Inativo));
+    const falta = registros.filter((r) => !completos.has(chaveDe(r)) && !(soAtivos && r.Inativo));
     faltantes += falta.length;
 
     if (apply && falta.length > 0) {
       // Gravação em LOTE (2 comandos por página em vez de centenas de upserts).
       // skipDuplicates: nunca altera o que já existe.
       const produtosData = falta.map((p) => ({
-        id: p.Id,
+        id: chaveDe(p),
+        primeiroSyncEm: new Date("2000-01-01T00:00:00Z"),
+        dataAtualizacaoPdv: p.DataAtualizacao ? new Date(p.DataAtualizacao) : null,
         redeId: p.RedeId ?? redeId,
         nome: p.Nome || null,
         referenciaFornecedor: p.ReferenciaProdutoFornecedor || null,
@@ -120,7 +124,7 @@ async function main() {
         compradorNome: p.Comprador || null,
       }));
       const variacoesData = falta.flatMap((p) =>
-        (p.Variacoes ?? []).map((v) => ({ id: v.Id, produtoId: p.Id, redeId: p.RedeId ?? redeId }))
+        (p.Variacoes ?? []).map((v) => ({ id: v.Id, produtoId: chaveDe(p), redeId: p.RedeId ?? redeId }))
       );
       await comRetryDb(() => prisma.produto.createMany({ data: produtosData, skipDuplicates: true }));
       for (let i = 0; i < variacoesData.length; i += 500) {
@@ -129,17 +133,17 @@ async function main() {
       }
       variacoes += variacoesData.length;
       semVariacaoEmbutida += falta.filter((p) => (p.Variacoes ?? []).length === 0).length;
-      novosIds.push(...falta.map((p) => p.Id));
+      novosIds.push(...falta.map((p) => chaveDe(p)));
       gravados += falta.length;
 
       // Produtos sem variação embutida: busca no endpoint dedicado (poucos).
       for (const p of falta.filter((x) => (x.Variacoes ?? []).length === 0)) {
         try {
-          const lista = await listarVariacoesProduto(redeId, p.Id);
+          const lista = await listarVariacoesProduto(redeId, idApiDoProduto(chaveDe(p)));
           for (const v of lista) {
             await prisma.variacaoProduto.upsert({
               where: { id: v.Id },
-              create: { id: v.Id, produtoId: p.Id, redeId: v.RedeId ?? redeId },
+              create: { id: v.Id, produtoId: chaveDe(p), redeId: v.RedeId ?? redeId },
               update: {},
             });
             variacoes++;

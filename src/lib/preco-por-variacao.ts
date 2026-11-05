@@ -13,10 +13,12 @@ export async function precosPorVariacao(
   tabelaId: number,
   ids: string[],
   totalPaginas: number
-): Promise<{ precos: Map<string, number>; chamadas: number }> {
+): Promise<{ precos: Map<string, { preco: number; promo: number }>; chamadas: number }> {
   const alvos = [...new Set(ids)].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
   const cache = new Map<number, PrecoPdv[]>();
-  const precos = new Map<string, number>();
+  const precos = new Map<string, { preco: number; promo: number }>();
+  const guarda = (alvo: string, r: PrecoPdv) =>
+    precos.set(alvo, { preco: Number(r.PrecoOriginal ?? 0), promo: Number(r.PrecoPromocional ?? 0) });
   let chamadas = 0;
 
   const pagina = async (n: number): Promise<PrecoPdv[]> => {
@@ -37,7 +39,7 @@ export async function precosPorVariacao(
       if (!regs.length) continue;
       if (alvo >= id(regs[0]) && alvo <= id(regs[regs.length - 1])) {
         const hit = regs.find((r) => id(r) === alvo);
-        if (hit) precos.set(alvo, Number(hit.PrecoOriginal ?? 0));
+        if (hit) guarda(alvo, hit);
         lo = Math.max(lo, n);
         resolvido = true;
         break;
@@ -59,7 +61,7 @@ export async function precosPorVariacao(
       else if (alvo > id(regs[regs.length - 1])) l = mid + 1;
       else {
         const hit = regs.find((r) => id(r) === alvo);
-        if (hit) precos.set(alvo, Number(hit.PrecoOriginal ?? 0));
+        if (hit) guarda(alvo, hit);
         lo = Math.max(lo, mid);
         break;
       }
