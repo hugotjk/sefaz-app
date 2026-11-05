@@ -42,6 +42,16 @@ const ROTULO: Record<Status, string> = {
   SEM_XML: "XML INCOMPLETO",
 };
 
+const TD: React.CSSProperties = { whiteSpace: "nowrap", padding: "5px 8px", fontSize: 12.5 };
+const TH: React.CSSProperties = { whiteSpace: "nowrap", padding: "6px 8px", fontSize: 12.5 };
+const CORTA = (w: number): React.CSSProperties => ({
+  ...TD,
+  maxWidth: w,
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+});
+const DIR: React.CSSProperties = { ...TD, textAlign: "right" };
+
 const ymd = (d: Date) => d.toISOString().slice(0, 10);
 function intervaloPadrao() {
   const fim = new Date();
@@ -124,7 +134,10 @@ export default function ConferenciaMkpPage() {
         </div>
       </div>
 
-      <div className="card">
+      <div
+        className="card"
+        style={{ width: "min(98vw, 1700px)", position: "relative", left: "50%", transform: "translateX(-50%)" }}
+      >
         {erro && <p style={{ color: "var(--danger, #c0392b)" }}>{erro}</p>}
         {dados && !erro && (
           <>
@@ -141,44 +154,44 @@ export default function ConferenciaMkpPage() {
               <p>Nenhum produto para mostrar neste filtro.</p>
             ) : (
               <div style={{ overflowX: "auto" }}>
-                <table className="tabela">
+                <table className="tabela" style={{ borderCollapse: "collapse", width: "100%" }}>
                   <thead>
                     <tr>
-                      <th>Alerta</th>
-                      <th>Modelo</th>
-                      <th>Referência</th>
-                      <th>Descrição</th>
-                      <th>Fornecedor</th>
-                      <th>NF</th>
-                      <th style={{ textAlign: "right" }}>Custo bruto</th>
-                      <th style={{ textAlign: "right" }}>Custo total</th>
-                      <th style={{ textAlign: "right" }}>Preço no PDV</th>
-                      <th style={{ textAlign: "right" }}>MKP atual</th>
-                      <th style={{ textAlign: "right" }}>MKP esperado</th>
-                      <th style={{ textAlign: "right" }}>Preço correto</th>
+                      <th style={TH}>Alerta</th>
+                      <th style={TH}>Modelo</th>
+                      <th style={TH}>Referência</th>
+                      <th style={TH}>Descrição</th>
+                      <th style={TH}>Fornecedor</th>
+                      <th style={TH}>NF</th>
+                      <th style={{ ...TH, textAlign: "right" }}>Custo bruto</th>
+                      <th style={{ ...TH, textAlign: "right" }}>Custo total</th>
+                      <th style={{ ...TH, textAlign: "right" }}>Preço PDV</th>
+                      <th style={{ ...TH, textAlign: "right" }}>MKP atual</th>
+                      <th style={{ ...TH, textAlign: "right" }}>MKP esperado</th>
+                      <th style={{ ...TH, textAlign: "right" }}>Preço correto</th>
                     </tr>
                   </thead>
                   <tbody>
                     {dados.linhas.map((l) => (
                       <tr key={l.modelo + "|" + l.referencia} style={l.status !== "OK" ? { background: "rgba(231,76,60,.10)" } : undefined}>
-                        <td style={{ whiteSpace: "nowrap", fontWeight: 600 }}>{ROTULO[l.status]}</td>
-                        <td>{l.modelo}</td>
-                        <td>{l.referencia}</td>
-                        <td title={l.descricao}>{l.descricao}</td>
-                        <td>{l.emitente}</td>
-                        <td title={`${l.nNotas} nota(s); última em ${l.data ?? "—"}`}>{l.nf}</td>
-                        <td style={{ textAlign: "right" }}>{dinheiro(l.custoBruto)}</td>
-                        <td style={{ textAlign: "right" }}>{dinheiro(l.custoTotal)}</td>
+                        <td style={{ ...TD, fontWeight: 600 }}>{ROTULO[l.status]}</td>
+                        <td style={TD}>{l.modelo}</td>
+                        <td style={TD}>{l.referencia}</td>
+                        <td style={CORTA(340)} title={l.descricao}>{l.descricao}</td>
+                        <td style={CORTA(200)} title={l.emitente}>{l.emitente}</td>
+                        <td style={TD} title={`${l.nNotas} nota(s); última em ${l.data ?? "—"}`}>{l.nf}</td>
+                        <td style={DIR}>{dinheiro(l.custoBruto)}</td>
+                        <td style={DIR}>{dinheiro(l.custoTotal)}</td>
                         <td
-                          style={{ textAlign: "right" }}
+                          style={DIR}
                           title={l.precosPdvDistintos.length > 1 ? `Preços diferentes nas variações: ${l.precosPdvDistintos.join(" / ")}` : undefined}
                         >
                           {dinheiro(l.precoPdv)}
                           {l.precosPdvDistintos.length > 1 ? " *" : ""}
                         </td>
-                        <td style={{ textAlign: "right" }}>{mkp(l.mkpAtual)}</td>
-                        <td style={{ textAlign: "right" }}>{mkp(l.mkpEsperado)}</td>
-                        <td style={{ textAlign: "right", fontWeight: l.status === "ERRO" ? 700 : 400 }}>{dinheiro(l.precoCorreto)}</td>
+                        <td style={DIR}>{mkp(l.mkpAtual)}</td>
+                        <td style={DIR}>{mkp(l.mkpEsperado)}</td>
+                        <td style={{ ...DIR, fontWeight: l.status === "ERRO" ? 700 : 400 }}>{dinheiro(l.precoCorreto)}</td>
                       </tr>
                     ))}
                   </tbody>
