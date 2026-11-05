@@ -133,9 +133,10 @@ export async function montarConferenciaMkp(f: FiltrosConferenciaMkp): Promise<Re
   const refs = [...new Set(reps.map(({ r }) => up(r.referencia)))];
   const precosPdv = new Map<string, number[]>();
   const achouProduto = new Set<string>();
+  const nomePdv = new Map<string, string>();
   if (refs.length) {
-    const pr = await prisma.$queryRaw<{ ref: string; preco: number | null }[]>(Prisma.sql`
-      SELECT UPPER(BTRIM(p."referenciaFornecedor")) AS ref, pv.preco::float8 AS preco
+    const pr = await prisma.$queryRaw<{ ref: string; nome: string | null; preco: number | null }[]>(Prisma.sql`
+      SELECT UPPER(BTRIM(p."referenciaFornecedor")) AS ref, p.nome AS nome, pv.preco::float8 AS preco
       FROM "Produto" p
       LEFT JOIN "VariacaoProduto" v ON v."produtoId" = p.id
       LEFT JOIN "PrecoVariacao" pv ON pv."variacaoId" = v.id
@@ -143,6 +144,7 @@ export async function montarConferenciaMkp(f: FiltrosConferenciaMkp): Promise<Re
     `);
     for (const x of pr) {
       achouProduto.add(x.ref);
+      if (x.nome && !nomePdv.has(x.ref)) nomePdv.set(x.ref, x.nome.trim());
       if (x.preco == null) continue;
       const l = precosPdv.get(x.ref) ?? [];
       l.push(arred2(Number(x.preco)));
@@ -159,6 +161,7 @@ export async function montarConferenciaMkp(f: FiltrosConferenciaMkp): Promise<Re
       modelo: r.modelo,
       emitente: r.emitente,
       referencia: r.referencia,
+      descricao: r.descricao,
       custoUn,
       custoTotUn,
     });
@@ -183,7 +186,7 @@ export async function montarConferenciaMkp(f: FiltrosConferenciaMkp): Promise<Re
     return {
       modelo: r.modelo,
       referencia: r.referencia,
-      descricao: r.descricao,
+      descricao: nomePdv.get(ref) ?? r.descricao,
       emitente: r.emitente,
       nf: r.numero ?? "",
       data: r.data ? new Date(r.data).toISOString().slice(0, 10) : null,
@@ -206,9 +209,10 @@ export async function montarConferenciaMkp(f: FiltrosConferenciaMkp): Promise<Re
       a.modelo.localeCompare(b.modelo) ||
       a.referencia.localeCompare(b.referencia)
   );
-  const comAlerta = linhas.filter((l) => l.status !== "OK").length;
+  const ehAlerta = (l: LinhaMkp) => l.status !== "OK" && l.status !== "SEM_PRECO_PDV" && l.status !== "SEM_XML";
+  const comAlerta = linhas.filter(ehAlerta).length;
   return {
-    linhas: f.somenteAlerta ? linhas.filter((l) => l.status !== "OK") : linhas,
+    linhas: f.somenteAlerta ? linhas.filter(ehAlerta) : linhas,
     total: linhas.length,
     comAlerta,
     modelosSemRegra: [...modelosSemRegra].sort(),
