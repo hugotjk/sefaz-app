@@ -9,6 +9,7 @@ import { LIMITE_TENTATIVAS_XML, DIAS_NOTA_RECENTE } from "@/lib/nota-xml-status"
 import { classificarTipoLoja } from "@/lib/classificar-tipo-loja";
 import { popularNotaItens, avaliarCadastroItens } from "@/lib/popular-nota-itens";
 import { reavaliarCadastroRecentes, vincularCadastroDeProdutos } from "@/lib/reavaliar-cadastro-recentes";
+import { precosPorVariacao } from "@/lib/preco-por-variacao";
 import { upsertEstoqueBulk } from "@/lib/bulk-upsert-estoque";
 import {
   buscarNfesRecebidas,
@@ -1354,95 +1355,80 @@ export const syncPrecos = inngest.createFunction(
 );
 
 // ---------------------------------------------------------------------------
-// syncPrecosRecentes — de 2 em 2 horas (06:30-20:30). A tabela de preços do PDV vem
-// ordenada por DataAtualizacao crescente (o mais novo fica nas ÚLTIMAS páginas),
-// então lemos de trás pra frente até chegar em preços mais antigos que a última
-// execução (com folga de 2 dias). Assim, preço de produto novo/editado entra no
-// app em ~1h, sem esperar a varredura completa do syncPrecos (que leva semanas).
-// Trava de segurança: se a última página não tiver datas recentes (ordem
-// inesperada), não grava nada.
+// syncPrecosProdutosRecentes — de 2 em 2 horas (07:10-21:10, depois do syncProdutos).
+// A tabela de preços do PDV não filtra por data, mas vem ordenada pelo VariacaoId
+// (texto): achamos o preço de cada variação por busca binária (~14 chamadas) em vez de
+// varrer as 15 mil páginas. Alvos:
+//   A) variações SEM preço de produtos atualizados nos últimos 2 dias (cadastro novo);
+//   B) todas as variações de produtos atualizados nas últimas 5 horas (preço editado).
+// A varredura completa da madrugada (syncPrecos) continua como está.
 // ---------------------------------------------------------------------------
 
-const MAX_PAGINAS_PRECOS_RECENTES = 80; // 80 x 50 = 4.000 preços por execução (no máx.)
-const DIAS_FOLGA_PRECOS_RECENTES = 2;
+const PRECOS_RECENTES_DIAS = 2;
+const PRECOS_RECENTES_HORAS_EDICAO = 5;
+const VARIACOES_POR_PASSO_PRECOS = 40;
+const SUBGRUPOS_PARALELOS_PRECOS = 4;
 
-export const syncPrecosRecentes = inngest.createFunction(
+export const syncPrecosProdutosRecentes = inngest.createFunction(
   {
-    id: "pdv-sync-precos-recentes",
+    id: "pdv-sync-precos-produtos-recentes",
     concurrency: [
       { scope: "account", key: '"sefaz-pdv-sync"', limit: 4 },
       { limit: 1 },
     ],
     retries: 2,
   },
-  { cron: "TZ=America/Sao_Paulo 30 6-20/2 * * *" }, // 2 em 2 horas (06:30, 08:30, ... 20:30)
+  { cron: "TZ=America/Sao_Paulo 10 7-21/2 * * *" },
   async ({ step }) => {
     const tabelaId = await step.run("descobrir-tabela-varejo", descobrirTabelaVarejo);
-    const ultimo = await step.run("ultimo-sync", () =>
-      lerSyncState<{ iso: string | null }>("precos-recentes:ultimo", { iso: null })
-    );
-    const inicioExecucao = new Date();
-    const base = ultimo.iso ? new Date(ultimo.iso) : new Date(inicioExecucao.getTime() - 3 * 86400000);
-    const limite = new Date(base.getTime() - DIAS_FOLGA_PRECOS_RECENTES * 86400000);
 
-    const total = await step.run("total-paginas", async () => {
+    const totalPaginas = await step.run("total-paginas", async () => {
       const { paginacao } = await listarPrecos(tabelaId, { pagina: 1, tamanhoPagina: PDV_TAM_PAGINA });
       return paginacao?.TotalPaginas ?? 0;
     });
-    if (!total) return { tabelaId, aviso: "sem paginação" };
+    if (!totalPaginas) return { tabelaId, aviso: "sem paginação" };
 
-    let pagina = total;
-    let salvos = 0;
-    let paginasLidas = 0;
-    let parou = "limite de páginas";
+    const alvos = await step.run("alvos", async () => {
+      const rows = await prisma.$queryRaw<{ id: string }[]>(Prisma.sql`
+        SELECT DISTINCT v.id
+        FROM "VariacaoProduto" v
+        JOIN "Produto" p ON p.id = v."produtoId"
+        LEFT JOIN "PrecoVariacao" pv ON pv."variacaoId" = v.id
+        WHERE (p."updatedAt" >= NOW() - (${PRECOS_RECENTES_DIAS} * INTERVAL '1 day') AND pv."variacaoId" IS NULL)
+           OR p."updatedAt" >= NOW() - (${PRECOS_RECENTES_HORAS_EDICAO} * INTERVAL '1 hour')
+      `);
+      return rows.map((r: { id: string }) => r.id).sort((a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0));
+    });
 
-    while (paginasLidas < MAX_PAGINAS_PRECOS_RECENTES && pagina >= 1) {
-      const paginaAtual = pagina;
-      const r = await step.run(`recentes-t${tabelaId}-p${paginaAtual}`, async () => {
-        const { registros } = await listarPrecos(tabelaId, {
-          pagina: paginaAtual,
-          tamanhoPagina: PDV_TAM_PAGINA,
-        });
-        const datas = registros
-          .map((x) => (x.DataAtualizacao ? new Date(x.DataAtualizacao).getTime() : NaN))
-          .filter((t) => !Number.isNaN(t));
-        const maxData = datas.length ? Math.max(...datas) : null;
-        // Trava: a 1ª página lida (a última da tabela) tem que ter datas recentes.
-        if (paginaAtual === total && maxData != null && maxData < inicioExecucao.getTime() - 45 * 86400000) {
-          return { salvos: 0, tudoAntigo: true, ordemInesperada: true };
+    let encontrados = 0;
+    let chamadas = 0;
+    for (let i = 0; i < alvos.length; i += VARIACOES_POR_PASSO_PRECOS) {
+      const lote = alvos.slice(i, i + VARIACOES_POR_PASSO_PRECOS);
+      const r = await step.run(`precos-lote-${i}`, async () => {
+        // Sub-grupos contíguos (as variações do mesmo produto ficam juntas) em paralelo.
+        const tam = Math.ceil(lote.length / SUBGRUPOS_PARALELOS_PRECOS);
+        const grupos: string[][] = [];
+        for (let k = 0; k < lote.length; k += tam) grupos.push(lote.slice(k, k + tam));
+        const res = await Promise.all(grupos.map((g) => precosPorVariacao(tabelaId, g, totalPaginas)));
+        const todos = new Map<string, number>();
+        let ch = 0;
+        for (const x of res) {
+          ch += x.chamadas;
+          for (const [k, v] of x.precos) todos.set(k, v);
         }
-        if (registros.length) {
-          const ids = registros.map((x) => String(x.VariacaoId));
-          const precos = registros.map((x) => Number(x.PrecoOriginal ?? 0));
+        if (todos.size) {
           await prisma.$executeRaw(Prisma.sql`
             INSERT INTO "PrecoVariacao" ("variacaoId", "preco", "updatedAt")
-            SELECT v, p, NOW() FROM unnest(${ids}::text[], ${precos}::numeric[]) AS t(v, p)
+            SELECT v, p, NOW() FROM unnest(${[...todos.keys()]}::text[], ${[...todos.values()]}::numeric[]) AS t(v, p)
             ON CONFLICT ("variacaoId") DO UPDATE SET "preco" = EXCLUDED."preco", "updatedAt" = NOW()
           `);
         }
-        // Página vazia (a última pode dar 404 na API) não indica "acabou": segue pra trás.
-        const tudoAntigo = maxData != null && maxData < limite.getTime();
-        return { salvos: registros.length, tudoAntigo, ordemInesperada: false };
+        return { achados: todos.size, chamadas: ch };
       });
-      paginasLidas++;
-      salvos += r.salvos;
-      if (r.ordemInesperada) {
-        parou = "ordem inesperada (nada gravado)";
-        break;
-      }
-      if (r.tudoAntigo) {
-        parou = "chegou em preços antigos";
-        break;
-      }
-      pagina--;
+      encontrados += r.achados;
+      chamadas += r.chamadas;
     }
-
-    if (!parou.startsWith("ordem")) {
-      await step.run("gravar-ultimo", () =>
-        gravarSyncState("precos-recentes:ultimo", { iso: inicioExecucao.toISOString() })
-      );
-    }
-    return { tabelaId, totalPaginas: total, paginasLidas, salvos, parou };
+    return { tabelaId, totalPaginas, variacoesAlvo: alvos.length, encontrados, chamadas };
   }
 );
 

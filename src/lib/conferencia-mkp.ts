@@ -51,8 +51,8 @@ export function parseFiltrosConferenciaMkp(sp: URLSearchParams): FiltrosConferen
   };
 }
 
-// Depois desse tempo sem preço no app, vira alerta (produto 2h até o app + preço 2h).
-export const JANELA_AGUARDANDO_PRECO_H = 4;
+// Depois desse tempo sem preço no app, vira alerta (produto até 3h no app + preço até 2h depois).
+export const JANELA_AGUARDANDO_PRECO_H = 6;
 
 const up = (s: string | null | undefined) => (s ?? "").trim().toUpperCase();
 
