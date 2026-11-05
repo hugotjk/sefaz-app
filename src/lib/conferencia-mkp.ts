@@ -12,7 +12,7 @@ export interface FiltrosConferenciaMkp {
   somenteAlerta: boolean;
 }
 
-export type StatusMkp = "OK" | "ERRO" | "SEM_PRECO_PDV" | "SEM_PRODUTO_PDV" | "SEM_XML";
+export type StatusMkp = "OK" | "ERRO" | "PRECOS_DIVERGENTES" | "SEM_PRECO_PDV" | "SEM_PRODUTO_PDV" | "SEM_XML";
 
 export interface LinhaMkp {
   modelo: string;
@@ -26,6 +26,7 @@ export interface LinhaMkp {
   custoTotal: number | null; // Preço 2 (desconto, IPI e ST)
   precoPdv: number | null; // preço que está no sistema
   precosPdvDistintos: number[];
+  precosPdvDetalhe: { preco: number; qtd: number }[]; // cada preço e em quantas variações aparece
   mkpAtual: number | null; // preço no PDV / custo total
   mkpEsperado: number | null; // preço correto / custo total
   precoCorreto: number | null; // preço que deveria estar no sistema
@@ -179,7 +180,8 @@ export async function montarConferenciaMkp(f: FiltrosConferenciaMkp): Promise<Re
     if (p.preco3 == null) status = p.preco2 == null ? "SEM_XML" : "OK";
     else if (!achouProduto.has(ref)) status = "SEM_PRODUTO_PDV";
     else if (precoPdv == null) status = "SEM_PRECO_PDV";
-    else status = Math.abs(precoPdv - p.preco3) > 0.005 || distintos.length > 1 ? "ERRO" : "OK";
+    else if (Math.abs(precoPdv - p.preco3) > 0.005) status = "ERRO";
+    else status = distintos.length > 1 ? "PRECOS_DIVERGENTES" : "OK";
 
     const base = p.preco2;
     const razao = (v: number | null) => (v != null && base ? Math.round((v / base) * 100) / 100 : null);
@@ -195,6 +197,7 @@ export async function montarConferenciaMkp(f: FiltrosConferenciaMkp): Promise<Re
       custoTotal: p.preco2,
       precoPdv,
       precosPdvDistintos: distintos,
+      precosPdvDetalhe: [...cont.entries()].sort((a, b) => b[1] - a[1] || a[0] - b[0]).map(([preco, qtd]) => ({ preco, qtd })),
       mkpAtual: razao(precoPdv),
       mkpEsperado: razao(p.preco3),
       precoCorreto: p.preco3,
@@ -202,7 +205,7 @@ export async function montarConferenciaMkp(f: FiltrosConferenciaMkp): Promise<Re
     };
   });
 
-  const peso: Record<StatusMkp, number> = { ERRO: 0, SEM_PRECO_PDV: 1, SEM_PRODUTO_PDV: 2, SEM_XML: 3, OK: 4 };
+  const peso: Record<StatusMkp, number> = { ERRO: 0, PRECOS_DIVERGENTES: 0, SEM_PRECO_PDV: 1, SEM_PRODUTO_PDV: 2, SEM_XML: 3, OK: 4 };
   linhas.sort(
     (a, b) =>
       peso[a.status] - peso[b.status] ||

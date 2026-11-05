@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 
-type Status = "OK" | "ERRO" | "SEM_PRECO_PDV" | "SEM_PRODUTO_PDV" | "SEM_XML";
+type Status = "OK" | "ERRO" | "PRECOS_DIVERGENTES" | "SEM_PRECO_PDV" | "SEM_PRODUTO_PDV" | "SEM_XML";
 
 interface Linha {
   modelo: string;
@@ -16,6 +16,7 @@ interface Linha {
   custoTotal: number | null;
   precoPdv: number | null;
   precosPdvDistintos: number[];
+  precosPdvDetalhe: { preco: number; qtd: number }[];
   mkpAtual: number | null;
   mkpEsperado: number | null;
   precoCorreto: number | null;
@@ -37,6 +38,7 @@ const mkp = (v: number | null) => (v == null ? "—" : mkpFmt.format(v));
 const ROTULO: Record<Status, string> = {
   OK: "OK",
   ERRO: "⚠ PREÇO ERRADO",
+  PRECOS_DIVERGENTES: "⚠ VARIAÇÕES COM PREÇOS DIFERENTES",
   SEM_PRECO_PDV: "AGUARDANDO PREÇO DO PDV",
   SEM_PRODUTO_PDV: "⚠ NÃO ACHADO NO PDV",
   SEM_XML: "XML INCOMPLETO",
@@ -169,7 +171,7 @@ export default function ConferenciaMkpPage() {
                   </thead>
                   <tbody>
                     {dados.linhas.map((l) => (
-                      <tr key={l.modelo + "|" + l.referencia} style={l.status === "ERRO" || l.status === "SEM_PRODUTO_PDV" ? { background: "rgba(231,76,60,.10)" } : undefined}>
+                      <tr key={l.modelo + "|" + l.referencia} style={l.status === "ERRO" || l.status === "PRECOS_DIVERGENTES" || l.status === "SEM_PRODUTO_PDV" ? { background: "rgba(231,76,60,.10)" } : undefined}>
                         <td style={{ ...TD, fontWeight: 600 }}>{ROTULO[l.status]}</td>
                         <td style={TD}>{l.modelo}</td>
                         <td style={TD}>{l.referencia}</td>
@@ -178,12 +180,10 @@ export default function ConferenciaMkpPage() {
                         <td style={TD} title={`${l.nNotas} nota(s); última em ${l.data ?? "—"}`}>{l.nf}</td>
                         <td style={DIR}>{dinheiro(l.custoBruto)}</td>
                         <td style={DIR}>{dinheiro(l.custoTotal)}</td>
-                        <td
-                          style={DIR}
-                          title={l.precosPdvDistintos.length > 1 ? `Preços diferentes nas variações: ${l.precosPdvDistintos.join(" / ")}` : undefined}
-                        >
-                          {dinheiro(l.precoPdv)}
-                          {l.precosPdvDistintos.length > 1 ? " *" : ""}
+                        <td style={DIR}>
+                          {l.precosPdvDetalhe.length > 1
+                            ? l.precosPdvDetalhe.map((d) => `${dinheiro(d.preco)} (${d.qtd})`).join(" / ")
+                            : dinheiro(l.precoPdv)}
                         </td>
                         <td style={DIR}>{mkp(l.mkpAtual)}</td>
                         <td style={DIR}>{mkp(l.mkpEsperado)}</td>
