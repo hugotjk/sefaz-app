@@ -1268,7 +1268,7 @@ export const syncFiliais = inngest.createFunction(
 );
 
 // ---------------------------------------------------------------------------
-// syncPrecos — 1x por dia. Varre a tabela de preço "VAREJO" inteira (não tem
+// syncPrecos — 1x por dia (06:30). Varre a tabela de preço "VAREJO" inteira (não tem
 // filtro incremental) por cursor de página e faz upsert em PrecoVariacao.
 // ---------------------------------------------------------------------------
 
@@ -1298,7 +1298,7 @@ export const syncPrecos = inngest.createFunction(
     ],
     retries: 3,
   },
-  { cron: "45 3 * * *" },
+  { cron: "TZ=America/Sao_Paulo 30 6 * * *" }, // varredura completa 1x/dia, 06:30
   async ({ step }) => {
     const tabelaId = await step.run("descobrir-tabela-varejo", descobrirTabelaVarejo);
 
@@ -1375,7 +1375,7 @@ export const syncPrecosRecentes = inngest.createFunction(
     ],
     retries: 2,
   },
-  { cron: "TZ=America/Sao_Paulo 30 6-20 * * *" },
+  { cron: "TZ=America/Sao_Paulo 45 6-20 * * *" }, // :45, fora do :30 da varredura completa
   async ({ step }) => {
     const tabelaId = await step.run("descobrir-tabela-varejo", descobrirTabelaVarejo);
     const ultimo = await step.run("ultimo-sync", () =>

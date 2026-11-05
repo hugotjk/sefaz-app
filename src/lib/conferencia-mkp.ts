@@ -37,6 +37,7 @@ export interface ResultadoConferenciaMkp {
   linhas: LinhaMkp[];
   total: number;
   comAlerta: number;
+  aguardandoPreco: number; // cadastrados no PDV, mas o preço ainda não chegou: ficam fora do relatório
   modelosSemRegra: string[]; // modelos com produtos cadastrados no período, mas sem regra de preço ensinada
 }
 
@@ -212,11 +213,15 @@ export async function montarConferenciaMkp(f: FiltrosConferenciaMkp): Promise<Re
       a.modelo.localeCompare(b.modelo) ||
       a.referencia.localeCompare(b.referencia)
   );
+  const aguardandoPreco = linhas.filter((l) => l.status === "SEM_PRECO_PDV").length;
+  // Produto recém-cadastrado, ainda sem preço no app: não entra no relatório.
+  const conferidas = linhas.filter((l) => l.status !== "SEM_PRECO_PDV");
   const ehAlerta = (l: LinhaMkp) => l.status !== "OK" && l.status !== "SEM_PRECO_PDV" && l.status !== "SEM_XML";
-  const comAlerta = linhas.filter(ehAlerta).length;
+  const comAlerta = conferidas.filter(ehAlerta).length;
   return {
-    linhas: f.somenteAlerta ? linhas.filter(ehAlerta) : linhas,
-    total: linhas.length,
+    linhas: f.somenteAlerta ? conferidas.filter(ehAlerta) : conferidas,
+    total: conferidas.length,
+    aguardandoPreco,
     comAlerta,
     modelosSemRegra: [...modelosSemRegra].sort(),
   };
