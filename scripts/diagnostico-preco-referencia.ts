@@ -41,7 +41,7 @@ async function main() {
       console.log(
         `   var ${v.id} | tam ${String(v.tamanho ?? "").padEnd(4)} cor ${String(v.cor ?? "").padEnd(10)} | ` +
           `app: ${f(v.preco).padStart(8)} (${v.precoEm ? v.precoEm.toISOString().slice(0, 10) : "sem data"}) | ` +
-          `API t3: ${f(t3.precos.get(v.id)).padStart(8)} | API t7: ${f(t7.precos.get(v.id)).padStart(8)}`
+          `API t3: ${f(t3.precos.get(v.id)?.preco).padStart(8)} | API t7: ${f(t7.precos.get(v.id)?.preco).padStart(8)}`
       );
     }
   }
