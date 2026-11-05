@@ -485,3 +485,11 @@ export async function listarPrecos(
     TamanhoPagina: params.tamanhoPagina,
   });
 }
+
+/** Diagnóstico: consulta a tabela de preços com parâmetros extras (testar filtros). */
+export async function consultarPrecosComParametros(
+  tabelaId: number,
+  params: Record<string, string | number>
+): Promise<RespostaPaginada<PrecoPdv>> {
+  return chamarApiPaginado<PrecoPdv>(`/api/public/precos/${tabelaId}`, { Pagina: 1, TamanhoPagina: 5, ...params });
+}
