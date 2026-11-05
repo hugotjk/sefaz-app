@@ -10,6 +10,8 @@ import { classificarTipoLoja } from "@/lib/classificar-tipo-loja";
 import { popularNotaItens, avaliarCadastroItens } from "@/lib/popular-nota-itens";
 import { reavaliarCadastroRecentes, vincularCadastroDeProdutos } from "@/lib/reavaliar-cadastro-recentes";
 import { precosPorVariacao } from "@/lib/preco-por-variacao";
+import { REDES_ATIVAS } from "@/lib/redes-ativas";
+import { chaveProduto, idApiDoProduto } from "@/lib/produto-id";
 import { upsertEstoqueBulk } from "@/lib/bulk-upsert-estoque";
 import {
   buscarNfesRecebidas,
@@ -679,7 +681,7 @@ export const syncProdutos = inngest.createFunction(
   async ({ step }) => {
     const redes = await step.run("listar-redes-ativas", async () => {
       const todas = await listarRedes();
-      return todas.filter((r) => !r.Inativa).map((r) => ({ id: r.Id, nome: r.Nome }));
+      return todas.filter((r) => !r.Inativa && REDES_ATIVAS.includes(r.Id)).map((r) => ({ id: r.Id, nome: r.Nome }));
     });
 
     const resumo: Record<string, unknown> = {};
@@ -759,8 +761,11 @@ export const syncProdutos = inngest.createFunction(
           const semEmbutidaCandidatos: string[] = [];
 
           for (const p of registros) {
+            // O código do produto só é único dentro da rede: a chave leva a rede.
+            const chaveP = chaveProduto(p.RedeId ?? rede.id, p.Id);
             const campos = {
               redeId: p.RedeId ?? rede.id,
+              dataAtualizacaoPdv: p.DataAtualizacao ? new Date(p.DataAtualizacao) : null,
               nome: p.Nome || null,
               referenciaFornecedor: p.ReferenciaProdutoFornecedor || null,
               fornecedorId: p.FornecedorId || null,
@@ -776,8 +781,8 @@ export const syncProdutos = inngest.createFunction(
             };
             ops.push(
               prisma.produto.upsert({
-                where: { id: p.Id },
-                create: { id: p.Id, ...campos },
+                where: { id: chaveP },
+                create: { id: chaveP, ...campos },
                 update: campos,
               })
             );
@@ -788,14 +793,14 @@ export const syncProdutos = inngest.createFunction(
                 ops.push(
                   prisma.variacaoProduto.upsert({
                     where: { id: v.Id },
-                    create: { id: v.Id, produtoId: p.Id, redeId: p.RedeId ?? rede.id },
-                    update: { produtoId: p.Id, redeId: p.RedeId ?? rede.id },
+                    create: { id: v.Id, produtoId: chaveP, redeId: p.RedeId ?? rede.id },
+                    update: { produtoId: chaveP, redeId: p.RedeId ?? rede.id },
                   })
                 );
                 vars++;
               }
             } else {
-              semEmbutidaCandidatos.push(p.Id);
+              semEmbutidaCandidatos.push(chaveP);
             }
           }
 
@@ -803,7 +808,7 @@ export const syncProdutos = inngest.createFunction(
           const salvos = registros.length;
           // Vincula na hora: itens de nota "sem cadastro" que casam com os
           // produtos desta página passam a ter cadastro assim que entram no banco.
-          await vincularCadastroDeProdutos(registros.map((p) => p.Id));
+          await vincularCadastroDeProdutos(registros.map((p) => chaveProduto(p.RedeId ?? rede.id, p.Id)));
 
           // Produtos sem variação embutida que AINDA não têm nenhuma variação
           // salva — numa query só, em vez de um count por produto.
@@ -871,7 +876,7 @@ export const syncProdutos = inngest.createFunction(
           const n = await step.run(`variacoes-r${rede.id}-${i}`, async () => {
             let vars = 0;
             for (const produtoId of ids) {
-              const lista = await listarVariacoesProduto(rede.id, produtoId);
+              const lista = await listarVariacoesProduto(rede.id, idApiDoProduto(produtoId));
               for (const v of lista) {
                 await prisma.variacaoProduto.upsert({
                   where: { id: v.Id },
@@ -1324,10 +1329,11 @@ export const syncPrecos = inngest.createFunction(
         let salvos = 0;
         for (const p of registros) {
           const preco = Number(p.PrecoOriginal ?? 0);
+          const precoPromocional = Number(p.PrecoPromocional ?? 0);
           await prisma.precoVariacao.upsert({
             where: { variacaoId: String(p.VariacaoId) },
-            create: { variacaoId: String(p.VariacaoId), preco },
-            update: { preco },
+            create: { variacaoId: String(p.VariacaoId), preco, precoPromocional },
+            update: { preco, precoPromocional },
           });
           salvos++;
         }
@@ -1359,13 +1365,12 @@ export const syncPrecos = inngest.createFunction(
 // A tabela de preços do PDV não filtra por data, mas vem ordenada pelo VariacaoId
 // (texto): achamos o preço de cada variação por busca binária (~14 chamadas) em vez de
 // varrer as 15 mil páginas. Alvos:
-//   A) variações SEM preço de produtos atualizados nos últimos 2 dias (cadastro novo);
-//   B) todas as variações de produtos atualizados nas últimas 5 horas (preço editado).
+//   todas as variações de produtos com DataAtualizacao do PDV nos últimos 2 dias.
 // A varredura completa da madrugada (syncPrecos) continua como está.
 // ---------------------------------------------------------------------------
 
 const PRECOS_RECENTES_DIAS = 2;
-const PRECOS_RECENTES_HORAS_EDICAO = 5;
+const MAX_VARIACOES_PRECOS_RECENTES = 4000;
 const VARIACOES_POR_PASSO_PRECOS = 40;
 const SUBGRUPOS_PARALELOS_PRECOS = 4;
 
@@ -1388,14 +1393,16 @@ export const syncPrecosProdutosRecentes = inngest.createFunction(
     });
     if (!totalPaginas) return { tabelaId, aviso: "sem paginação" };
 
+    // Todas as variações de produtos criados/alterados no PDV nos últimos 2 dias
+    // (data real do PDV, com margem de segurança). Mais novos primeiro, com teto por execução.
     const alvos = await step.run("alvos", async () => {
       const rows = await prisma.$queryRaw<{ id: string }[]>(Prisma.sql`
-        SELECT DISTINCT v.id
+        SELECT v.id
         FROM "VariacaoProduto" v
         JOIN "Produto" p ON p.id = v."produtoId"
-        LEFT JOIN "PrecoVariacao" pv ON pv."variacaoId" = v.id
-        WHERE (p."updatedAt" >= NOW() - (${PRECOS_RECENTES_DIAS} * INTERVAL '1 day') AND pv."variacaoId" IS NULL)
-           OR p."updatedAt" >= NOW() - (${PRECOS_RECENTES_HORAS_EDICAO} * INTERVAL '1 hour')
+        WHERE p."dataAtualizacaoPdv" >= NOW() - (${PRECOS_RECENTES_DIAS} * INTERVAL '1 day')
+        ORDER BY p."dataAtualizacaoPdv" DESC
+        LIMIT ${MAX_VARIACOES_PRECOS_RECENTES}
       `);
       return rows.map((r: { id: string }) => r.id).sort((a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0));
     });
@@ -1410,7 +1417,7 @@ export const syncPrecosProdutosRecentes = inngest.createFunction(
         const grupos: string[][] = [];
         for (let k = 0; k < lote.length; k += tam) grupos.push(lote.slice(k, k + tam));
         const res = await Promise.all(grupos.map((g) => precosPorVariacao(tabelaId, g, totalPaginas)));
-        const todos = new Map<string, number>();
+        const todos = new Map<string, { preco: number; promo: number }>();
         let ch = 0;
         for (const x of res) {
           ch += x.chamadas;
@@ -1418,9 +1425,9 @@ export const syncPrecosProdutosRecentes = inngest.createFunction(
         }
         if (todos.size) {
           await prisma.$executeRaw(Prisma.sql`
-            INSERT INTO "PrecoVariacao" ("variacaoId", "preco", "updatedAt")
-            SELECT v, p, NOW() FROM unnest(${[...todos.keys()]}::text[], ${[...todos.values()]}::numeric[]) AS t(v, p)
-            ON CONFLICT ("variacaoId") DO UPDATE SET "preco" = EXCLUDED."preco", "updatedAt" = NOW()
+            INSERT INTO "PrecoVariacao" ("variacaoId", "preco", "precoPromocional", "updatedAt")
+            SELECT v, p, q, NOW() FROM unnest(${[...todos.keys()]}::text[], ${[...todos.values()].map((x) => x.preco)}::numeric[], ${[...todos.values()].map((x) => x.promo)}::numeric[]) AS t(v, p, q)
+            ON CONFLICT ("variacaoId") DO UPDATE SET "preco" = EXCLUDED."preco", "precoPromocional" = EXCLUDED."precoPromocional", "updatedAt" = NOW()
           `);
         }
         return { achados: todos.size, chamadas: ch };
@@ -2009,7 +2016,7 @@ export const enriquecerVariacoes = inngest.createFunction(
         for (const { produtoId, redeId } of lote) {
           let lista;
           try {
-            lista = await listarVariacoesProduto(redeId, produtoId);
+            lista = await listarVariacoesProduto(redeId, idApiDoProduto(produtoId));
           } catch {
             continue; // produto que não responde — pula, cursor segue em frente
           }
