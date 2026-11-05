@@ -1354,6 +1354,99 @@ export const syncPrecos = inngest.createFunction(
 );
 
 // ---------------------------------------------------------------------------
+// syncPrecosRecentes — de hora em hora (6h-20h). A tabela de preços do PDV vem
+// ordenada por DataAtualizacao crescente (o mais novo fica nas ÚLTIMAS páginas),
+// então lemos de trás pra frente até chegar em preços mais antigos que a última
+// execução (com folga de 2 dias). Assim, preço de produto novo/editado entra no
+// app em ~1h, sem esperar a varredura completa do syncPrecos (que leva semanas).
+// Trava de segurança: se a última página não tiver datas recentes (ordem
+// inesperada), não grava nada.
+// ---------------------------------------------------------------------------
+
+const MAX_PAGINAS_PRECOS_RECENTES = 80; // 80 x 50 = 4.000 preços por execução (no máx.)
+const DIAS_FOLGA_PRECOS_RECENTES = 2;
+
+export const syncPrecosRecentes = inngest.createFunction(
+  {
+    id: "pdv-sync-precos-recentes",
+    concurrency: [
+      { scope: "account", key: '"sefaz-pdv-sync"', limit: 4 },
+      { limit: 1 },
+    ],
+    retries: 2,
+  },
+  { cron: "TZ=America/Sao_Paulo 30 6-20 * * *" },
+  async ({ step }) => {
+    const tabelaId = await step.run("descobrir-tabela-varejo", descobrirTabelaVarejo);
+    const ultimo = await step.run("ultimo-sync", () =>
+      lerSyncState<{ iso: string | null }>("precos-recentes:ultimo", { iso: null })
+    );
+    const inicioExecucao = new Date();
+    const base = ultimo.iso ? new Date(ultimo.iso) : new Date(inicioExecucao.getTime() - 3 * 86400000);
+    const limite = new Date(base.getTime() - DIAS_FOLGA_PRECOS_RECENTES * 86400000);
+
+    const total = await step.run("total-paginas", async () => {
+      const { paginacao } = await listarPrecos(tabelaId, { pagina: 1, tamanhoPagina: PDV_TAM_PAGINA });
+      return paginacao?.TotalPaginas ?? 0;
+    });
+    if (!total) return { tabelaId, aviso: "sem paginação" };
+
+    let pagina = total;
+    let salvos = 0;
+    let paginasLidas = 0;
+    let parou = "limite de páginas";
+
+    while (paginasLidas < MAX_PAGINAS_PRECOS_RECENTES && pagina >= 1) {
+      const paginaAtual = pagina;
+      const r = await step.run(`recentes-t${tabelaId}-p${paginaAtual}`, async () => {
+        const { registros } = await listarPrecos(tabelaId, {
+          pagina: paginaAtual,
+          tamanhoPagina: PDV_TAM_PAGINA,
+        });
+        const datas = registros
+          .map((x) => (x.DataAtualizacao ? new Date(x.DataAtualizacao).getTime() : NaN))
+          .filter((t) => !Number.isNaN(t));
+        const maxData = datas.length ? Math.max(...datas) : null;
+        // Trava: a 1ª página lida (a última da tabela) tem que ter datas recentes.
+        if (paginaAtual === total && maxData != null && maxData < inicioExecucao.getTime() - 45 * 86400000) {
+          return { salvos: 0, tudoAntigo: true, ordemInesperada: true };
+        }
+        if (registros.length) {
+          const ids = registros.map((x) => String(x.VariacaoId));
+          const precos = registros.map((x) => Number(x.PrecoOriginal ?? 0));
+          await prisma.$executeRaw(Prisma.sql`
+            INSERT INTO "PrecoVariacao" ("variacaoId", "preco", "updatedAt")
+            SELECT v, p, NOW() FROM unnest(${ids}::text[], ${precos}::numeric[]) AS t(v, p)
+            ON CONFLICT ("variacaoId") DO UPDATE SET "preco" = EXCLUDED."preco", "updatedAt" = NOW()
+          `);
+        }
+        // Página vazia (a última pode dar 404 na API) não indica "acabou": segue pra trás.
+        const tudoAntigo = maxData != null && maxData < limite.getTime();
+        return { salvos: registros.length, tudoAntigo, ordemInesperada: false };
+      });
+      paginasLidas++;
+      salvos += r.salvos;
+      if (r.ordemInesperada) {
+        parou = "ordem inesperada (nada gravado)";
+        break;
+      }
+      if (r.tudoAntigo) {
+        parou = "chegou em preços antigos";
+        break;
+      }
+      pagina--;
+    }
+
+    if (!parou.startsWith("ordem")) {
+      await step.run("gravar-ultimo", () =>
+        gravarSyncState("precos-recentes:ultimo", { iso: inicioExecucao.toISOString() })
+      );
+    }
+    return { tabelaId, totalPaginas: total, paginasLidas, salvos, parou };
+  }
+);
+
+// ---------------------------------------------------------------------------
 // consolidarVendasAntigas — 1x por dia. Move o que passou de VENDAS_MESES_DETALHE
 // meses de VendaItemSync para VendaResumoMensal (soma por variacao x loja x mês)
 // e apaga o detalhe. Feito em lotes numa transação (ler -> somar -> incrementar
