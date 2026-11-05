@@ -12,7 +12,7 @@ export interface FiltrosConferenciaMkp {
   somenteAlerta: boolean;
 }
 
-export type StatusMkp = "OK" | "ERRO" | "PRECOS_DIVERGENTES" | "SEM_PRECO_PDV" | "SEM_PRODUTO_PDV" | "SEM_XML";
+export type StatusMkp = "OK" | "ERRO" | "PRECOS_DIVERGENTES" | "AGUARDANDO_PRECO" | "SEM_PRECO_PDV" | "SEM_PRODUTO_PDV" | "SEM_XML";
 
 export interface LinhaMkp {
   modelo: string;
@@ -37,6 +37,7 @@ export interface ResultadoConferenciaMkp {
   linhas: LinhaMkp[];
   total: number;
   comAlerta: number;
+  aguardandoPreco: number; // cadastrados há pouco: o preço ainda pode chegar (não é alerta)
   modelosSemRegra: string[]; // modelos com produtos cadastrados no período, mas sem regra de preço ensinada
 }
 
@@ -49,6 +50,9 @@ export function parseFiltrosConferenciaMkp(sp: URLSearchParams): FiltrosConferen
     somenteAlerta: sp.get("somenteAlerta") === "1",
   };
 }
+
+// Depois desse tempo sem preço no app, vira alerta (produto 2h até o app + preço 2h).
+export const JANELA_AGUARDANDO_PRECO_H = 4;
 
 const up = (s: string | null | undefined) => (s ?? "").trim().toUpperCase();
 
@@ -135,9 +139,11 @@ export async function montarConferenciaMkp(f: FiltrosConferenciaMkp): Promise<Re
   const precosPdv = new Map<string, number[]>();
   const achouProduto = new Set<string>();
   const nomePdv = new Map<string, string>();
+  const primeiroSync = new Map<string, number>(); // menor "primeiroSyncEm" por referência
   if (refs.length) {
-    const pr = await prisma.$queryRaw<{ ref: string; nome: string | null; preco: number | null }[]>(Prisma.sql`
-      SELECT UPPER(BTRIM(p."referenciaFornecedor")) AS ref, p.nome AS nome, pv.preco::float8 AS preco
+    const pr = await prisma.$queryRaw<{ ref: string; nome: string | null; preco: number | null; primeiro: Date }[]>(Prisma.sql`
+      SELECT UPPER(BTRIM(p."referenciaFornecedor")) AS ref, p.nome AS nome, pv.preco::float8 AS preco,
+             p."primeiroSyncEm" AS primeiro
       FROM "Produto" p
       LEFT JOIN "VariacaoProduto" v ON v."produtoId" = p.id
       LEFT JOIN "PrecoVariacao" pv ON pv."variacaoId" = v.id
@@ -146,6 +152,8 @@ export async function montarConferenciaMkp(f: FiltrosConferenciaMkp): Promise<Re
     for (const x of pr) {
       achouProduto.add(x.ref);
       if (x.nome && !nomePdv.has(x.ref)) nomePdv.set(x.ref, x.nome.trim());
+      const t = new Date(x.primeiro).getTime();
+      primeiroSync.set(x.ref, Math.min(primeiroSync.get(x.ref) ?? t, t));
       if (x.preco == null) continue;
       const l = precosPdv.get(x.ref) ?? [];
       l.push(arred2(Number(x.preco)));
@@ -179,7 +187,11 @@ export async function montarConferenciaMkp(f: FiltrosConferenciaMkp): Promise<Re
     let status: StatusMkp;
     if (p.preco3 == null) status = p.preco2 == null ? "SEM_XML" : "OK";
     else if (!achouProduto.has(ref)) status = "SEM_PRODUTO_PDV";
-    else if (precoPdv == null) status = "SEM_PRECO_PDV";
+    else if (precoPdv == null) {
+      // Cadastrado há menos de JANELA_AGUARDANDO_PRECO_H horas: o preço ainda pode chegar.
+      const idade = Date.now() - (primeiroSync.get(ref) ?? 0);
+      status = idade < JANELA_AGUARDANDO_PRECO_H * 3600000 ? "AGUARDANDO_PRECO" : "SEM_PRECO_PDV";
+    }
     else if (Math.abs(precoPdv - p.preco3) > 0.005) status = "ERRO";
     else status = distintos.length > 1 ? "PRECOS_DIVERGENTES" : "OK";
 
@@ -205,18 +217,20 @@ export async function montarConferenciaMkp(f: FiltrosConferenciaMkp): Promise<Re
     };
   });
 
-  const peso: Record<StatusMkp, number> = { ERRO: 0, PRECOS_DIVERGENTES: 0, SEM_PRECO_PDV: 1, SEM_PRODUTO_PDV: 2, SEM_XML: 3, OK: 4 };
+  const peso: Record<StatusMkp, number> = { ERRO: 0, PRECOS_DIVERGENTES: 0, AGUARDANDO_PRECO: 5, SEM_PRECO_PDV: 1, SEM_PRODUTO_PDV: 2, SEM_XML: 3, OK: 4 };
   linhas.sort(
     (a, b) =>
       peso[a.status] - peso[b.status] ||
       a.modelo.localeCompare(b.modelo) ||
       a.referencia.localeCompare(b.referencia)
   );
-  const ehAlerta = (l: LinhaMkp) => l.status !== "OK" && l.status !== "SEM_PRECO_PDV" && l.status !== "SEM_XML";
+  const aguardandoPreco = linhas.filter((l) => l.status === "AGUARDANDO_PRECO").length;
+  const ehAlerta = (l: LinhaMkp) => l.status !== "OK" && l.status !== "AGUARDANDO_PRECO" && l.status !== "SEM_XML";
   const comAlerta = linhas.filter(ehAlerta).length;
   return {
     linhas: f.somenteAlerta ? linhas.filter(ehAlerta) : linhas,
     total: linhas.length,
+    aguardandoPreco,
     comAlerta,
     modelosSemRegra: [...modelosSemRegra].sort(),
   };

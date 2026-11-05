@@ -89,6 +89,9 @@ model Produto {
   compradorNome        String?
   precoVarejoAtual     Decimal? @db.Decimal(14, 2)
   updatedAt            DateTime @updatedAt
+  // Quando o app viu o produto pela 1ª vez (updatedAt muda a cada sync). Produtos que já
+  // existiam na criação do campo ficam com 2000-01-01.
+  primeiroSyncEm       DateTime @default(now())
   variacoes            VariacaoProduto[]
 
   @@index([redeId])
