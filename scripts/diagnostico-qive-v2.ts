@@ -4,6 +4,7 @@
  * e como é o formato da resposta.
  *
  * Uso: npx tsx --env-file=.env scripts\diagnostico-qive-v2.ts <CNPJ só números> [de AAAA-MM-DD] [até AAAA-MM-DD]
+ * Opcional: --modo=receiver | emitter | owner-todos
  * Ex.:  npx tsx --env-file=.env scripts\diagnostico-qive-v2.ts 12345678000190 2025-01-01 2025-12-31
  */
 const QIVE_BASE = "https://api.arquivei.com.br";
@@ -29,9 +30,16 @@ async function chamar(corpo: unknown) {
 }
 
 async function main() {
-  const [cnpj, de, ate] = process.argv.slice(2);
+  const args = process.argv.slice(2).filter((a) => !a.startsWith("--"));
+  const modo = process.argv.find((a) => a.startsWith("--modo="))?.slice(7) ?? "owner";
+  const [cnpj, de, ate] = args;
   if (!cnpj) throw new Error("Informe o CNPJ (só números).");
-  const filtros: any = { Owners: [cnpj], OwnerRoles: ["received"] };
+  // modos: owner (padrão) | receiver (ReceiverCnpj) | emitter (EmitterCnpj) | owner-todos (Owners sem filtro de papel)
+  const filtros: any =
+    modo === "receiver" ? { ReceiverCnpj: [cnpj] }
+    : modo === "emitter" ? { EmitterCnpj: [cnpj] }
+    : modo === "owner-todos" ? { Owners: [cnpj] }
+    : { Owners: [cnpj], OwnerRoles: ["received"] };
   if (de || ate) {
     filtros.EmissionDate = {
       From: `${de ?? "2000-01-01"}T00:00:00Z`,
@@ -45,8 +53,8 @@ async function main() {
   try {
     const j = JSON.parse(r.txt);
     console.log("Chaves da resposta:", Object.keys(j).join(", "));
-    const lista = (j.Data ?? j.data ?? j.Documents ?? j.documents ?? []) as any[];
-    console.log(`Itens nesta página: ${Array.isArray(lista) ? lista.length : "?"}`);
+    const lista = (j.Nfes ?? j.Data ?? j.data ?? []) as any[];
+    console.log(`Itens nesta página: ${Array.isArray(lista) ? lista.length : 0} | Total no filtro: ${j.Total}`);
     console.log("Resposta (início):", JSON.stringify(j).slice(0, 1500));
   } catch {
     console.log("Resposta (texto):", r.txt.slice(0, 800));
