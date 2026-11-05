@@ -144,7 +144,7 @@ export default function ConferenciaMkpPage() {
             <p>
               <strong>{dados.comAlerta}</strong> com alerta de {dados.total} produtos conferidos.
               {dados.aguardandoPreco > 0 && (
-                <span style={{ color: "var(--text-dim)" }}> {dados.aguardandoPreco} cadastrado(s) há menos de 4 horas aguardando o preço (sem alerta por enquanto).</span>
+                <span style={{ color: "var(--text-dim)" }}> {dados.aguardandoPreco} cadastrado(s) há menos de 6 horas aguardando o preço (sem alerta por enquanto).</span>
               )}
               {dados.modelosSemRegra.length > 0 && (
                 <span style={{ color: "var(--text-dim)" }}>
