@@ -1369,7 +1369,7 @@ export const syncPrecos = inngest.createFunction(
             const existentes = await prisma.$queryRaw<{ id: string }[]>(Prisma.sql`
               SELECT "variacaoId" AS id FROM "PrecoVariacao" WHERE "variacaoId" = ANY(${velhos.map((x) => x.id)}::text[])
             `);
-            const jaTem = new Set(existentes.map((e) => e.id));
+            const jaTem = new Set(existentes.map((e: { id: string }) => e.id));
             const naoGravar = new Set(velhos.filter((x) => jaTem.has(x.id)).map((x) => x.id));
             gravar = registros.filter((x) => !naoGravar.has(x.id));
           }
