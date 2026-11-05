@@ -37,7 +37,7 @@ const mkp = (v: number | null) => (v == null ? "—" : mkpFmt.format(v));
 const ROTULO: Record<Status, string> = {
   OK: "OK",
   ERRO: "⚠ PREÇO ERRADO",
-  SEM_PRECO_PDV: "⚠ SEM PREÇO NO PDV",
+  SEM_PRECO_PDV: "AGUARDANDO PREÇO DO PDV",
   SEM_PRODUTO_PDV: "⚠ NÃO ACHADO NO PDV",
   SEM_XML: "XML INCOMPLETO",
 };
@@ -102,35 +102,31 @@ export default function ConferenciaMkpPage() {
         preço esperado pelo MKP do modelo. Só aparecem modelos que já têm regra de preço.
       </p>
 
-      <div className="card notes-filtros-card">
-        <div className="notes-filtros">
-          <div className="notes-filtros-linha">
-            <div className="field">
-              <label>Fornecedor</label>
-              <input value={emitente} onChange={(e) => setEmitente(e.target.value)} placeholder="Nome do fornecedor" />
-            </div>
-            <div className="field">
-              <label>Modelo</label>
-              <input value={modelo} onChange={(e) => setModelo(e.target.value)} placeholder="Ex.: Hurley" />
-            </div>
-            <div className="field">
-              <label>Emissão de</label>
-              <input type="date" value={dataInicial} onChange={(e) => setDataInicial(e.target.value)} />
-            </div>
-            <div className="field">
-              <label>até</label>
-              <input type="date" value={dataFinal} onChange={(e) => setDataFinal(e.target.value)} />
-            </div>
-          </div>
-          <div className="notes-filtros-linha">
-            <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
-              <input type="checkbox" checked={somenteAlerta} onChange={(e) => setSomenteAlerta(e.target.checked)} />
-              Mostrar só os com alerta
-            </label>
-            <button type="button" onClick={buscar} disabled={carregando}>
-              {carregando ? "Carregando…" : "Buscar"}
-            </button>
-          </div>
+      <div className="card" style={{ padding: "10px 14px" }}>
+        <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
+          <label style={{ fontSize: 12 }}>
+            Fornecedor
+            <input style={{ display: "block", width: 170 }} value={emitente} onChange={(e) => setEmitente(e.target.value)} />
+          </label>
+          <label style={{ fontSize: 12 }}>
+            Modelo
+            <input style={{ display: "block", width: 130 }} value={modelo} onChange={(e) => setModelo(e.target.value)} />
+          </label>
+          <label style={{ fontSize: 12 }}>
+            Emissão de
+            <input style={{ display: "block", width: 140 }} type="date" value={dataInicial} onChange={(e) => setDataInicial(e.target.value)} />
+          </label>
+          <label style={{ fontSize: 12 }}>
+            até
+            <input style={{ display: "block", width: 140 }} type="date" value={dataFinal} onChange={(e) => setDataFinal(e.target.value)} />
+          </label>
+          <label style={{ fontSize: 13, display: "flex", gap: 6, alignItems: "center", paddingBottom: 6 }}>
+            <input type="checkbox" checked={somenteAlerta} onChange={(e) => setSomenteAlerta(e.target.checked)} />
+            Só com alerta
+          </label>
+          <button type="button" style={{ width: "auto", padding: "6px 16px" }} onClick={buscar} disabled={carregando}>
+            {carregando ? "Carregando…" : "Buscar"}
+          </button>
         </div>
       </div>
 
@@ -173,7 +169,7 @@ export default function ConferenciaMkpPage() {
                   </thead>
                   <tbody>
                     {dados.linhas.map((l) => (
-                      <tr key={l.modelo + "|" + l.referencia} style={l.status !== "OK" ? { background: "rgba(231,76,60,.10)" } : undefined}>
+                      <tr key={l.modelo + "|" + l.referencia} style={l.status === "ERRO" || l.status === "SEM_PRODUTO_PDV" ? { background: "rgba(231,76,60,.10)" } : undefined}>
                         <td style={{ ...TD, fontWeight: 600 }}>{ROTULO[l.status]}</td>
                         <td style={TD}>{l.modelo}</td>
                         <td style={TD}>{l.referencia}</td>

@@ -46,6 +46,7 @@ export function calcularPrecosModelo(a: {
   modelo: string | null | undefined;
   emitente: string | null | undefined;
   referencia: string | null | undefined;
+  descricao?: string | null;
   custoUn: number;
   custoTotUn: number | null;
 }): PrecosModelo {
@@ -62,7 +63,18 @@ export function calcularPrecosModelo(a: {
     preco2 = a.custoTotUn == null ? null : a.custoTotUn * fator;
     preco3 = preco2 == null ? null : fim999(preco2 * 2.2);
   } else if (ehKennerRedley && preco2 != null) {
-    // x2,5 ou x2,55: o que ficar mais perto de um valor terminado em 9,99
+    // Times (Flamengo, Fluminense, Botafogo, Vasco): x2,30 (pode dar 2,31 por causa do ,99).
+    // Demais: x2,5 ou x2,55, o que ficar mais perto de um valor terminado em 9,99.
+    const ehTime = /\b(FLAMENGO|FLUMINENSE|BOTAFOGO|VASCO|FLA|FLU)\b/.test(norm(a.descricao));
+    if (ehTime) {
+      preco3 = fim999(preco2 * 2.3);
+      return {
+        preco1: arred2(preco1),
+        preco2: arred2(preco2),
+        preco3: arred2(preco3),
+        multiplicador: 2.3,
+      };
+    }
     const cand = [preco2 * 2.5, preco2 * 2.55].map((v) => ({ v, f: fim999(v) }));
     cand.sort((x, y) => Math.abs(x.v - x.f) - Math.abs(y.v - y.f));
     preco3 = cand[0].f;

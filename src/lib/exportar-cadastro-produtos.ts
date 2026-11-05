@@ -611,6 +611,7 @@ export async function gerarCadastroXlsx(
       modelo,
       emitente,
       referencia,
+      descricao,
       custoUn,
       custoTotUn,
     });
