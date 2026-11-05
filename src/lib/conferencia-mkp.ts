@@ -171,7 +171,7 @@ export async function montarConferenciaMkp(f: FiltrosConferenciaMkp): Promise<Re
       const porRede = prodsPorChave.get(k) ?? new Map<number, Prod>();
       prodsPorChave.set(k, porRede);
       const t = new Date(x.primeiro).getTime();
-      const pd = porRede.get(x.rede) ?? { redeId: x.rede, nome: x.nome?.trim() ?? null, primeiro: t, vars: [] };
+      const pd: Prod = porRede.get(x.rede) ?? { redeId: x.rede, nome: x.nome?.trim() ?? null, primeiro: t, vars: [] as VariacaoMkp[] };
       pd.primeiro = Math.min(pd.primeiro, t);
       if (x.vid) pd.vars.push({ codigo: x.vid, tamanho: x.tamanho, cor: x.cor, preco: x.preco == null ? null : arred2(x.preco), promo: x.promo ? arred2(x.promo) : null });
       porRede.set(x.rede, pd);
