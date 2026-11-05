@@ -80,6 +80,8 @@ const MODELO_PALAVRA_ESPECIAL: Record<string, string> = {
   mcd: "MCD",
   myflag: "MyFlag",
   tvb: "TVB",
+  "55rj": "55RJ",
+  wqsurf: "WQSurf",
 };
 
 // Conectivos que ficam em minúsculo quando NÃO são a primeira palavra
@@ -183,6 +185,11 @@ export const EMPRESAS_BANIDAS: string[] = [
   "MERCADO LIVRE BRASIL LTDA",
   "MTAG ETIQUETAS ACESSORIOS EM GERAL LTDA",
   "P D A COMERCIO PET E CINOFILIA",
+  "CASTRO E CASTRO COMERCIO E IMPORTACAO LT",
+  "UNITY DISPLAY COMERCIO DE EXPOSITORES LTDA",
+  "BOTTINO MATERIAIS DE CONSTRUCAO LTDA",
+  "ECO BOX LTDA",
+  "KARFER INDUSTRIA E COMERCIO LTDA",
   "SENSORBRASIL COMERCIO E LOCACAO LTDA",
   "VENDA MERC LTDA",
   "WWG EMBALAGENS LTDA",
@@ -332,8 +339,18 @@ function identificarModeloRaw(
     ["DBB DISTRIBUIDORA DE PRODUTOS DE BELEZA LTDA", "lacoste"], // só Modelo; referência = fallback
     ["COMPANHIA FABRIL LEPPER - FILIAL", "lepper"],
     ["AURA COMERCIO DE ARTIGOS DO VESTUARIO LTDA", "n1"],
-    ["TOREL COMERCIO DE ARTIGOS ESPORTIVOS LTDA ME", "torel fla"]
+    ["TOREL COMERCIO DE ARTIGOS ESPORTIVOS LTDA ME", "torel fla"],
+    ["LM PRODUTOS LICENCIADOS LTDA", "Cebola"],
+    ["P. A. SOLUCOES CRIATIVAS EM ARTEFATOS DE PLASTICOS EIRELI", "Fut Toy"],
   ];
+  // Malhas D Estefano: o Modelo vem da descrição (55RJ / WQS / BOARD).
+  if (igual(A, "MALHAS D ESTEFANO LTDA")) {
+    const hu = H.toUpperCase();
+    if (hu.includes("55RJ")) return "55RJ";
+    if (hu.includes("WQS")) return "WQSurf";
+    if (hu.includes("BOARD")) return "Board Session";
+    return null;
+  }
   const porEmpresa = MODELOS_POR_EMPRESA.find(([nome]) => igual(A, nome));
   if (porEmpresa) return porEmpresa[1];
   // Duas empresas do grupo antigo ainda sem informação pra definir o Modelo:
@@ -767,9 +784,16 @@ function referenciaFormula2(A: string, G: string, H: string, P: string, Q: strin
       "TVB INDUSTRIA E COMERCIO LTDA",
       "SUPERACAO COMERCIO DE ARTIGOS DO VESTUARIO LTDA",
       "BLUE WAVE IND E COM LTDA",
+      "P. A. SOLUCOES CRIATIVAS EM ARTEFATOS DE PLASTICOS EIRELI",
     ].some((x) => igual(A, x))
   )
     return G;
+  // LM Produtos Licenciados (Cebola): referência = os números do início da descrição
+  //   "4405-GARRAFA ALUMINIO..." -> "4405"
+  if (igual(A, "LM PRODUTOS LICENCIADOS LTDA")) {
+    const m = H.match(/^\s*(\d+)/);
+    return m ? m[1] : "";
+  }
   // Premier: código sem o trecho depois do último "-" (tamanho) — mesmo
   // padrão da Maxima Apparel.
   if (igual(A, "PREMIER DIST DE VESTUARIOS CALCADOS EQUIPAMENTOS E ACESSORIO")) {
