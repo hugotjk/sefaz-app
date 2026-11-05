@@ -35,9 +35,18 @@ async function main() {
     { ProdutoId: produtoId },
     { produtoId },
     { Referencia: alvo[0].ref ?? "" },
+    { ApartirDe: new Date(Date.now() - 86400000).toISOString().slice(0, 10) },
+    { aPartirDe: new Date(Date.now() - 86400000).toISOString().slice(0, 10) },
     { DataAtualizacao: new Date(Date.now() - 86400000).toISOString().slice(0, 10) },
     { DataAtualizacaoInicial: new Date(Date.now() - 86400000).toISOString().slice(0, 10) },
   ];
+  try {
+    const r0 = await consultarPrecosComParametros(TABELA, {});
+    console.log("\nPrimeiros 5 preços da tabela (sem filtro), DataAtualizacao:", r0.registros.map((x) => x.DataAtualizacao ?? "(sem data)").join(" | "));
+  } catch (e: any) {
+    console.log("Erro ao ler a tabela:", String(e.message).slice(0, 100));
+  }
+  console.log("");
   for (const t of testes) {
     try {
       const r = await consultarPrecosComParametros(TABELA, t);
