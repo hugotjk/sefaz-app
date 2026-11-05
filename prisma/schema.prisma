@@ -341,3 +341,13 @@ model NoteEvent {
 
   @@index([noteId])
 }
+
+// Cache dos detalhes do XML por item de nota (ver migration 20261105230000).
+model NotaItemDetalheXml {
+  itemId   String   @id
+  unidade  String   @default("")
+  desconto Decimal  @default(0) @db.Decimal(14, 4)
+  ipi      Decimal  @default(0) @db.Decimal(14, 4)
+  icmsSt   Decimal  @default(0) @db.Decimal(14, 4)
+  criadoEm DateTime @default(now())
+}

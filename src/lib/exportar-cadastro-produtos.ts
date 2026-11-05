@@ -191,8 +191,24 @@ async function carregarItens(pares: ParProduto[]): Promise<ItemBase[]> {
 /** Lê o XML das notas e devolve, por item, unidade/desconto/IPI/ICMS ST. */
 export async function detalhesDoXml(itens: ItemBase[]): Promise<Map<string, DetalheXml>> {
   const out = new Map<string, DetalheXml>();
+  // 1) O que já foi lido antes vem do cache (o XML de uma nota nunca muda).
+  try {
+    const cache = await prisma.$queryRaw<
+      { itemId: string; unidade: string; desconto: number; ipi: number; icmsSt: number }[]
+    >(Prisma.sql`
+      SELECT "itemId", unidade, desconto::float8 AS desconto, ipi::float8 AS ipi, "icmsSt"::float8 AS "icmsSt"
+      FROM "NotaItemDetalheXml" WHERE "itemId" = ANY(${itens.map((i) => i.id)}::text[])
+    `);
+    for (const c of cache) {
+      out.set(c.itemId, { unidade: c.unidade, desconto: c.desconto, ipi: c.ipi, icmsSt: c.icmsSt });
+    }
+  } catch {
+    /* tabela de cache ainda não existe: segue lendo os XMLs */
+  }
+  const faltantes = itens.filter((i) => !out.has(i.id));
+  const novos: { id: string; d: DetalheXml }[] = [];
   const porNota = new Map<string, ItemBase[]>();
-  for (const it of itens) {
+  for (const it of faltantes) {
     const l = porNota.get(it.noteId) ?? [];
     l.push(it);
     porNota.set(it.noteId, l);
@@ -224,12 +240,14 @@ export async function detalhesDoXml(itens: ItemBase[]): Promise<Map<string, Deta
         );
         if (k < 0) continue;
         const x = disponiveis.splice(k, 1)[0];
-        out.set(it.id, {
+        const d = {
           unidade: (x.unidade || "").trim().toUpperCase(),
           desconto: Number(x.valorDesconto) || 0,
           ipi: Number(x.valorIpi) || 0,
           icmsSt: Number(x.valorIcmsSt) || 0,
-        });
+        };
+        out.set(it.id, d);
+        novos.push({ id: it.id, d });
       }
     }
   };
@@ -237,6 +255,22 @@ export async function detalhesDoXml(itens: ItemBase[]): Promise<Map<string, Deta
   // 3 lotes por vez (sem estourar as conexões do banco gratuito).
   for (let i = 0; i < lotes.length; i += 3) {
     await Promise.all(lotes.slice(i, i + 3).map(processar));
+  }
+  // 2) Guarda o que acabou de ser lido para as próximas aberturas.
+  if (novos.length) {
+    try {
+      for (let i = 0; i < novos.length; i += 500) {
+        const f = novos.slice(i, i + 500);
+        await prisma.$executeRaw(Prisma.sql`
+          INSERT INTO "NotaItemDetalheXml" ("itemId", unidade, desconto, ipi, "icmsSt")
+          SELECT * FROM unnest(${f.map((x) => x.id)}::text[], ${f.map((x) => x.d.unidade)}::text[],
+            ${f.map((x) => x.d.desconto)}::numeric[], ${f.map((x) => x.d.ipi)}::numeric[], ${f.map((x) => x.d.icmsSt)}::numeric[])
+          ON CONFLICT ("itemId") DO NOTHING
+        `);
+      }
+    } catch {
+      /* sem a tabela de cache, só não guarda */
+    }
   }
   return out;
 }
