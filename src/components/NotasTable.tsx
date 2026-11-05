@@ -97,10 +97,10 @@ export function NotasTable() {
 
   // Lista de empresas recebedoras (certificados), ordenada alfabeticamente.
   useEffect(() => {
-    fetch("/api/certificados")
+    fetch("/api/empresas-recebedoras")
       .then((r) => r.json())
       .then((j) => {
-        const lista: CertificadoOpcao[] = j.certificados ?? [];
+        const lista: CertificadoOpcao[] = j.empresas ?? [];
         lista.sort((a, b) =>
           (a.razaoSocial?.trim() || a.cnpj).localeCompare(
             b.razaoSocial?.trim() || b.cnpj,
@@ -134,7 +134,7 @@ export function NotasTable() {
         qs.set("buscaCampo", buscaCampo);
         qs.set("buscaTermo", buscaTermoAplicado.trim());
       }
-      if (certificateId) qs.set("certificateId", certificateId);
+      if (certificateId) qs.set("cnpjDestino", certificateId);
       if (dataInicial) qs.set("dataInicial", dataInicial);
       if (dataFinal) qs.set("dataFinal", dataFinal);
 
