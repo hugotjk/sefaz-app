@@ -764,7 +764,6 @@ function referenciaFormula2(A: string, G: string, H: string, P: string, Q: strin
     [
       "KRYSTALMIX COMERCIO E DISTRIBUIDORA DE PRODUTOS E UTENSILIOS",
       "KIT CLUB DISTRIBUIDORA DE ARTIGOS ESPORTIVOS LTDA - ME",
-      "MALHAS D ESTEFANO LTDA",
       "SEEDER CONFECCOES LTDA",
       "TSC IDOLOS COMERCIO DE ARTIGOS ESPORTIVOS LTDA",
       "TSC ESTADIOS COMERCIO DE ARTIGOS ESPORTIVOS LTDA",
@@ -788,6 +787,14 @@ function referenciaFormula2(A: string, G: string, H: string, P: string, Q: strin
     ].some((x) => igual(A, x))
   )
     return G;
+  // Malhas D Estefano: "MEIA SA 55RJ" / "MEIA SA BOARD" / "MEIA SA WQS" conforme a descrição
+  if (igual(A, "MALHAS D ESTEFANO LTDA")) {
+    const hu = H.toUpperCase();
+    if (hu.includes("55RJ")) return "MEIA SA 55RJ";
+    if (hu.includes("BOARD")) return "MEIA SA BOARD";
+    if (hu.includes("WQS")) return "MEIA SA WQS";
+    return "";
+  }
   // LM Produtos Licenciados (Cebola): referência = os números do início da descrição
   //   "4405-GARRAFA ALUMINIO..." -> "4405"
   if (igual(A, "LM PRODUTOS LICENCIADOS LTDA")) {
