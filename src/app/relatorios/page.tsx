@@ -39,6 +39,13 @@ const RELATORIOS: CardRelatorio[] = [
       "Produtos que já existem no sistema, mas cujo EAN da nota fiscal não está cadastrado em nenhuma variação.",
     etiqueta: "Notas Fiscais",
   },
+  {
+    href: "/relatorios/conferencia-mkp",
+    titulo: "Conferência de MKP",
+    descricao:
+      "Produtos já cadastrados com o custo faturado (bruto e total com desconto, IPI e ST), o MKP do modelo e alerta nos que estão com o preço errado no PDV.",
+    etiqueta: "Notas Fiscais",
+  },
 ];
 
 export default function RelatoriosPage() {

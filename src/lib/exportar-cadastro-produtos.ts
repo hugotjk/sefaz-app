@@ -9,7 +9,8 @@ import {
   tamanhoPlausivel,
 } from "@/lib/identificar-tamanho";
 import { tipoEGrupoLacoste } from "@/lib/lacoste-grupos";
-import { CORES_OAKLEY, PRECOS_OAKLEY } from "@/lib/oakley-base";
+import { CORES_OAKLEY } from "@/lib/oakley-base";
+import { arred2, calcularPrecosModelo } from "@/lib/precos-modelo";
 
 /**
  * Exporta, no padrão do "Guia do Usuário — Importação de Produtos WQS", os
@@ -124,7 +125,7 @@ function soDigitos(s: string | null | undefined) {
 
 const ROUPAS = ["CAMISA", "CAMISETA", "BERMUDA", "SHORT", "SHORTS", "JAQUETA", "MOLETOM", "CALCA", "BLUSA", "REGATA", "VESTIDO", "BODY", "MACACAO", "SAIA", "COLETE", "CORTA", "VENTO", "POLO", "CONJUNTO", "BIQUINI", "MAIO", "SUNGA", "CUECA", "LEGGING", "TOP", "T", "SHIRT", "TSHIRT", "CASACO", "AGASALHO", "JERSEY"];
 
-interface ItemBase {
+export interface ItemBase {
   id: string;
   noteId: string;
   codigo: string;
@@ -141,7 +142,7 @@ interface ItemBase {
   data: Date | null;
 }
 
-interface DetalheXml {
+export interface DetalheXml {
   unidade: string;
   desconto: number;
   ipi: number;
@@ -188,7 +189,7 @@ async function carregarItens(pares: ParProduto[]): Promise<ItemBase[]> {
 }
 
 /** Lê o XML das notas e devolve, por item, unidade/desconto/IPI/ICMS ST. */
-async function detalhesDoXml(itens: ItemBase[]): Promise<Map<string, DetalheXml>> {
+export async function detalhesDoXml(itens: ItemBase[]): Promise<Map<string, DetalheXml>> {
   const out = new Map<string, DetalheXml>();
   const porNota = new Map<string, ItemBase[]>();
   for (const it of itens) {
@@ -279,10 +280,6 @@ async function fornecedorPorModelo(modelos: string[]): Promise<Map<string, strin
   `);
   for (const r of rows) out.set(r.modelo, r.fornecedor);
   return out;
-}
-
-function arred2(v: number) {
-  return Math.round(v * 100) / 100;
 }
 
 /**
@@ -392,13 +389,6 @@ function dadosNewBalance(desc: string): { grupo: string; linha: string; cor: str
   const prox = seg[i + 1] ?? "";
   const cor = prox && !/\d/.test(prox) ? prox : "";
   return { grupo: primeiraPalavraGrupo(seg[i]), linha, cor };
-}
-
-/** Arredonda para o valor mais próximo que termina em 9,99 (mínimo 9,99). */
-function fim999(v: number) {
-  if (v <= 9.99) return 9.99;
-  const k = Math.round((v - 9.99) / 10);
-  return arred2(k * 10 + 9.99);
 }
 
 /** ME LEVA FARM: Grupo = 1ª palavra da descrição (PORTA JOIA = 2 palavras; MAXI/MINI são ignorados). */
@@ -616,39 +606,14 @@ export async function gerarCadastroXlsx(
     const custoTotUn = det
       ? (maisRecente.valorTotal - det.desconto + det.ipi + det.icmsSt) / qtd
       : null;
-    // Cálculos com o valor cheio; só no fim arredonda para 2 casas.
-    let preco1: number | null = custoUn;
-    let preco2: number | null = custoTotUn;
-    let preco3: number | null = null; // markup do modelo ainda não aprendido
-    if (modeloU === "ME LEVA FARM") {
-      // Faturado pela CIDADE MARAVILHOSA: Preço 1 = NF e Preço 2 = custo+impostos-desconto
-      // (sem multiplicar); nos demais fornecedores os dois levam x1,50.
-      const fator = norm(emitente).includes("CIDADE MARAVILHOSA") ? 1 : 1.5;
-      preco1 = custoUn * fator;
-      preco2 = custoTotUn == null ? null : custoTotUn * fator;
-      preco3 = preco2 == null ? null : fim999(preco2 * 2.2);
-    } else if (ehKennerRedley && preco2 != null) {
-      // x2,5 ou x2,55: o que ficar mais perto de um valor terminado em 9,99
-      const cand = [preco2 * 2.5, preco2 * 2.55].map((v) => ({ v, f: fim999(v) }));
-      cand.sort((a, b) => Math.abs(a.v - a.f) - Math.abs(b.v - b.f));
-      preco3 = cand[0].f;
-    }
-    if (modeloU === "OAKLEY") {
-      // Preço 3: "PDV R$" da planilha da Oakley (estilo = 9 primeiros caracteres); sem o
-      // estilo, markup sobre o Preço 2 (roupa FOA x2,72; calçado/óculos FOF x2,45). Termina em ,99.
-      const estilo = norm(referencia).replace(/\s+/g, "").slice(0, 9);
-      const tabela = PRECOS_OAKLEY[estilo];
-      if (tabela != null) preco3 = fim999(tabela);
-      else if (preco2 != null) {
-        const m = estilo.startsWith("FOA") ? 2.72 : estilo.startsWith("FOF") ? 2.45 : 0;
-        if (m) preco3 = fim999(preco2 * m);
-      }
-    }
-    const mult = modeloU === "HURLEY" ? 2.9 : modeloU === "RIP CURL" ? 2.4 : modeloU === "NEW BALANCE" ? 2.3 : 0;
-    if (mult && preco2 != null) preco3 = fim999(preco2 * mult);
-    preco1 = preco1 == null ? null : arred2(preco1);
-    preco2 = preco2 == null ? null : arred2(preco2);
-    preco3 = preco3 == null ? null : arred2(preco3);
+    // Regras de preço por modelo: ver src/lib/precos-modelo.ts (compartilhadas com a Conferência de MKP).
+    const { preco1, preco2, preco3 } = calcularPrecosModelo({
+      modelo,
+      emitente,
+      referencia,
+      custoUn,
+      custoTotUn,
+    });
     // Preco4: 0 para o que não é Flamengo/Fluminense. Fla/Flu: Preco3 + 10%
     // (adidas Fla e Puma repetem o Preco3); em branco enquanto o Preco3 não existe.
     const flaFlu = temPalavra(texto, ["FLAMENGO", "FLA", "CRF", "FLUMINENSE", "FLU"]);
