@@ -27,7 +27,6 @@ interface Resposta {
   linhas: Linha[];
   total: number;
   comAlerta: number;
-  aguardandoPreco: number;
   modelosSemRegra: string[];
 }
 
@@ -142,9 +141,6 @@ export default function ConferenciaMkpPage() {
           <>
             <p>
               <strong>{dados.comAlerta}</strong> com alerta de {dados.total} produtos conferidos.
-              {dados.aguardandoPreco > 0 && (
-                <span style={{ color: "var(--text-dim)" }}> {dados.aguardandoPreco} cadastrado(s) recente(s) aguardando o preço chegar do PDV (fora do relatório).</span>
-              )}
               {dados.modelosSemRegra.length > 0 && (
                 <span style={{ color: "var(--text-dim)" }}>
                   {" "}
