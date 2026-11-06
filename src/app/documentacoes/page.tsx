@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { TIPOS_DOC } from "@/lib/lojas-docs";
 
@@ -52,6 +53,33 @@ const chipEstilo: Record<EstadoDoc, React.CSSProperties> = {
   vencido: { background: "rgba(220,38,38,.12)", color: "var(--red)", border: "1px solid transparent" },
 };
 
+function PendenteLinha({ p, lojas, onAtribuir, onDescartar }: {
+  p: { key: string; nome: string; tamanho: number };
+  lojas: Loja[];
+  onAtribuir: (key: string, lojaId: string, tipo: string) => void;
+  onDescartar: (key: string) => void;
+}) {
+  const [lojaTxt, setLojaTxt] = useState("");
+  const [tipo, setTipo] = useState("");
+  const q = norm(lojaTxt);
+  const loja = q ? lojas.find((l) => l.cnpj && l.ativa && norm(`${l.loja} ${fmtCnpj(l.cnpj)}`) === q) : undefined;
+  return (
+    <div style={{ display: "flex", gap: 8, alignItems: "center", padding: "6px 0", fontSize: 13, flexWrap: "wrap" }}>
+      <span style={{ minWidth: 260 }}>{p.nome}</span>
+      <input list="lojas-dl" value={lojaTxt} onChange={(e) => setLojaTxt(e.target.value)} placeholder="Loja (digite e escolha)" style={{ minWidth: 260, padding: "5px 8px" }} />
+      <select value={tipo} onChange={(e) => setTipo(e.target.value)} style={{ padding: "5px 8px" }}>
+        <option value="">Tipo…</option>
+        {TIPOS_DOC.map((t) => <option key={t.id} value={t.id}>{t.nome}</option>)}
+      </select>
+      <button disabled={!loja || !tipo} onClick={() => loja && onAtribuir(p.key, loja.id, tipo)}>Guardar</button>
+      <button onClick={() => onDescartar(p.key)}>Excluir</button>
+      <datalist id="lojas-dl">
+        {lojas.filter((l) => l.cnpj && l.ativa).map((l) => <option key={l.id} value={`${l.loja} ${fmtCnpj(l.cnpj)}`} />)}
+      </datalist>
+    </div>
+  );
+}
+
 export default function DocumentacoesPage() {
   const [lojas, setLojas] = useState<Loja[]>([]);
   const [docs, setDocs] = useState<Doc[]>([]);
@@ -65,6 +93,11 @@ export default function DocumentacoesPage() {
   const [importando, setImportando] = useState(false);
   const [resultado, setResultado] = useState<ResultadoImport | null>(null);
   const [erroImport, setErroImport] = useState<string | null>(null);
+  const [enviando, setEnviando] = useState(false);
+  const [resEnvio, setResEnvio] = useState<{ arquivo: string; status: string; detalhe: string }[] | null>(null);
+  const [arrastando, setArrastando] = useState(false);
+  const [pendentes, setPendentes] = useState<{ key: string; nome: string; tamanho: number }[]>([]);
+  const [erroPend, setErroPend] = useState<string | null>(null);
 
   const carregar = useCallback(async () => {
     setCarregando(true);
@@ -81,9 +114,63 @@ export default function DocumentacoesPage() {
       setCarregando(false);
     }
   }, []);
+  const carregarPendentes = useCallback(async () => {
+    try {
+      const r = await fetch("/api/documentacoes/pendentes");
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error || "Erro ao carregar a fila.");
+      setPendentes(j.pendentes);
+      setErroPend(null);
+    } catch (e: any) {
+      setErroPend(e.message);
+    }
+  }, []);
   useEffect(() => {
     carregar();
-  }, [carregar]);
+    carregarPendentes();
+  }, [carregar, carregarPendentes]);
+
+  async function enviarArquivos(files: FileList | File[]) {
+    const lista = [...files];
+    if (!lista.length) return;
+    setEnviando(true);
+    setResEnvio(null);
+    try {
+      const resultados: { arquivo: string; status: string; detalhe: string }[] = [];
+      for (let i = 0; i < lista.length; i += 3) {
+        const fd = new FormData();
+        lista.slice(i, i + 3).forEach((f) => fd.append("arquivos", f));
+        const r = await fetch("/api/documentacoes/upload", { method: "POST", body: fd });
+        const j = await r.json();
+        if (!r.ok) throw new Error(j.error || "Falha no envio.");
+        resultados.push(...j.resultados);
+      }
+      setResEnvio(resultados);
+      await Promise.all([carregar(), carregarPendentes()]);
+    } catch (e: any) {
+      setResEnvio([{ arquivo: "", status: "erro", detalhe: e.message }]);
+    } finally {
+      setEnviando(false);
+    }
+  }
+
+  async function atribuir(key: string, lojaId: string, tipo: string) {
+    const l = lojas.find((x) => x.id === lojaId);
+    if (!l || !tipo) return;
+    const r = await fetch("/api/documentacoes/pendentes", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ key, tipo, cnpj: l.cnpj, lojaId: l.id }),
+    });
+    const j = await r.json();
+    if (!r.ok) setErroPend(j.error || "Erro ao guardar.");
+    await Promise.all([carregar(), carregarPendentes()]);
+  }
+  async function descartar(key: string) {
+    if (!confirm("Excluir este arquivo da fila?")) return;
+    await fetch(`/api/documentacoes/pendentes?key=${encodeURIComponent(key)}`, { method: "DELETE" });
+    await carregarPendentes();
+  }
 
   async function importar(arquivo: File) {
     setImportando(true);
@@ -146,7 +233,7 @@ export default function DocumentacoesPage() {
     <div style={{ width: "calc(100vw - var(--sidebar-width) - 48px)", maxWidth: 1700, position: "relative", left: "50%", transform: "translateX(-50%)" }}>
       <h1 style={{ marginBottom: 6 }}>Documentações</h1>
       <p style={{ color: "var(--text-dim)", marginTop: 0 }}>
-        Documentos das lojas, guardados por empresa e por CNPJ. Hoje esta tela mostra o cadastro de lojas e o que já foi guardado.
+        Documentos das lojas, guardados por empresa e por CNPJ. Clique no nome da loja para ver e enviar os documentos dela.
       </p>
 
       <div className="card" style={{ padding: "10px 14px", marginBottom: 14 }}>
@@ -197,6 +284,45 @@ export default function DocumentacoesPage() {
         </div>
       </div>
 
+      <div
+        className="card"
+        onDragOver={(e) => { e.preventDefault(); setArrastando(true); }}
+        onDragLeave={() => setArrastando(false)}
+        onDrop={(e) => { e.preventDefault(); setArrastando(false); enviarArquivos(e.dataTransfer.files); }}
+        style={{ marginBottom: 14, textAlign: "center", padding: 18, border: `2px dashed ${arrastando ? "var(--green)" : "var(--border)"}` }}
+      >
+        <div style={{ fontSize: 14 }}>
+          {enviando ? "Enviando…" : "Arraste os documentos aqui, ou "}
+          {!enviando && (
+            <label style={{ textDecoration: "underline", cursor: "pointer" }}>
+              escolha os arquivos
+              <input type="file" multiple hidden onChange={(e) => { if (e.target.files) enviarArquivos(e.target.files); e.target.value = ""; }} />
+            </label>
+          )}
+        </div>
+        <div style={{ fontSize: 12, color: "var(--text-dim)", marginTop: 4 }}>
+          O app identifica a loja e o tipo pelo nome do arquivo (CNPJ, nome da loja, "alvará", "contrato", "cartão CNPJ"…). O que não identificar vai para a fila abaixo.
+        </div>
+      </div>
+      {resEnvio && (
+        <div className="card" style={{ marginBottom: 14, fontSize: 13 }}>
+          {resEnvio.map((r, i) => (
+            <div key={i} style={{ color: r.status === "erro" ? "var(--red)" : r.status === "pendente" ? "var(--yellow)" : undefined }}>
+              {r.arquivo && <strong>{r.arquivo}: </strong>}{r.status === "guardado" ? `guardado como ${r.detalhe}` : r.detalhe}
+            </div>
+          ))}
+        </div>
+      )}
+      {erroPend && <div className="card" style={{ marginBottom: 14, color: "var(--red)", fontSize: 13 }}>{erroPend}</div>}
+      {pendentes.length > 0 && (
+        <div className="card" style={{ marginBottom: 14 }}>
+          <strong style={{ fontSize: 13 }}>Fila de não identificados ({pendentes.length})</strong>
+          {pendentes.map((p) => (
+            <PendenteLinha key={p.key} p={p} lojas={lojas} onAtribuir={atribuir} onDescartar={descartar} />
+          ))}
+        </div>
+      )}
+
       {erroImport && <div className="card" style={{ marginBottom: 14, color: "var(--red)" }}>{erroImport}</div>}
       {resultado && (
         <div className="card" style={{ marginBottom: 14, fontSize: 13 }}>
@@ -235,7 +361,7 @@ export default function DocumentacoesPage() {
                 {lista.map((l) => (
                   <tr key={l.id} style={l.ativa ? undefined : { opacity: 0.6 }}>
                     <td style={CORTA(260)} title={l.loja}>
-                      <strong>{l.loja}</strong>
+                      <Link href={`/documentacoes/${l.id}`}><strong>{l.loja}</strong></Link>
                       {!l.ativa && <span style={{ marginLeft: 6, fontSize: 11, color: "var(--text-dim)" }}>(inativa)</span>}
                     </td>
                     <td style={CORTA(300)} title={l.razaoSocial ?? ""}>{l.razaoSocial ?? "—"}</td>
