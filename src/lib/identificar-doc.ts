@@ -1,4 +1,4 @@
-import { normalizarCnpj, soDigitos } from "@/lib/lojas-docs";
+import { normalizarCnpj, raizCnpj, razaoCurta, soDigitos } from "@/lib/lojas-docs";
 
 export interface LojaMin {
   id: string;
@@ -16,7 +16,7 @@ export function tipoPeloNome(nomeArquivo: string): string | null {
   const n = " " + norm(nomeArquivo.replace(/\.[^.]+$/, "")) + " ";
   if (/ alvara /.test(n)) return "alvara";
   if (/ (certificado|pfx|a1) /.test(n)) return "cert";
-  if (/ (contrato|alteracao|aditivo|distrato|estatuto) /.test(n)) return "contrato";
+  if (/ (contrato|alteracao|aditivo|distrato|estatuto|ato constitutivo|requerimento de empresario) /.test(n)) return "contrato";
   if (/ (inscricao estadual|ie|insc est) /.test(n)) return "ie";
   if (/ (cartao cnpj|comprovante de inscricao|cnpj) /.test(n)) return "cnpj";
   return null;
@@ -52,8 +52,74 @@ export function cnpjPeloNomeDaLoja(nomeArquivo: string, lojas: LojaMin[]): strin
   return cnpjs.size === 1 ? [...cnpjs][0] : null;
 }
 
-export function identificar(nomeArquivo: string, lojas: LojaMin[]) {
-  const tipo = tipoPeloNome(nomeArquivo);
-  const cnpj = cnpjPeloNome(nomeArquivo, lojas) ?? cnpjPeloNomeDaLoja(nomeArquivo, lojas);
-  return { tipo, cnpj };
+/** CNPJs conhecidos citados num texto (PDF), do mais citado para o menos citado. */
+export function cnpjsNoTexto(texto: string, lojas: LojaMin[]): { cnpj: string; vezes: number }[] {
+  const conhecidos = new Set(lojas.map((l) => l.cnpj).filter(Boolean));
+  const cont = new Map<string, number>();
+  for (const m of texto.matchAll(/\d{2}\.?\d{3}\.?\d{3}\/?\d{4}-?\d{2}/g)) {
+    const c = normalizarCnpj(soDigitos(m[0]));
+    if (c && conhecidos.has(c)) cont.set(c, (cont.get(c) ?? 0) + 1);
+  }
+  return [...cont.entries()].map(([cnpj, vezes]) => ({ cnpj, vezes })).sort((a, b) => b.vezes - a.vezes);
+}
+
+/** Pela razão social curta escrita no nome do arquivo: CNPJs da empresa (só lojas ativas, se houver). */
+export function cnpjsPelaRazao(nomeArquivo: string, lojas: LojaMin[]): string[] {
+  const n = " " + norm(nomeArquivo.replace(/\.[^.]+$/, "")) + " ";
+  let melhor = 0;
+  let raizes = new Map<string, LojaMin[]>();
+  for (const l of lojas) {
+    if (!l.cnpj || !l.razaoSocial) continue;
+    const rn = norm(razaoCurta(l.razaoSocial));
+    if (rn.length < 4 || !n.includes(" " + rn + " ")) continue;
+    if (rn.length > melhor) {
+      melhor = rn.length;
+      raizes = new Map();
+    }
+    if (rn.length === melhor) {
+      const r = raizCnpj(l.cnpj);
+      raizes.set(r, [...(raizes.get(r) ?? []), l]);
+    }
+  }
+  if (raizes.size !== 1) return [];
+  const ls = [...raizes.values()][0];
+  const ativos = ls.filter((l) => l.ativa);
+  return [...new Set((ativos.length ? ativos : ls).map((l) => l.cnpj))].sort();
+}
+
+export interface Identificacao {
+  tipo: string | null;
+  cnpj: string | null;
+  todosCnpjs: boolean;
+  origem: string;
+  aviso?: string;
+}
+
+const fmt = (c: string) => c.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, "$1.$2.$3/$4-$5");
+
+/**
+ * Ordem: 1) CNPJ no nome do arquivo ou dentro do PDF; 2) razão social no nome; 3) nome da loja.
+ * Se o CNPJ do PDF e o do nome do arquivo divergirem, devolve aviso (o arquivo vai para a fila).
+ */
+export function identificar(nomeArquivo: string, lojas: LojaMin[], textoPdf = ""): Identificacao {
+  let tipo = tipoPeloNome(nomeArquivo);
+  if (!tipo && textoPdf) tipo = tipoPeloNome(textoPdf.slice(0, 1500));
+
+  const doNome = cnpjPeloNome(nomeArquivo, lojas);
+  const doPdf = cnpjsNoTexto(textoPdf, lojas);
+  const topo = doPdf[0];
+  const pdfCnpj = topo && (doPdf.length === 1 || topo.vezes > doPdf[1].vezes) ? topo.cnpj : null;
+
+  if (doNome && pdfCnpj && doNome !== pdfCnpj) {
+    return { tipo, cnpj: null, todosCnpjs: false, origem: "conflito", aviso: `o nome do arquivo cita ${fmt(doNome)} e o PDF é do CNPJ ${fmt(pdfCnpj)}` };
+  }
+  if (doNome) return { tipo, cnpj: doNome, todosCnpjs: false, origem: "CNPJ no nome" };
+  if (pdfCnpj) return { tipo, cnpj: pdfCnpj, todosCnpjs: false, origem: "CNPJ dentro do PDF" };
+
+  const cs = cnpjsPelaRazao(nomeArquivo, lojas);
+  if (cs.length === 1) return { tipo, cnpj: cs[0], todosCnpjs: false, origem: "razão social no nome" };
+  if (cs.length > 1 && tipo === "contrato") return { tipo, cnpj: cs[0], todosCnpjs: true, origem: "razão social no nome" };
+
+  const loja = cnpjPeloNomeDaLoja(nomeArquivo, lojas);
+  return { tipo, cnpj: loja, todosCnpjs: false, origem: loja ? "nome da loja" : "" };
 }
