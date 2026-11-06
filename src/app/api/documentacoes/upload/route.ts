@@ -35,7 +35,7 @@ export async function POST(req: Request) {
       select: { id: true, loja: true, razaoSocial: true, cnpj: true, ativa: true },
     });
 
-    const resultados: { arquivo: string; status: "guardado" | "pendente" | "erro"; detalhe: string }[] = [];
+    const resultados: { arquivo: string; status: "guardado" | "repetido" | "pendente" | "erro"; detalhe: string }[] = [];
     for (const f of arquivos) {
       const buffer = Buffer.from(await f.arrayBuffer());
       try {
@@ -58,7 +58,7 @@ export async function POST(req: Request) {
         const r = await guardarDocumento({
           buffer, nomeOriginal: f.name, tipo: tipo!, cnpj: cnpj ?? undefined, lojaId: lojaIdManual, validade, todosCnpjsDaEmpresa: todos || (!cnpjManual && auto.todosCnpjs),
         });
-        resultados.push({ arquivo: f.name, status: "guardado", detalhe: r.map((x) => x.nomeArquivo).join(" | ") + (cnpjManual || !auto.origem ? "" : ` (identificado por: ${auto.origem})`) });
+        resultados.push({ arquivo: f.name, status: r.every((x) => x.jaExistia) ? "repetido" : "guardado", detalhe: (r.every((x) => x.jaExistia) ? "já estava guardado como " : "") + r.map((x) => x.nomeArquivo).join(" | ") + (cnpjManual || !auto.origem ? "" : ` (identificado por: ${auto.origem})`) });
       } catch (e: any) {
         resultados.push({ arquivo: f.name, status: "erro", detalhe: e?.message ?? "Erro ao guardar." });
       }

@@ -139,7 +139,8 @@ export default function LojaDocsPage({ params }: { params: { id: string } }) {
                     const ev = estadoValidade(a.validade);
                     return (
                       <div key={a.id} style={{ display: "flex", gap: 10, fontSize: 13, padding: "5px 0 0", alignItems: "center", flexWrap: "wrap" }}>
-                        <a href={`/api/documentacoes/arquivo?id=${a.id}`}>{a.nomeArquivo}</a>
+                        <a href={`/api/documentacoes/arquivo?id=${a.id}&ver=1`} target="_blank" rel="noreferrer">{a.nomeArquivo}</a>
+                        <a href={`/api/documentacoes/arquivo?id=${a.id}`} style={{ fontSize: 12 }}>Baixar</a>
                         <span style={{ color: "var(--text-dim)" }}>{fmtData(a.enviadoEm)} · {fmtTam(a.tamanho)}</span>
                         {a.validade && ev && <span style={{ color: ev.cor }}>validade {fmtData(a.validade)} ({ev.txt})</span>}
                         <button onClick={() => excluir(a)} style={{ fontSize: 12, marginLeft: "auto" }}>Excluir</button>

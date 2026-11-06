@@ -1,6 +1,12 @@
 import { prisma } from "@/lib/db";
-import { b2Put, contentTypePorNome } from "@/lib/b2";
+import { b2Get, b2Put, contentTypePorNome } from "@/lib/b2";
 import { TIPOS_DOC, nomeArquivoDoc, nomePastaCnpj, raizCnpj } from "@/lib/lojas-docs";
+
+export interface GuardadoRes {
+  id: string;
+  nomeArquivo: string;
+  jaExistia?: boolean;
+}
 
 export interface GuardarArgs {
   buffer: Buffer;
@@ -37,8 +43,18 @@ async function gravarUm(
   loja: string,
   razao: string | null,
   validade: Date | null | undefined
-) {
+): Promise<GuardadoRes> {
   const ext = extensaoDe(nomeOriginal);
+  // mesmo arquivo (mesmo tamanho e mesmo conteúdo) já guardado neste tipo/chave: não grava de novo
+  const candidatos = await prisma.documentoLoja.findMany({ where: { escopo, chave, tipo, tamanho: buffer.length } });
+  for (const c of candidatos) {
+    if (!c.driveItemId) continue;
+    try {
+      if ((await b2Get(c.driveItemId)).equals(buffer)) return { id: c.id, nomeArquivo: c.nomeArquivo, jaExistia: true } as GuardadoRes;
+    } catch {
+      /* arquivo sumiu do armazenamento: segue e grava */
+    }
+  }
   const pasta = nomePastaCnpj(cnpj, razao);
   let nome = nomeArquivoDoc({ tipo, razao, loja, cnpj, extensao: ext });
   const jaTem = await prisma.documentoLoja.findMany({ where: { escopo, chave, tipo }, select: { nomeArquivo: true } });
@@ -54,7 +70,7 @@ async function gravarUm(
   const doc = await prisma.documentoLoja.create({
     data: { escopo, chave, tipo, nomeArquivo: nome, driveItemId: key, tamanho: buffer.length, validade: validade ?? null },
   });
-  return { id: doc.id, nomeArquivo: nome };
+  return { id: doc.id, nomeArquivo: nome } as GuardadoRes;
 }
 
 export async function guardarDocumento(a: GuardarArgs) {
@@ -76,7 +92,7 @@ export async function guardarDocumento(a: GuardarArgs) {
     cnpjs = [...new Set(todas.filter((l) => l.cnpj.length === 14 && (l.ativa || l.cnpj === a.cnpj)).map((l) => l.cnpj))];
     if (!cnpjs.includes(a.cnpj)) cnpjs.push(a.cnpj);
   }
-  const out = [];
+  const out: GuardadoRes[] = [];
   for (const c of cnpjs) {
     const d = await dadosCnpj(c);
     out.push(await gravarUm(a.buffer, a.nomeOriginal, a.tipo, "CNPJ", c, c, d.loja, d.razao, a.validade));

@@ -18,6 +18,8 @@ interface Loja {
   origem: string;
 }
 interface Doc {
+  id: string;
+  nomeArquivo: string;
   escopo: "EMPRESA" | "CNPJ" | "LOJA";
   chave: string;
   tipo: string;
@@ -98,6 +100,7 @@ export default function DocumentacoesPage() {
   const [arrastando, setArrastando] = useState(false);
   const [pendentes, setPendentes] = useState<{ key: string; nome: string; tamanho: number }[]>([]);
   const [erroPend, setErroPend] = useState<string | null>(null);
+  const [aberto, setAberto] = useState<{ lojaId: string; tipo: string } | null>(null);
 
   const carregar = useCallback(async () => {
     setCarregando(true);
@@ -210,6 +213,11 @@ export default function DocumentacoesPage() {
       if (dias <= 30) return "vence";
     }
     return "ok";
+  }
+  function arquivosDe(l: Loja, tipoId: string): Doc[] {
+    const t = TIPOS_DOC.find((x) => x.id === tipoId)!;
+    const chave = t.escopo === "EMPRESA" ? l.raiz : t.escopo === "CNPJ" ? l.cnpj : l.id;
+    return (chave ? docsIndex.get(`${t.escopo}|${chave}`) : undefined)?.filter((d) => d.tipo === tipoId) ?? [];
   }
   const faltam = (l: Loja) => TIPOS_DOC.filter((t) => t.obrigatorio && estado(l, t.id) === "falta").length;
 
@@ -373,9 +381,36 @@ export default function DocumentacoesPage() {
                       <div style={{ display: "flex", gap: 5, flexWrap: "nowrap" }}>
                         {TIPOS_DOC.map((t) => {
                           const e = estado(l, t.id);
+                          const arqs = arquivosDe(l, t.id);
+                          const aberta = aberto?.lojaId === l.id && aberto.tipo === t.id;
                           return (
-                            <span key={t.id} title={t.nome} style={{ ...chipEstilo[e], fontSize: 11.5, padding: "2px 8px", borderRadius: 10, whiteSpace: "nowrap" }}>
-                              {t.curto}
+                            <span key={t.id} style={{ position: "relative" }}>
+                              <span
+                                title={arqs.length ? `${t.nome} — clique para ver ou baixar` : `${t.nome} — falta enviar`}
+                                onClick={() => (arqs.length ? setAberto(aberta ? null : { lojaId: l.id, tipo: t.id }) : (window.location.href = `/documentacoes/${l.id}`))}
+                                style={{ ...chipEstilo[e], fontSize: 11.5, padding: "2px 8px", borderRadius: 10, whiteSpace: "nowrap", cursor: "pointer", display: "inline-block" }}
+                              >
+                                {t.curto}
+                              </span>
+                              {aberta && (
+                                <div
+                                  className="card"
+                                  style={{ position: "absolute", top: "100%", left: 0, zIndex: 20, marginTop: 4, padding: 8, minWidth: 320, boxShadow: "0 6px 20px rgba(0,0,0,.18)" }}
+                                >
+                                  {arqs.map((a) => (
+                                    <div key={a.id} style={{ display: "flex", gap: 10, alignItems: "center", fontSize: 12.5, padding: "4px 2px" }}>
+                                      <span style={{ flex: 1, whiteSpace: "normal" }}>{a.nomeArquivo}</span>
+                                      <a href={`/api/documentacoes/arquivo?id=${a.id}&ver=1`} target="_blank" rel="noreferrer">Ver</a>
+                                      <a href={`/api/documentacoes/arquivo?id=${a.id}`}>Baixar</a>
+                                    </div>
+                                  ))}
+                                  <div style={{ textAlign: "right", fontSize: 12, paddingTop: 4 }}>
+                                    <a href={`/documentacoes/${l.id}`}>Abrir loja</a>
+                                    {" · "}
+                                    <a href="#" onClick={(ev) => { ev.preventDefault(); setAberto(null); }}>Fechar</a>
+                                  </div>
+                                </div>
+                              )}
                             </span>
                           );
                         })}
