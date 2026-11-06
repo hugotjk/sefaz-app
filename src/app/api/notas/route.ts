@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
+import { SQL_NOME_EMPRESA_XML } from "@/lib/empresas-recebedoras";
 import { statusXmlNota, TAMANHO_MINIMO_XML_COMPLETO } from "@/lib/nota-xml-status";
 
 export const runtime = "nodejs";
@@ -15,6 +16,8 @@ function montarWhere(sp: URLSearchParams): Prisma.NoteWhereInput {
 
   const certificateId = sp.get("certificateId")?.trim();
   if (certificateId) where.certificateId = certificateId;
+  const cnpjDestino = sp.get("cnpjDestino")?.trim();
+  if (cnpjDestino) where.cnpjDestino = cnpjDestino;
 
   // Intervalo de data de emissão (inputs date -> "YYYY-MM-DD"). Inclui o dia
   // final inteiro. Datas inválidas são ignoradas.
@@ -99,6 +102,17 @@ export async function GET(req: NextRequest) {
       )
     : new Set<string>();
 
+  // Razão social lida do XML para as notas desta página (quando não há certificado).
+  const nomesXml = new Map<string, string>();
+  const semCert = notas.filter((n) => !n.certificate).map((n) => n.chaveAcesso);
+  if (semCert.length) {
+    const rows = await prisma.$queryRaw<{ chave: string; nome: string | null }[]>(Prisma.sql`
+      SELECT n."chaveAcesso" AS chave, ${SQL_NOME_EMPRESA_XML} AS nome
+      FROM "Note" n WHERE n."chaveAcesso" IN (${Prisma.join(semCert)}) AND n."xmlCompleto" <> ''
+    `);
+    for (const r of rows) if (r.nome) nomesXml.set(r.chave, r.nome);
+  }
+
   const linhas = notas.map((nota) => ({
     chaveAcesso: nota.chaveAcesso,
     numero: nota.numero,
@@ -111,7 +125,7 @@ export async function GET(req: NextRequest) {
     // cliente ainda sem certificado cadastrado) -> sem "Empresa (Receb.)".
     destinatarioNome: nota.certificate
       ? nota.certificate.razaoSocial || nota.certificate.cnpj
-      : null,
+      : nomesXml.get(nota.chaveAcesso) ?? null,
     status: nota.status,
     qtdEventos: nota._count.eventos,
     statusXml: statusXmlNota({
