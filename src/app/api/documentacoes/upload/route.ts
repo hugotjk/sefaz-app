@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { b2Put } from "@/lib/b2";
-import { guardarDocumento } from "@/lib/docs-storage";
+import { guardarDocumento, guardarNaFila } from "@/lib/docs-storage";
 import { identificar } from "@/lib/identificar-doc";
 import { textoDoPdf } from "@/lib/pdf-texto";
 import { TIPOS_DOC } from "@/lib/lojas-docs";
@@ -10,7 +9,6 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-const limpa = (n: string) => n.replace(/[\\/:*?"<>|]+/g, " ").replace(/\s+/g, " ").trim();
 
 /**
  * Recebe arquivos. Sem tipo/CNPJ informados, identifica pelo nome do arquivo;
@@ -42,8 +40,8 @@ export async function POST(req: Request) {
         const texto = /\.pdf$/i.test(f.name) ? await textoDoPdf(buffer) : "";
         const auto = identificar(f.name, lojas, texto);
         if (auto.aviso && !cnpjManual) {
-          await b2Put(`_nao-identificados/${Date.now()}__${limpa(f.name)}`, buffer, f.type || "application/octet-stream");
-          resultados.push({ arquivo: f.name, status: "pendente", detalhe: `Atenção: ${auto.aviso}. Foi para a fila.` });
+          const q = await guardarNaFila(buffer, f.name, f.type || "application/octet-stream");
+          resultados.push({ arquivo: f.name, status: "pendente", detalhe: `Atenção: ${auto.aviso}. ${q.jaEstava ? "Já estava na fila." : "Foi para a fila."}` });
           continue;
         }
         const tipo = tipoManual ?? auto.tipo;
@@ -51,8 +49,8 @@ export async function POST(req: Request) {
         const tdef = TIPOS_DOC.find((t) => t.id === tipo);
         const pronto = tdef && (tdef.escopo === "LOJA" ? !!lojaIdManual : !!cnpj);
         if (!pronto) {
-          await b2Put(`_nao-identificados/${Date.now()}__${limpa(f.name)}`, buffer, f.type || "application/octet-stream");
-          resultados.push({ arquivo: f.name, status: "pendente", detalhe: "Não consegui identificar a loja/tipo. Foi para a fila." });
+          const q = await guardarNaFila(buffer, f.name, f.type || "application/octet-stream");
+          resultados.push({ arquivo: f.name, status: "pendente", detalhe: `Não consegui identificar a loja/tipo. ${q.jaEstava ? "Já estava na fila." : "Foi para a fila."}` });
           continue;
         }
         const r = await guardarDocumento({
