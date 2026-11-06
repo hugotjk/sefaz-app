@@ -11,7 +11,7 @@ export interface TipoDoc {
 }
 
 export const TIPOS_DOC: TipoDoc[] = [
-  { id: "contrato", nome: "Contrato / alteração contratual", curto: "Contrato", escopo: "EMPRESA", obrigatorio: true },
+  { id: "contrato", nome: "Contrato / alteração contratual", curto: "Contrato", escopo: "CNPJ", obrigatorio: true },
   { id: "cnpj", nome: "Cartão CNPJ", curto: "Cartão CNPJ", escopo: "CNPJ", obrigatorio: true },
   { id: "ie", nome: "Inscrição estadual", curto: "IE", escopo: "CNPJ", obrigatorio: true },
   { id: "cert", nome: "Certificado digital", curto: "Certificado", escopo: "CNPJ", obrigatorio: true },
