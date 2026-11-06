@@ -49,7 +49,7 @@ export async function POST(req: Request) {
           continue;
         }
         const r = await guardarDocumento({
-          buffer, nomeOriginal: f.name, tipo: tipo!, cnpj: cnpj ?? undefined, lojaId: lojaIdManual, validade, todosCnpjsDaEmpresa: todos,
+          buffer, nomeOriginal: f.name, tipo: tipo!, cnpj: cnpj ?? undefined, lojaId: lojaIdManual, validade, todosCnpjsDaEmpresa: todos || (!cnpjManual && auto.todosCnpjs),
         });
         resultados.push({ arquivo: f.name, status: "guardado", detalhe: r.map((x) => x.nomeArquivo).join(" | ") });
       } catch (e: any) {
