@@ -100,6 +100,8 @@ export default function DocumentacoesPage() {
   const [arrastando, setArrastando] = useState(false);
   const [pendentes, setPendentes] = useState<{ key: string; nome: string; tamanho: number }[]>([]);
   const [erroPend, setErroPend] = useState<string | null>(null);
+  const [limpando, setLimpando] = useState(false);
+  const [msgLimpeza, setMsgLimpeza] = useState<string | null>(null);
   const [aberto, setAberto] = useState<{ lojaId: string; tipo: string } | null>(null);
 
   const carregar = useCallback(async () => {
@@ -154,6 +156,23 @@ export default function DocumentacoesPage() {
       setResEnvio([{ arquivo: "", status: "erro", detalhe: e.message }]);
     } finally {
       setEnviando(false);
+    }
+  }
+
+  async function limparDuplicados() {
+    if (!confirm("Apagar os arquivos repetidos (mesmo conteúdo)? Fica sempre o mais antigo.")) return;
+    setLimpando(true);
+    setMsgLimpeza(null);
+    try {
+      const r = await fetch("/api/documentacoes/duplicados", { method: "POST" });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error || "Erro ao limpar.");
+      setMsgLimpeza(`Removidos: ${j.docsRemovidos} documento(s) repetido(s) e ${j.filaRemovidos} repetido(s) na fila.`);
+      await Promise.all([carregar(), carregarPendentes()]);
+    } catch (e: any) {
+      setMsgLimpeza(e.message);
+    } finally {
+      setLimpando(false);
     }
   }
 
@@ -275,6 +294,9 @@ export default function DocumentacoesPage() {
             Só com documento faltando
           </label>
           <span style={{ flex: 1 }} />
+          <button onClick={limparDuplicados} disabled={limpando} style={{ fontSize: 13, border: "1px solid var(--border)", borderRadius: 6, padding: "6px 12px", background: "var(--panel-2)" }}>
+            {limpando ? "Limpando…" : "Limpar repetidos"}
+          </button>
           <label className="btn-importar" style={{ cursor: importando ? "default" : "pointer", fontSize: 13, border: "1px solid var(--border)", borderRadius: 6, padding: "6px 12px", background: "var(--panel-2)" }}>
             {importando ? "Importando…" : "Importar planilha de lojas"}
             <input
@@ -331,6 +353,7 @@ export default function DocumentacoesPage() {
         </div>
       )}
 
+      {msgLimpeza && <div className="card" style={{ marginBottom: 14, fontSize: 13 }}>{msgLimpeza}</div>}
       {erroImport && <div className="card" style={{ marginBottom: 14, color: "var(--red)" }}>{erroImport}</div>}
       {resultado && (
         <div className="card" style={{ marginBottom: 14, fontSize: 13 }}>
