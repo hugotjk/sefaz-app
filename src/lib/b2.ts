@@ -10,10 +10,12 @@ import {
 let _client: S3Client | null = null;
 
 function config() {
-  const keyId = process.env.B2_KEY_ID;
-  const secret = process.env.B2_APPLICATION_KEY;
-  const bucket = process.env.B2_BUCKET;
-  let endpoint = process.env.B2_ENDPOINT;
+  // aspas, espaços e quebras de linha colados junto com o valor quebram a assinatura
+  const lim = (v?: string) => v?.trim().replace(/^["']|["']$/g, "").trim();
+  const keyId = lim(process.env.B2_KEY_ID);
+  const secret = lim(process.env.B2_APPLICATION_KEY);
+  const bucket = lim(process.env.B2_BUCKET);
+  let endpoint = lim(process.env.B2_ENDPOINT)?.replace(/\/+$/, "");
   if (!keyId || !secret || !bucket || !endpoint) {
     throw new Error("Armazenamento não configurado (B2_KEY_ID, B2_APPLICATION_KEY, B2_BUCKET, B2_ENDPOINT).");
   }
