@@ -149,7 +149,7 @@ export default function ConferenciaMkpPage() {
 
       <div
         className="card"
-        style={{ width: "min(98vw, 1700px)", position: "relative", left: "50%", transform: "translateX(-50%)" }}
+        style={{ width: "min(calc(100vw - var(--sidebar-width) - 48px), 1700px)", position: "relative", left: "50%", transform: "translateX(-50%)" }}
       >
         {erro && <p style={{ color: "var(--danger, #c0392b)" }}>{erro}</p>}
         {dados && !erro && (

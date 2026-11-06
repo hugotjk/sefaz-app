@@ -351,3 +351,37 @@ model NotaItemDetalheXml {
   icmsSt   Decimal  @default(0) @db.Decimal(14, 4)
   criadoEm DateTime @default(now())
 }
+
+// Cadastro de lojas da tela de Documentações. Vem das planilhas LOJAS e LOJAS_MFPLAI
+// (importadas pela própria tela). Um mesmo CNPJ pode aparecer em mais de uma loja
+// (loja provisória) e lojas inativas ficam no cadastro.
+model LojaCadastro {
+  id          String   @id @default(cuid())
+  cnpj        String   @default("") // só dígitos; "" = sem CNPJ
+  loja        String
+  razaoSocial String?
+  gestor      String?
+  rede        String?
+  ativa       Boolean  @default(true)
+  origem      String // LOJAS | MFPLAI
+  updatedAt   DateTime @updatedAt
+
+  @@unique([origem, cnpj, loja])
+  @@index([cnpj])
+}
+
+// Documentos guardados (o arquivo fica no OneDrive; aqui só o registro).
+// escopo EMPRESA -> chave = raiz do CNPJ (8 dígitos); CNPJ -> 14 dígitos; LOJA -> id da LojaCadastro.
+model DocumentoLoja {
+  id          String   @id @default(cuid())
+  escopo      String
+  chave       String
+  tipo        String
+  nomeArquivo String
+  driveItemId String?
+  tamanho     Int?
+  validade    DateTime?
+  enviadoEm   DateTime @default(now())
+
+  @@index([escopo, chave])
+}

@@ -15,9 +15,11 @@ export interface NavItem {
 // Estrutura de dados do menu. Nenhum item usa `submenu` ainda, mas o
 // componente já sabe renderizar o flyout quando for adicionado.
 const ITENS: NavItem[] = [
-  { nome: "Notas Fiscais", icone: "📄", href: "/notas" },
-  { nome: "Certificados", icone: "🔑", href: "/certificados" },
+  { nome: "Início", icone: "🏠", href: "/inicio" },
+  { nome: "Notas Faturadas", icone: "📄", href: "/notas" },
   { nome: "Relatórios", icone: "📊", href: "/relatorios" },
+  { nome: "Documentações", icone: "🗂️", href: "/documentacoes" },
+  { nome: "Certificados", icone: "🔑", href: "/certificados" },
 ];
 
 function estaAtivo(pathname: string, href: string) {
@@ -47,6 +49,7 @@ export function SidebarNav() {
               <span className="sidebar-icon" aria-hidden>
                 {item.icone}
               </span>
+              <span className="sidebar-rotulo">{item.nome}</span>
             </Link>
 
             {/* balão com o nome da tela ao passar o mouse */}

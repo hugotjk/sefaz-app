@@ -13,9 +13,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body>
         <div className="app-shell-sidebar">
           <aside className="sidebar">
-            <div className="sidebar-logo" aria-hidden>
-              P
-            </div>
+            <div className="sidebar-logo">Painel da Loja</div>
             <SidebarNav />
           </aside>
           <div className="app-content">
