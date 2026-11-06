@@ -82,7 +82,7 @@ export function nomeArquivoDoc(args: {
 }) {
   const t = TIPOS_DOC.find((x) => x.id === args.tipo);
   const curta = razaoCurta(args.razao);
-  let loja = args.loja.trim();
+  let loja = args.loja.trim().replace(/\s+INATIV[AO]$/i, "");
   if (curta && loja.toUpperCase().startsWith(curta + " ")) loja = loja.slice(curta.length).trim();
   else if (curta && loja.toUpperCase() === curta) loja = "";
   const partes = [t?.curto ?? args.tipo];
