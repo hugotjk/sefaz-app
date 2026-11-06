@@ -1,4 +1,5 @@
 import { PRECOS_OAKLEY } from "@/lib/oakley-base";
+import { PRECOS_ADIDAS } from "@/lib/adidas-base";
 
 /** Regras de preço por modelo — usadas no cadastro (planilha) e na Conferência de MKP. */
 
@@ -16,7 +17,14 @@ export function fim999(v: number) {
   return arred2(k * 10 + 9.99);
 }
 
-const MULT_FIXO: Record<string, number> = { HURLEY: 2.9, "RIP CURL": 2.4, "NEW BALANCE": 2.3 };
+const MULT_FIXO: Record<string, number> = { HURLEY: 2.9, "RIP CURL": 2.4, "NEW BALANCE": 2.3, BRAZILINE: 2.35, "BETEL FLA": 2.4, "STARTER FLA": 2.4 };
+
+/** Adidas e Adidas Fla: o preço certo é o RRP da base da Adidas (artigo = referência). */
+const ehAdidas = (m: string) => m === "ADIDAS" || m === "ADIDAS FLA";
+const precoAdidas = (ref: string | null | undefined): number | null => {
+  const r = norm(ref).replace(/\s+/g, "");
+  return PRECOS_ADIDAS[r] ?? PRECOS_ADIDAS[r.slice(0, 6)] ?? null;
+};
 
 /** O modelo tem regra de preço (Preço 3) ensinada? */
 export function modeloTemRegraDePreco(modelo: string | null | undefined): boolean {
@@ -26,6 +34,7 @@ export function modeloTemRegraDePreco(modelo: string | null | undefined): boolea
     m.includes("KENNER") ||
     m.includes("REDLEY") ||
     m === "OAKLEY" ||
+    ehAdidas(m) ||
     m in MULT_FIXO
   );
 }
@@ -89,6 +98,10 @@ export function calcularPrecosModelo(a: {
       const m = estilo.startsWith("FOA") ? 2.72 : estilo.startsWith("FOF") ? 2.45 : 0;
       if (m) preco3 = fim999(preco2 * m);
     }
+  }
+  if (ehAdidas(modeloU)) {
+    const rrp = precoAdidas(a.referencia);
+    if (rrp != null) preco3 = rrp;
   }
   const mult = MULT_FIXO[modeloU] ?? 0;
   if (mult && preco2 != null) preco3 = fim999(preco2 * mult);
