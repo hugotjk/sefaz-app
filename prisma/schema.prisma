@@ -363,10 +363,10 @@ model LojaCadastro {
   gestor      String?
   rede        String?
   ativa       Boolean  @default(true)
-  origem      String // LOJAS | MFPLAI
+  origem      String // planilha da última importação: LOJAS | MFPLAI
   updatedAt   DateTime @updatedAt
 
-  @@unique([origem, cnpj, loja])
+  @@unique([cnpj, loja])
   @@index([cnpj])
 }
 
