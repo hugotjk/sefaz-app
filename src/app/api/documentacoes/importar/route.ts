@@ -68,7 +68,7 @@ export async function POST(req: NextRequest) {
     let lidas = 0;
     for (let r = cab + 1; r <= ws.rowCount; r++) {
       const row = ws.getRow(r);
-      const loja = texto(row.getCell(col("LOJA")).value);
+      const loja = texto(row.getCell(col("LOJA")).value).replace(/\s+/g, " ").toUpperCase();
       if (!loja) continue;
       lidas++;
       if (lojaEhNrn(loja)) {
@@ -101,9 +101,11 @@ export async function POST(req: NextRequest) {
         FROM unnest(${f.map(() => randomUUID())}::text[], ${f.map((x) => x.cnpj)}::text[], ${f.map((x) => x.loja)}::text[],
           ${f.map((x) => x.razao)}::text[], ${f.map((x) => x.gestor)}::text[], ${f.map((x) => x.rede)}::text[],
           ${f.map((x) => x.ativa)}::boolean[]) AS t(id, cnpj, loja, razao, gestor, rede, ativa)
-        ON CONFLICT (origem, cnpj, loja) DO UPDATE SET
-          "razaoSocial" = EXCLUDED."razaoSocial", gestor = EXCLUDED.gestor, rede = EXCLUDED.rede,
-          ativa = EXCLUDED.ativa, "updatedAt" = NOW()
+        ON CONFLICT (cnpj, loja) DO UPDATE SET
+          "razaoSocial" = COALESCE(EXCLUDED."razaoSocial", "LojaCadastro"."razaoSocial"),
+          gestor = COALESCE(EXCLUDED.gestor, "LojaCadastro".gestor),
+          rede = COALESCE(EXCLUDED.rede, "LojaCadastro".rede),
+          ativa = EXCLUDED.ativa, origem = EXCLUDED.origem, "updatedAt" = NOW()
         RETURNING (xmax = 0) AS inserida
       `);
       for (const x of res) x.inserida ? novas++ : atualizadas++;
