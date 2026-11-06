@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { b2Put } from "@/lib/b2";
 import { guardarDocumento } from "@/lib/docs-storage";
 import { identificar } from "@/lib/identificar-doc";
+import { textoDoPdf } from "@/lib/pdf-texto";
 import { TIPOS_DOC } from "@/lib/lojas-docs";
 
 export const runtime = "nodejs";
@@ -38,7 +39,13 @@ export async function POST(req: Request) {
     for (const f of arquivos) {
       const buffer = Buffer.from(await f.arrayBuffer());
       try {
-        const auto = identificar(f.name, lojas);
+        const texto = /\.pdf$/i.test(f.name) ? await textoDoPdf(buffer) : "";
+        const auto = identificar(f.name, lojas, texto);
+        if (auto.aviso && !cnpjManual) {
+          await b2Put(`_nao-identificados/${Date.now()}__${limpa(f.name)}`, buffer, f.type || "application/octet-stream");
+          resultados.push({ arquivo: f.name, status: "pendente", detalhe: `Atenção: ${auto.aviso}. Foi para a fila.` });
+          continue;
+        }
         const tipo = tipoManual ?? auto.tipo;
         const cnpj = cnpjManual ?? auto.cnpj;
         const tdef = TIPOS_DOC.find((t) => t.id === tipo);
@@ -51,7 +58,7 @@ export async function POST(req: Request) {
         const r = await guardarDocumento({
           buffer, nomeOriginal: f.name, tipo: tipo!, cnpj: cnpj ?? undefined, lojaId: lojaIdManual, validade, todosCnpjsDaEmpresa: todos || (!cnpjManual && auto.todosCnpjs),
         });
-        resultados.push({ arquivo: f.name, status: "guardado", detalhe: r.map((x) => x.nomeArquivo).join(" | ") });
+        resultados.push({ arquivo: f.name, status: "guardado", detalhe: r.map((x) => x.nomeArquivo).join(" | ") + (cnpjManual || !auto.origem ? "" : ` (identificado por: ${auto.origem})`) });
       } catch (e: any) {
         resultados.push({ arquivo: f.name, status: "erro", detalhe: e?.message ?? "Erro ao guardar." });
       }
