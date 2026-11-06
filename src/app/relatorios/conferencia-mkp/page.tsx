@@ -52,8 +52,8 @@ const ROTULO: Record<Status, string> = {
   SEM_XML: "XML INCOMPLETO",
 };
 
-const TD: React.CSSProperties = { whiteSpace: "nowrap", padding: "5px 8px", fontSize: 12.5 };
-const TH: React.CSSProperties = { whiteSpace: "nowrap", padding: "6px 8px", fontSize: 12.5 };
+const TD: React.CSSProperties = { whiteSpace: "nowrap", padding: "5px 6px", fontSize: 12.5 };
+const TH: React.CSSProperties = { whiteSpace: "nowrap", padding: "6px 6px", fontSize: 12.5 };
 const CORTA = (w: number): React.CSSProperties => ({
   ...TD,
   maxWidth: w,
@@ -207,8 +207,8 @@ export default function ConferenciaMkpPage() {
                           )}
                           {l.referencia}
                         </td>
-                        <td style={CORTA(340)} title={l.descricao}>{l.descricao}</td>
-                        <td style={CORTA(140)} title={l.emitente}>{l.emitente}</td>
+                        <td style={CORTA(250)} title={l.descricao}>{l.descricao}</td>
+                        <td style={CORTA(110)} title={l.emitente}>{l.emitente}</td>
                         <td style={TD} title={`${l.nNotas} nota(s); última em ${l.data ?? "—"}`}>{l.nf}</td>
                         <td style={DIR}>{dinheiro(l.custoBruto)}</td>
                         <td style={DIR}>{dinheiro(l.custoTotal)}</td>
