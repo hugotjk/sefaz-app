@@ -16,8 +16,6 @@ export const TIPOS_DOC: TipoDoc[] = [
   { id: "ie", nome: "Inscrição estadual", curto: "IE", escopo: "CNPJ", obrigatorio: true },
   { id: "cert", nome: "Certificado digital", curto: "Certificado", escopo: "CNPJ", obrigatorio: true },
   { id: "alvara", nome: "Alvará", curto: "Alvará", escopo: "CNPJ", obrigatorio: true },
-  { id: "socio", nome: "Documento do sócio", curto: "Sócio", escopo: "EMPRESA", obrigatorio: true },
-  { id: "resid", nome: "Comprovante de residência", curto: "Residência", escopo: "EMPRESA", obrigatorio: true },
   { id: "foto", nome: "Fotos", curto: "Fotos", escopo: "LOJA", obrigatorio: false },
 ];
 
