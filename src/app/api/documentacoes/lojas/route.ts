@@ -10,7 +10,7 @@ export async function GET() {
   try {
     const [lojas, docs] = await Promise.all([
       prisma.lojaCadastro.findMany({ orderBy: [{ loja: "asc" }] }),
-      prisma.documentoLoja.findMany({ select: { escopo: true, chave: true, tipo: true, validade: true } }),
+      prisma.documentoLoja.findMany({ select: { id: true, nomeArquivo: true, escopo: true, chave: true, tipo: true, validade: true } }),
     ]);
     return NextResponse.json({
       lojas: lojas.map((l) => ({
@@ -27,6 +27,8 @@ export async function GET() {
         origem: l.origem,
       })),
       docs: docs.map((d) => ({
+        id: d.id,
+        nomeArquivo: d.nomeArquivo,
         escopo: d.escopo,
         chave: d.chave,
         tipo: d.tipo,

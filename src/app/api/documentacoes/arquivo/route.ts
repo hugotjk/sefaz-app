@@ -13,11 +13,12 @@ async function achar(req: Request) {
 export async function GET(req: Request) {
   const d = await achar(req);
   if (!d?.driveItemId) return NextResponse.json({ error: "Documento não encontrado." }, { status: 404 });
+  const inline = new URL(req.url).searchParams.get("ver") === "1";
   const buf = await b2Get(d.driveItemId);
   return new NextResponse(new Uint8Array(buf), {
     headers: {
       "Content-Type": contentTypePorNome(d.nomeArquivo),
-      "Content-Disposition": `attachment; filename*=UTF-8''${encodeURIComponent(d.nomeArquivo)}`,
+      "Content-Disposition": `${inline ? "inline" : "attachment"}; filename*=UTF-8''${encodeURIComponent(d.nomeArquivo)}`,
     },
   });
 }
