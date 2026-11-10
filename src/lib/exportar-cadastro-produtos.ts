@@ -11,6 +11,8 @@ import {
 import { tipoEGrupoLacoste } from "@/lib/lacoste-grupos";
 import { CORES_OAKLEY } from "@/lib/oakley-base";
 import { arred2, calcularPrecosModelo } from "@/lib/precos-modelo";
+import { dadosPuma } from "@/lib/puma-cadastro";
+import { ultimoNome } from "@/lib/identificar-produto";
 
 /**
  * Exporta, no padrão do "Guia do Usuário — Importação de Produtos WQS", os
@@ -471,7 +473,9 @@ export async function gerarCadastroXlsx(
     const tamBrutoOk =
       tamBruto && norm(it.modelo) === "LACOSTE" && !tamanhoPlausivel(tamBruto) ? null : tamBruto;
     const tam = tamBrutoOk ? canonicalizarTamanho(tamBrutoOk) : null;
-    const desc = descricaoSemTamanho(it.descricao, tamBruto);
+    // PUMA: o tamanho do PDV (GG) não é o texto da nota (XL): tira a última palavra da descrição.
+    const tamNaDescricao = norm(it.modelo) === "PUMA" && tamBrutoOk ? ultimoNome(it.descricao) : tamBruto;
+    const desc = descricaoSemTamanho(it.descricao, tamNaDescricao);
     const chave = JSON.stringify([it.modelo, it.referencia, desc]);
     const l = grupos.get(chave) ?? [];
     l.push({ ...it, tam, tamBruto: tamBrutoOk });
@@ -594,6 +598,12 @@ export async function gerarCadastroXlsx(
       cor = nb.cor;
       if (grupo === "TENIS" || grupo === "CHINELO") colecao = "PERMANENTE";
     }
+    if (modeloU === "PUMA") {
+      // Grupo/Linha/Colecao ficam em branco (amarelo). Tênis: nome do modelo entra na descrição.
+      const pm = dadosPuma(maisRecente.descricao);
+      cor = pm.cor;
+      nomeProd = pm.calcado ? pm.nome : "";
+    }
     if (modeloU === "OAKLEY") {
       if (/\bTEE$/.test(norm(descricao))) grupo = "TSHIRT";
       linha = "MASCULINA";
@@ -614,7 +624,7 @@ export async function gerarCadastroXlsx(
     // ---- grade / unidade / tipo ------------------------------------------------
     const ehCalcado = grupo
       ? ["TENIS", "TENIS INF", "CHINELO"].includes(grupo)
-      : temPalavra(texto, ["TENIS", "CHINELO", "SANDALIA", "SLIDE", "CHUTEIRA"]);
+      : temPalavra(texto, ["TENIS", "CHINELO", "SANDALIA", "SLIDE", "CHUTEIRA", "CALCADOS", "CALCADO"]);
     const grade = ehCalcado ? "TENIS" : "PMG";
     const det = detalhes.get(maisRecente.id);
     // Unidade: calçado = PAR; roupa = PC; senão a da nota; sem unidade na nota = PC.
