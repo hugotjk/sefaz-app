@@ -6,7 +6,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
-// Body: { chaves: string[], emitente?, dataInicial?, dataFinal? } — mesmas chaves e filtros da tela.
+// Body: { chaves: string[], emitente?, modelo?, dataInicial?, dataFinal? } — mesmas chaves e filtros da tela.
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json().catch(() => ({}));
@@ -14,7 +14,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Nenhuma referência selecionada." }, { status: 400 });
     }
     const sp = new URLSearchParams();
-    for (const k of ["emitente", "dataInicial", "dataFinal"]) if (body?.[k]) sp.set(k, String(body[k]));
+    for (const k of ["emitente", "modelo", "dataInicial", "dataFinal"]) if (body?.[k]) sp.set(k, String(body[k]));
     const { buffer, resumo } = await gerarAlteracaoPrecoXlsx(body.chaves, parseFiltrosConferenciaMkp(sp));
     const nome = nomeArquivoAlteracao();
     return new Response(new Uint8Array(buffer), {

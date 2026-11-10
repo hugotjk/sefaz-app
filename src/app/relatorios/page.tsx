@@ -40,13 +40,6 @@ const RELATORIOS: CardRelatorio[] = [
     etiqueta: "Notas Fiscais",
   },
   {
-    href: "/relatorios/alteracao-preco",
-    titulo: "Alteração de Preço",
-    descricao:
-      "Produtos já cadastrados na MULTI com preço a corrigir: marque o modelo ou as referências e baixe a planilha de alteração de cadastro.",
-    etiqueta: "Produtos",
-  },
-  {
     href: "/relatorios/conferencia-mkp",
     titulo: "Conferência de MKP",
     descricao:
