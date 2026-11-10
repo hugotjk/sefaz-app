@@ -10,7 +10,7 @@ import {
 } from "@/lib/identificar-tamanho";
 import { tipoEGrupoLacoste } from "@/lib/lacoste-grupos";
 import { CORES_OAKLEY } from "@/lib/oakley-base";
-import { arred2, calcularPrecosModelo } from "@/lib/precos-modelo";
+import { arred2, calcularPrecosModelo, calcularPreco4 } from "@/lib/precos-modelo";
 import { dadosPuma } from "@/lib/puma-cadastro";
 import { ultimoNome } from "@/lib/identificar-produto";
 
@@ -659,15 +659,7 @@ export async function gerarCadastroXlsx(
       custoUn,
       custoTotUn,
     });
-    // Preco4: 0 para o que não é Flamengo/Fluminense. Fla/Flu: Preco3 + 10%
-    // (adidas Fla e Puma repetem o Preco3); em branco enquanto o Preco3 não existe.
-    const flaFlu = temPalavra(texto, ["FLAMENGO", "FLA", "CRF", "FLUMINENSE", "FLU"]);
-    let preco4: number | null = 0;
-    if (flaFlu) {
-      if (preco3 == null) preco4 = null;
-      else if (modeloU === "PUMA" || modeloU.includes("ADIDAS")) preco4 = preco3;
-      else preco4 = arred2(preco3 * 1.1);
-    }
+    const preco4 = calcularPreco4(modelo, texto, preco3);
 
     const ncm = soDigitos(maisRecente.ncm);
     const nova: any[] = [
