@@ -17,10 +17,7 @@ export function fim999(v: number) {
   return arred2(k * 10 + 9.99);
 }
 
-const MULT_FIXO: Record<string, number> = { HURLEY: 2.9, "RIP CURL": 2.4, "NEW BALANCE": 2.3, BRAZILINE: 2.35, "BETEL FLA": 2.4, "STARTER FLA": 2.4, COIMBRA: 2.5 };
-
-/** Multiplicadores usados só no cadastro (ainda não entram na Conferência de MKP). */
-const MULT_CADASTRO: Record<string, number> = { PUMA: 2.41 };
+const MULT_FIXO: Record<string, number> = { HURLEY: 2.9, "RIP CURL": 2.4, "NEW BALANCE": 2.3, BRAZILINE: 2.35, "BETEL FLA": 2.4, "STARTER FLA": 2.4, COIMBRA: 2.5, PUMA: 2.41 };
 
 /** Adidas e Adidas Fla: o preço certo é o RRP da base da Adidas (artigo = referência). */
 const ehAdidas = (m: string) => m === "ADIDAS" || m === "ADIDAS FLA";
@@ -106,7 +103,7 @@ export function calcularPrecosModelo(a: {
     const rrp = precoAdidas(a.referencia);
     if (rrp != null) preco3 = rrp;
   }
-  const mult = MULT_FIXO[modeloU] ?? MULT_CADASTRO[modeloU] ?? 0;
+  const mult = MULT_FIXO[modeloU] ?? 0;
   if (mult && preco2 != null) preco3 = fim999(preco2 * mult);
   return {
     preco1: preco1 == null ? null : arred2(preco1),
