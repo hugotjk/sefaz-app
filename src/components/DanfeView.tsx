@@ -195,7 +195,10 @@ export function DanfeView({ nfe }: { nfe: NFeParaExibir }) {
           {nfe.itens.map((item, i) => (
             <tr key={i}>
               <td>{item.codigo}</td>
-              <td style={{ textAlign: "left" }}>{item.descricao}</td>
+              <td style={{ textAlign: "left" }}>
+                {item.descricao}
+                {item.ean && <div style={{ fontSize: "0.85em", opacity: 0.65 }}>EAN {item.ean}</div>}
+              </td>
               <td>{item.ncm}</td>
               <td>{item.cst}</td>
               <td>{item.cfop}</td>
