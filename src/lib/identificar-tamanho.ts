@@ -13,6 +13,7 @@
  * do SES do Excel (a primeira que casa vale).
  */
 import { direita, esquerda, localizar, substituir, ultimoNome } from "./identificar-produto";
+import { tamanhoPuma } from "./puma-cadastro";
 
 export interface EntradaTamanho {
   emitente: string; // $A
@@ -194,10 +195,8 @@ const REGRAS: Regra[] = [
   },
   {
     quando: porModelo("PUMA"),
-    valor: (e) =>
-      cadeia(ult(e.descricao), [
-        ["S", "P"], ["Adult", "UN"], ["XXL", "2G"], ["XL", "GG"], ["OPFA", "UN"], ["L", "G"],
-      ]),
+    // XS->PP, S->P, M, L->G, XL->GG, 2XL->2G (tamanho é a última palavra); números (calçado) ficam como estão
+    valor: (e) => tamanhoPuma(ult(e.descricao)),
   },
 ];
 
