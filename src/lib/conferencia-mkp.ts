@@ -3,7 +3,7 @@ import { prisma } from "@/lib/db";
 import { EMPRESAS_BANIDAS } from "@/lib/identificar-produto";
 import { detalhesDoXml, type ItemBase } from "@/lib/exportar-cadastro-produtos";
 import { REDES_ATIVAS } from "@/lib/redes-ativas";
-import { arred2, calcularPrecosModelo, modeloTemRegraDePreco } from "@/lib/precos-modelo";
+import { arred2, calcularPrecosModelo, calcularPreco4, modeloTemRegraDePreco } from "@/lib/precos-modelo";
 
 export interface FiltrosConferenciaMkp {
   emitente: string;
@@ -27,6 +27,8 @@ export interface VariacaoMkp {
 export interface LinhaMkp {
   redeId: number | null;
   rede: string;
+  produtosPdv: { codigo: string; nome: string | null }[]; // produtos do PDV (um por cor): a Referência da planilha de alteração
+  preco4: number | null;
   variacoes: VariacaoMkp[];
   emPromocao: boolean;
   modelo: string;
@@ -150,14 +152,14 @@ export async function montarConferenciaMkp(f: FiltrosConferenciaMkp): Promise<Re
   const detalhes = itensBase.length ? await detalhesDoXml(itensBase) : new Map();
 
   // Produtos no PDV por (referência, modelo, rede) — o código só vale dentro da rede.
-  interface Prod { redeId: number; nome: string | null; primeiro: number; vars: VariacaoMkp[] }
+  interface Prod { prods: Map<string, string | null>; redeId: number; nome: string | null; primeiro: number; vars: VariacaoMkp[] }
   const refs = [...new Set(reps.map(({ r }) => up(r.referencia)))];
   const prodsPorChave = new Map<string, Map<number, Prod>>(); // "REF|MODELO" -> rede -> produto
   const nomesRede = new Map<number, string>();
   for (const x of await prisma.redeSync.findMany()) nomesRede.set(x.id, x.nome);
   if (refs.length) {
     const pr = await prisma.$queryRaw<any[]>(Prisma.sql`
-      SELECT UPPER(BTRIM(p."referenciaFornecedor")) AS ref, UPPER(BTRIM(p."modeloNome")) AS modelo,
+      SELECT p.id AS pid, UPPER(BTRIM(p."referenciaFornecedor")) AS ref, UPPER(BTRIM(p."modeloNome")) AS modelo,
              p."redeId" AS rede, p.nome AS nome, p."primeiroSyncEm" AS primeiro,
              v.id AS vid, v.tamanho, v.cor, pv.preco::float8 AS preco, pv."precoPromocional"::float8 AS promo
       FROM "Produto" p
@@ -171,8 +173,9 @@ export async function montarConferenciaMkp(f: FiltrosConferenciaMkp): Promise<Re
       const porRede = prodsPorChave.get(k) ?? new Map<number, Prod>();
       prodsPorChave.set(k, porRede);
       const t = new Date(x.primeiro).getTime();
-      const pd: Prod = porRede.get(x.rede) ?? { redeId: x.rede, nome: x.nome?.trim() ?? null, primeiro: t, vars: [] as VariacaoMkp[] };
+      const pd: Prod = porRede.get(x.rede) ?? { prods: new Map<string, string | null>(), redeId: x.rede, nome: x.nome?.trim() ?? null, primeiro: t, vars: [] as VariacaoMkp[] };
       pd.primeiro = Math.min(pd.primeiro, t);
+      pd.prods.set(String(x.pid).slice(String(x.pid).indexOf(":") + 1), x.nome?.trim() ?? null);
       if (x.vid) pd.vars.push({ codigo: x.vid, tamanho: x.tamanho, cor: x.cor, preco: x.preco == null ? null : arred2(x.preco), promo: x.promo ? arred2(x.promo) : null });
       porRede.set(x.rede, pd);
     }
@@ -229,6 +232,8 @@ export async function montarConferenciaMkp(f: FiltrosConferenciaMkp): Promise<Re
       linhas.push({
         redeId: pd?.redeId ?? null,
         rede: pd ? (nomesRede.get(pd.redeId) ?? `Rede ${pd.redeId}`) : "—",
+        produtosPdv: pd ? [...pd.prods.entries()].map(([codigo, nome]) => ({ codigo, nome })) : [],
+        preco4: calcularPreco4(r.modelo, `${r.descricao} ${pd?.nome ?? ""}`, p.preco3),
         variacoes: [...vars].sort((a, b) => (a.tamanho ?? "").localeCompare(b.tamanho ?? "", "pt-BR", { numeric: true }) || (a.cor ?? "").localeCompare(b.cor ?? "")),
         emPromocao,
         modelo: r.modelo,

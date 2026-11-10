@@ -1,12 +1,14 @@
 "use client";
 
-import { Fragment, useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 
 type Status = "OK" | "ERRO" | "PRECOS_DIVERGENTES" | "AGUARDANDO_PRECO" | "EM_PROMOCAO" | "SEM_PRECO_PDV" | "SEM_PRODUTO_PDV" | "SEM_XML";
 
 interface Variacao { codigo: string; tamanho: string | null; cor: string | null; preco: number | null; promo: number | null }
 
 interface Linha {
+  redeId: number | null;
+  produtosPdv: { codigo: string; nome: string | null }[];
   rede: string;
   variacoes: Variacao[];
   emPromocao: boolean;
@@ -79,6 +81,11 @@ export default function ConferenciaMkpPage() {
   const [dados, setDados] = useState<Resposta | null>(null);
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState<string | null>(null);
+  // Modelos abertos (por padrão todos fechados) e referências marcadas para a planilha de alteração.
+  const [modelosAbertos, setModelosAbertos] = useState<Set<string>>(new Set());
+  const [selecionados, setSelecionados] = useState<Set<string>>(new Set());
+  const [exportando, setExportando] = useState(false);
+  const [msgExport, setMsgExport] = useState<string | null>(null);
 
   const buscar = useCallback(async () => {
     setCarregando(true);
@@ -95,6 +102,7 @@ export default function ConferenciaMkpPage() {
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Erro ao carregar o relatório.");
       setDados(json as Resposta);
+      setModelosAbertos(new Set());
     } catch (e: any) {
       setErro(e.message);
     } finally {
@@ -106,6 +114,69 @@ export default function ConferenciaMkpPage() {
     buscar();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dataInicial, dataFinal, somenteAlerta]);
+
+  // Só dá para alterar preço de produto já cadastrado na MULTI (rede 2): é a rede das fórmulas da planilha.
+  const elegivel = (l: Linha) => l.redeId === 2 && l.produtosPdv.length > 0;
+  const chaveSel = (l: Linha) => JSON.stringify([l.modelo, l.referencia]);
+  const grupos = useMemo(() => {
+    const m = new Map<string, Linha[]>();
+    for (const l of dados?.linhas ?? []) {
+      const lista = m.get(l.modelo) ?? [];
+      lista.push(l);
+      m.set(l.modelo, lista);
+    }
+    return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0], "pt-BR"));
+  }, [dados]);
+  const todosAbertos = grupos.length > 0 && grupos.every(([m]) => modelosAbertos.has(m));
+
+  function alternarModelo(linhas: Linha[]) {
+    const el = linhas.filter(elegivel);
+    setSelecionados((prev) => {
+      const prox = new Set(prev);
+      const todos = el.every((l) => prox.has(chaveSel(l)));
+      for (const l of el) {
+        if (todos) prox.delete(chaveSel(l));
+        else prox.add(chaveSel(l));
+      }
+      return prox;
+    });
+  }
+
+  async function exportar() {
+    if (selecionados.size === 0 || exportando) return;
+    setExportando(true);
+    setMsgExport(null);
+    try {
+      const res = await fetch("/api/relatorios/alteracao-preco/exportar", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ chaves: [...selecionados], emitente: emitente.trim(), modelo: modelo.trim(), dataInicial, dataFinal }),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        throw new Error(j.error || "Erro ao gerar o arquivo.");
+      }
+      const nome = res.headers.get("X-Nome-Arquivo") || "ALTERACAO_PRECO.xlsx";
+      const r = JSON.parse(decodeURIComponent(res.headers.get("X-Resumo") || "{}"));
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = nome;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      const avisos: string[] = [];
+      if (r.semPreco3) avisos.push(`${r.semPreco3} referência(s) sem Preço 3 (célula amarela)`);
+      if (r.semCodigoPdv?.length) avisos.push(`${r.semCodigoPdv.length} fora da planilha (sem produto na MULTI)`);
+      setMsgExport(`${nome}: ${r.linhas ?? "?"} linha${r.linhas === 1 ? "" : "s"}` + (avisos.length ? ` · atenção: ${avisos.join("; ")}` : ""));
+    } catch (e: any) {
+      setMsgExport(`Erro: ${e.message}`);
+    } finally {
+      setExportando(false);
+    }
+  }
 
   return (
     <div>
@@ -166,6 +237,27 @@ export default function ConferenciaMkpPage() {
                 </span>
               )}
             </p>
+            {dados.linhas.length > 0 && (
+              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", margin: "0 0 10px" }}>
+                <span style={{ fontSize: 12, color: "var(--text-dim)" }}>
+                  {selecionados.size.toLocaleString("pt-BR")} referência{selecionados.size === 1 ? "" : "s"} marcada{selecionados.size === 1 ? "" : "s"} para alterar o preço (só produtos da MULTI)
+                </span>
+                {selecionados.size > 0 && (
+                  <button type="button" className="btn-secundario" style={{ width: "auto", padding: "5px 10px", fontSize: 12 }} onClick={() => setSelecionados(new Set())}>
+                    Limpar seleção
+                  </button>
+                )}
+                <button type="button" style={{ width: "auto", padding: "5px 12px", fontSize: 12 }} disabled={selecionados.size === 0 || exportando} onClick={exportar}
+                  title="Baixar a planilha de alteração de cadastro (Preço 1 a 4)">
+                  {exportando ? "Gerando…" : "⬇ Exportar planilha de alteração"}
+                </button>
+                <button type="button" className="btn-secundario" style={{ width: "auto", padding: "5px 10px", fontSize: 12 }}
+                  onClick={() => setModelosAbertos(todosAbertos ? new Set() : new Set(grupos.map(([m]) => m)))}>
+                  {todosAbertos ? "Recolher todos" : "Expandir todos"}
+                </button>
+                {msgExport && <span style={{ fontSize: 12, color: msgExport.startsWith("Erro") ? "var(--red)" : "var(--text-dim)" }}>{msgExport}</span>}
+              </div>
+            )}
             {dados.linhas.length === 0 ? (
               <p>Nenhum produto para mostrar neste filtro.</p>
             ) : (
@@ -173,6 +265,7 @@ export default function ConferenciaMkpPage() {
                 <table className="tabela" style={{ borderCollapse: "collapse", width: "100%" }}>
                   <thead>
                     <tr>
+                      <th style={TH}></th>
                       <th style={TH}>Alerta</th>
                       <th style={TH}>Rede</th>
                       <th style={TH}>Modelo</th>
@@ -189,12 +282,42 @@ export default function ConferenciaMkpPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {dados.linhas.map((l) => {
-                      const chave = l.rede + "|" + l.modelo + "|" + l.referencia;
-                      const aberta = abertas.has(chave);
+                    {grupos.map(([nomeModelo, linhasModelo]) => {
+                      const aberto = modelosAbertos.has(nomeModelo);
+                      const el = linhasModelo.filter(elegivel);
+                      const marcados = el.filter((l) => selecionados.has(chaveSel(l))).length;
+                      const alertas = linhasModelo.filter((l) => l.status !== "OK" && l.status !== "AGUARDANDO_PRECO" && l.status !== "SEM_XML").length;
                       return (
+                        <Fragment key={"m:" + nomeModelo}>
+                          <tr style={{ background: "rgba(127,127,127,.12)", cursor: "pointer" }}
+                            onClick={() => setModelosAbertos((p) => { const n = new Set(p); if (n.has(nomeModelo)) n.delete(nomeModelo); else n.add(nomeModelo); return n; })}>
+                            <td style={TD} onClick={(e) => e.stopPropagation()}>
+                              <input type="checkbox" disabled={el.length === 0} checked={el.length > 0 && marcados === el.length}
+                                ref={(x) => { if (x) x.indeterminate = marcados > 0 && marcados < el.length; }}
+                                title="Marcar/desmarcar todas as referências deste modelo (MULTI)"
+                                onChange={() => alternarModelo(linhasModelo)} />
+                            </td>
+                            <td style={{ ...TD, fontWeight: 700 }} colSpan={13}>
+                              {aberto ? "▼" : "▶"} {nomeModelo}
+                              <span style={{ fontWeight: 400, color: "var(--text-dim)", marginLeft: 10 }}>
+                                {linhasModelo.length} referência{linhasModelo.length === 1 ? "" : "s"}
+                                {alertas > 0 ? ` · ${alertas} com alerta` : ""}
+                                {marcados > 0 ? ` · ${marcados} marcada${marcados === 1 ? "" : "s"}` : ""}
+                              </span>
+                            </td>
+                          </tr>
+                          {aberto &&
+                            linhasModelo.map((l) => {
+                              const chave = l.rede + "|" + l.modelo + "|" + l.referencia;
+                              const aberta = abertas.has(chave);
+                              return (
                       <Fragment key={chave}>
                       <tr style={l.status === "ERRO" || l.status === "EM_PROMOCAO" || l.status === "PRECOS_DIVERGENTES" || l.status === "SEM_PRECO_PDV" || l.status === "SEM_PRODUTO_PDV" ? { background: "rgba(231,76,60,.10)" } : undefined}>
+                        <td style={TD}>
+                          <input type="checkbox" disabled={!elegivel(l)} checked={selecionados.has(chaveSel(l))}
+                            title={elegivel(l) ? "Marcar para a planilha de alteração" : "Só produtos já cadastrados na MULTI"}
+                            onChange={() => setSelecionados((p) => { const n = new Set(p); const k = chaveSel(l); if (n.has(k)) n.delete(k); else n.add(k); return n; })} />
+                        </td>
                         <td style={{ ...TD, fontWeight: 600 }}>{ROTULO[l.status]}</td>
                         <td style={TD}>{l.rede}</td>
                         <td style={TD}>{l.modelo}</td>
@@ -223,7 +346,7 @@ export default function ConferenciaMkpPage() {
                       </tr>
                       {aberta && (
                         <tr>
-                          <td colSpan={13} style={{ padding: "4px 8px 10px 40px", fontSize: 12 }}>
+                          <td colSpan={14} style={{ padding: "4px 8px 10px 40px", fontSize: 12 }}>
                             <table style={{ borderCollapse: "collapse" }}>
                               <thead><tr><th style={TH}>Código</th><th style={TH}>Tamanho</th><th style={TH}>Cor</th><th style={{ ...TH, textAlign: "right" }}>Preço</th><th style={{ ...TH, textAlign: "right" }}>Promoção</th></tr></thead>
                               <tbody>
@@ -240,6 +363,9 @@ export default function ConferenciaMkpPage() {
                         </tr>
                       )}
                       </Fragment>
+                              );
+                            })}
+                        </Fragment>
                       );
                     })}
                   </tbody>

@@ -112,3 +112,20 @@ export function calcularPrecosModelo(a: {
     multiplicador: mult || null,
   };
 }
+
+function temPalavra(texto: string, palavras: string[]): boolean {
+  const t = ` ${norm(texto).replace(/[^A-Z0-9]+/g, " ")} `;
+  return palavras.some((p) => t.includes(` ${p} `));
+}
+
+/**
+ * Preço 4: 0 para o que não é Flamengo/Fluminense. Fla/Flu: Preço 3 + 10%
+ * (Adidas e Puma repetem o Preço 3); em branco (null) enquanto o Preço 3 não existe.
+ */
+export function calcularPreco4(modelo: string | null | undefined, texto: string, preco3: number | null): number | null {
+  const modeloU = norm(modelo).trim();
+  if (!temPalavra(`${texto} ${modelo ?? ""}`, ["FLAMENGO", "FLA", "CRF", "FLUMINENSE", "FLU"])) return 0;
+  if (preco3 == null) return null;
+  if (modeloU === "PUMA" || modeloU.includes("ADIDAS")) return preco3;
+  return arred2(preco3 * 1.1);
+}
