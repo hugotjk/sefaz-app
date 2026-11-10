@@ -605,7 +605,7 @@ export async function gerarCadastroXlsx(
       nomeProd = pm.calcado ? pm.nome : "";
     }
     if (modeloU === "OAKLEY") {
-      if (/\bTEE$/.test(norm(descricao))) grupo = "TSHIRT";
+      if (/\bTEE\b/.test(norm(descricao))) grupo = "TSHIRT";
       linha = "MASCULINA";
       const cod = norm(referencia).replace(/\s+/g, "").slice(-3);
       cor = coresOak.get(cod) ?? "";
