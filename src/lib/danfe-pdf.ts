@@ -86,7 +86,9 @@ export async function gerarDanfePdf(nfe: NFeParaExibir): Promise<Buffer> {
     ...(nfe.itens.length
       ? nfe.itens.map((it) => [
           { text: it.codigo, style: "td" },
-          { text: it.descricao, style: "tdLeft" },
+          it.ean
+            ? { stack: [{ text: it.descricao, style: "tdLeft" }, { text: `EAN ${it.ean}`, style: "eanItem" }] }
+            : { text: it.descricao, style: "tdLeft" },
           { text: it.ncm, style: "td" },
           { text: it.cst, style: "td" },
           { text: it.cfop, style: "td" },
@@ -290,6 +292,7 @@ export async function gerarDanfePdf(nfe: NFeParaExibir): Promise<Buffer> {
       lbl: { fontSize: 6, color: "#555555", characterSpacing: 0.2 },
       val: { fontSize: 9 },
       secao: { fontSize: 7, bold: true, color: "#333333" },
+      eanItem: { fontSize: 6, color: "#666666", alignment: "left" },
       th: { fontSize: 6, bold: true, alignment: "center", color: "#333333" },
       td: { fontSize: 6, alignment: "center" },
       tdLeft: { fontSize: 6, alignment: "left" },
