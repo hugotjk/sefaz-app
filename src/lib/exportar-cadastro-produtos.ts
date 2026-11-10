@@ -400,6 +400,14 @@ function corUltimaPalavra(desc: string): string {
   return PREFIXO_COR.has(ant) ? `${ant} ${u}` : u;
 }
 
+/** Hurley: nome do grupo no cadastro (1ª palavra da descrição -> grupo). */
+const GRUPO_HURLEY: Record<string, string> = {
+  BONE: "BONE ABA CURVA",
+  SHORTS: "SHORT",
+  BOARDSHORTS: "BOARDSHORT",
+  BEACHSIDE: "WALKBOARD",
+};
+
 /** Hurley / Rip Curl: Linha pelos tamanhos (P-GG e 36-48 = masculina; 8-16 ou JUV/INF = infanto). */
 function linhaPorTamanhos(desc: string, tams: (string | null)[]): string {
   if (/\b(JUV|JUVENIL|INF|INFANTIL|KIDS?)\b/.test(norm(desc))) return "INFANTO";
@@ -589,6 +597,7 @@ export async function gerarCadastroXlsx(
     const ehHurleyRC = modeloU === "HURLEY" || modeloU === "RIP CURL";
     if (ehHurleyRC) {
       grupo = primeiraPalavraGrupo(descricao);
+      if (modeloU === "HURLEY") grupo = GRUPO_HURLEY[grupo] ?? grupo;
       cor = corUltimaPalavra(descricao);
       linha = linhaPorTamanhos(descricao, lista.map((i) => i.tam));
     } else if (modeloU === "NEW BALANCE") {
