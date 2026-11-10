@@ -84,6 +84,99 @@ async function chamarReceived(query: string, caminho = "/v1/nfe/received"): Prom
   return { notas, proximoCursor, count: Number(json.count ?? notas.length) };
 }
 
+// ---------------------------------------------------------------------------
+// API v2 (POST /v2/dfe/nfe) — filtra por CNPJ do destinatário e por data de EMISSÃO.
+// Enxerga as notas de todos os CNPJs da conta (o GET v1 exige tags e deixa lojas novas de fora).
+// O XML vem no campo "Xml" (nfeProc completo, texto).
+// ---------------------------------------------------------------------------
+const dormirMs = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+async function chamarV2(corpo: unknown): Promise<any> {
+  const { id, key } = credenciais();
+  let ultimo = "";
+  for (let t = 1; t <= 4; t++) {
+    try {
+      const res = await fetch(`${QIVE_BASE}/v2/dfe/nfe`, {
+        method: "POST",
+        headers: {
+          "X-API-ID": id,
+          "X-API-KEY": key,
+          "X-Use-ApiGateway": "always",
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify(corpo),
+        signal: AbortSignal.timeout(60_000),
+      });
+      const txt = await res.text();
+      if (res.status === 429 || res.status >= 500) {
+        ultimo = `HTTP ${res.status}`;
+        await dormirMs(2000 * t);
+        continue;
+      }
+      if (!res.ok) throw new Error(`Qive v2 HTTP ${res.status}: ${txt.slice(0, 200)}`);
+      return JSON.parse(txt);
+    } catch (e: any) {
+      if (String(e?.message).startsWith("Qive v2 HTTP")) throw e;
+      ultimo = String(e?.message ?? e);
+      await dormirMs(2000 * t);
+    }
+  }
+  throw new Error(`Qive v2 sem resposta: ${ultimo}`);
+}
+
+const filtroV2 = (cnpj: string, de: string, ate: string) => ({
+  Owners: [cnpj],
+  OwnerRoles: ["received"],
+  EmissionDate: { From: `${de}T00:00:00Z`, To: `${ate}T23:59:59Z` },
+});
+
+/** Lista chave + data de emissão das notas recebidas de um CNPJ (sem o XML: leve). */
+export async function listarChavesV2(
+  cnpj: string,
+  de: string,
+  ate: string
+): Promise<{ chave: string; emissao: string }[]> {
+  const out: { chave: string; emissao: string }[] = [];
+  let paginator = "";
+  for (let pag = 0; pag < 100; pag++) {
+    const corpo: any = { Fields: ["AccessKey", "EmissionDate"], Filters: filtroV2(cnpj, de, ate), Limit: 500 };
+    if (paginator) corpo.Paginator = paginator;
+    const j = await chamarV2(corpo);
+    const lista: any[] = Array.isArray(j.Nfes) ? j.Nfes : [];
+    for (const n of lista) if (n.AccessKey) out.push({ chave: String(n.AccessKey), emissao: String(n.EmissionDate ?? "") });
+    const prox = String(j.Paginator ?? "");
+    if (lista.length < 500 || !prox || prox === paginator) break;
+    paginator = prox;
+    await dormirMs(150);
+  }
+  return out;
+}
+
+/** Baixa as notas (com XML) de um CNPJ numa janela de emissão. XML devolvido em Base64 (formato do importador). */
+export async function buscarNfesV2(cnpj: string, de: string, ate: string): Promise<QiveNfe[]> {
+  const out: QiveNfe[] = [];
+  let paginator = "";
+  for (let pag = 0; pag < 200; pag++) {
+    const corpo: any = { Fields: ["AccessKey", "Xml"], Filters: filtroV2(cnpj, de, ate), Limit: 50 };
+    if (paginator) corpo.Paginator = paginator;
+    const j = await chamarV2(corpo);
+    const lista: any[] = Array.isArray(j.Nfes) ? j.Nfes : [];
+    for (const n of lista) {
+      if (!n.AccessKey || !n.Xml) continue;
+      const bruto = String(n.Xml);
+      // a v2 entrega o XML como texto; se vier em Base64, mantém.
+      const b64 = bruto.trimStart().startsWith("<") ? Buffer.from(bruto, "utf8").toString("base64") : bruto;
+      out.push({ access_key: String(n.AccessKey), xml: b64 });
+    }
+    const prox = String(j.Paginator ?? "");
+    if (lista.length < 50 || !prox || prox === paginator) break;
+    paginator = prox;
+    await dormirMs(150);
+  }
+  return out;
+}
+
 /** Busca uma página de NF-e RECEBIDAS a partir de um cursor posicional. */
 export async function buscarNfesRecebidas(
   cursor: number,

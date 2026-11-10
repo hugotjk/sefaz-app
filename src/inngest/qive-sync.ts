@@ -3,9 +3,9 @@
  * principal de notas).
  *
  *  qiveSync      cron 6h–20h (America/Sao_Paulo), de hora em hora:
- *                  1. notas novas  (cursor posicional numa janela created_at
- *                     fixa que começa em `base` e vai até 2100 -> o cursor só
- *                     anda pra frente e "segue" as notas novas);
+ *                  1. notas novas via API v2 (POST /v2/dfe/nfe) por CNPJ: lista as
+ *                     chaves, compara com o banco e baixa o XML só das que faltam
+ *                     (1ª vez 90 dias; depois 10 dias);
  *                  2. eventos      (cancelamento, carta de correção...) da fila
  *                     /v1/events/nfe, aplicados às notas que já temos.
  *  qiveBackfill  cron 6h–20h: carrega o passado em 3 janelas (0-30, 30-60,
@@ -18,26 +18,31 @@
 import { inngest } from "@/lib/inngest";
 import { prisma } from "@/lib/db";
 import {
-  buscarNfesRecebidasPorJanela,
+  listarChavesV2,
+  buscarNfesV2,
   buscarEventosNfe,
   aplicarEventosQive,
   importarLoteQive,
-  QIVE_LIMIT_PAGINA,
 } from "@/lib/qive";
 
 // Mude aqui pra 2 em 2 horas: "TZ=America/Sao_Paulo 0 6-20/2 * * *"
 const CRON_QIVE = "TZ=America/Sao_Paulo 0 6-20 * * *";
 const DIAS_RETENCAO = 90;
-const PAGINAS_NOTAS_POR_EXECUCAO = 8; // 8 * 50 = 400 notas
 const PAGINAS_EVENTOS_POR_EXECUCAO = 8;
-const PAGINAS_BACKFILL_POR_EXECUCAO = 8;
 const CHAVE = "qive-sync:estado";
+const CHAVE_V2 = "qive-sync:v2";
+const DIAS_JANELA_V2 = 10;
 const CHAVE_REDUNDANCIA = "qive-sync:certificados-redundantes";
 
 interface JanelaPendente {
   desde: string;
   ate: string;
   cursor: number;
+}
+
+interface EstadoV2 {
+  /** quando a 1ª carga completa (90 dias) terminou sem falha. */
+  completoEm: string | null;
 }
 
 interface EstadoQive {
@@ -90,6 +95,19 @@ async function bancoCheio(): Promise<{ cheio: boolean; mb: number }> {
   return { cheio: mb > LIMITE_BANCO_MB, mb };
 }
 
+/** CNPJs de destinatário a consultar: lojas ativas + certificados + destinatários já vistos nas notas. */
+async function cnpjsDaConta(): Promise<string[]> {
+  const lojas = await prisma.lojaCadastro.findMany({ where: { ativa: true }, select: { cnpj: true } });
+  const certs = await prisma.certificate.findMany({ select: { cnpj: true } });
+  const notas = await prisma.$queryRaw<{ c: string }[]>`SELECT DISTINCT "cnpjDestino" AS c FROM "Note" WHERE "cnpjDestino" IS NOT NULL`;
+  const set = new Set<string>();
+  for (const x of [...lojas.map((l) => l.cnpj), ...certs.map((c) => c.cnpj), ...notas.map((n) => n.c)]) {
+    const d = String(x ?? "").replace(/\D/g, "");
+    if (d.length === 14) set.add(d);
+  }
+  return [...set];
+}
+
 async function lerEstado(): Promise<EstadoQive> {
   const e = await ler<EstadoQive | null>(CHAVE, null);
   if (e) return e;
@@ -124,45 +142,59 @@ export const qiveSync = inngest.createFunction(
     const estado = await step.run("ler-estado", lerEstado);
     await step.run("garantir-estado", () => gravar(CHAVE, estado));
 
-    // 1) notas novas ---------------------------------------------------------
-    // Janela curta [ontem da última varredura OK, amanhã], cursor 0 e pagina
-    // até acabar. Notas já existentes são puladas (idempotente). Se estourar o
-    // limite de páginas, a MESMA janela continua na próxima execução.
-    if (!estado.pendente) {
-      const desde = estado.ultimaVarreduraOk
-        ? dia(new Date(new Date(estado.ultimaVarreduraOk).getTime() - 86_400_000))
-        : estado.base;
-      estado.pendente = { desde, ate: amanha(), cursor: 0 };
-    }
+    // 1) notas novas (API v2, por CNPJ) --------------------------------------
+    // 1ª execução: 90 dias de emissão. Depois: últimos 10 dias (pega nota que chega atrasada).
+    // Por CNPJ: lista só as chaves, compara com o banco e baixa o XML apenas das que faltam.
+    const v2 = await step.run("ler-estado-v2", () => ler<EstadoV2>(CHAVE_V2, { completoEm: null }));
+    const dias = v2.completoEm ? DIAS_JANELA_V2 : DIAS_RETENCAO;
+    const hoje = dia(new Date());
+    const de = menosDias(hoje, dias - 1);
+    const cnpjs = await step.run("cnpjs-da-conta", cnpjsDaConta);
     let importadas = 0;
     let jaExistiam = 0;
-    let terminou = false;
-    for (let i = 0; i < PAGINAS_NOTAS_POR_EXECUCAO && !terminou; i++) {
-      const janela = estado.pendente!;
-      const r = await step.run(`notas-${janela.desde}-${janela.cursor}`, async () => {
-        const pag = await buscarNfesRecebidasPorJanela(janela.desde, janela.ate, janela.cursor, QIVE_LIMIT_PAGINA);
-        const res = await importarLoteQive(pag.notas);
-        await registrarRedundancia(res.redundantesPorCertificado);
-        return { ...res, proximoCursor: pag.proximoCursor };
+    let erros = 0;
+    const falhas: string[] = [];
+    for (const cnpj of cnpjs) {
+      const r = await step.run(`v2-${cnpj}`, async () => {
+        try {
+          const lista = await listarChavesV2(cnpj, de, hoje);
+          if (lista.length === 0) return { imp: 0, ja: 0, err: 0, falha: false };
+          const chaves = lista.map((x) => x.chave);
+          const tem = new Set(
+            (await prisma.note.findMany({ where: { chaveAcesso: { in: chaves } }, select: { chaveAcesso: true } })).map(
+              (n) => n.chaveAcesso
+            )
+          );
+          const faltam = lista.filter((x) => !tem.has(x.chave));
+          if (faltam.length === 0) return { imp: 0, ja: lista.length, err: 0, falha: false };
+          const datas = faltam.map((x) => x.emissao.slice(0, 10)).filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d)).sort();
+          // janela mínima que cobre as faltantes (±1 dia por causa de fuso)
+          const d1 = datas.length ? menosDias(datas[0], 1) : de;
+          const d2 = datas.length ? menosDias(datas[datas.length - 1], -1) : hoje;
+          const notas = await buscarNfesV2(cnpj, d1 < de ? de : d1, d2 > hoje ? hoje : d2);
+          const falt = new Set(faltam.map((x) => x.chave));
+          const res = await importarLoteQive(notas.filter((n) => falt.has(n.access_key)));
+          await registrarRedundancia(res.redundantesPorCertificado);
+          return { imp: res.importadas, ja: lista.length - faltam.length + res.jaExistiam, err: res.erros, falha: false };
+        } catch {
+          return { imp: 0, ja: 0, err: 1, falha: true };
+        }
       });
-      importadas += r.importadas;
-      jaExistiam += r.jaExistiam;
-      estado.totais.erros += r.erros;
-      if (r.recebidas === 0 || r.proximoCursor == null || r.proximoCursor === janela.cursor) {
-        terminou = true;
-      } else {
-        janela.cursor = r.proximoCursor;
-        await step.run(`salvar-notas-${janela.cursor}`, () => gravar(CHAVE, estado));
-      }
+      importadas += r.imp;
+      jaExistiam += r.ja;
+      erros += r.err;
+      if (r.falha) falhas.push(cnpj);
     }
+    estado.totais.erros += erros;
+    const terminou = falhas.length === 0;
     if (terminou) {
-      estado.pendente = null;
+      await step.run("salvar-v2", () => gravar(CHAVE_V2, { completoEm: new Date().toISOString() } satisfies EstadoV2));
       estado.ultimaVarreduraOk = new Date().toISOString();
     }
 
     // 2) eventos (só depois do backfill de notas) ---------------------------
     let eventosAplicados = 0;
-    if (estado.backfillFase >= 3) {
+    {
       // 1ª vez: 90 dias inteiros (poucos eventos). Depois: janela curta.
       const desde = estado.eventosBackfillFeito
         ? dia(new Date(Date.now() - 2 * 86_400_000))
@@ -200,52 +232,17 @@ export const qiveSync = inngest.createFunction(
       await gravar(CHAVE, atual);
     });
 
-    return { importadas, jaExistiam, eventosAplicados, backfillFase: estado.backfillFase, terminou };
+    return { importadas, jaExistiam, eventosAplicados, cnpjs: cnpjs.length, janelaDias: dias, falhas, terminou };
   }
 );
 
 // ---------------------------------------------------------------------------
 export const qiveBackfill = inngest.createFunction(
-  { id: "qive-backfill-90d", concurrency: [{ limit: 1 }], retries: 2 },
+  { id: "qive-backfill-90d", concurrency: [{ limit: 1 }], retries: 0 },
   { cron: CRON_QIVE },
-  async ({ step }) => {
-    const estado = await step.run("ler-estado", lerEstado);
-    if (estado.backfillFase >= 3) return { concluido: true };
-    const trava = await step.run("checar-tamanho-banco", bancoCheio);
-    if (trava.cheio) return { pausado: true, motivo: `banco com ${trava.mb} MB (limite ${LIMITE_BANCO_MB})` };
-
-    let importadas = 0;
-    let paginas = 0;
-    while (paginas < PAGINAS_BACKFILL_POR_EXECUCAO && estado.backfillFase < 3) {
-      const fase = estado.backfillFase;
-      // fase 0: [base-30, base]   fase 1: [base-60, base-30]   fase 2: [base-90, base-60]
-      const ate = menosDias(estado.base, fase * 30);
-      const desde = menosDias(estado.base, (fase + 1) * 30);
-      const r = await step.run(`fase-${fase}-pag-${estado.backfillCursor}`, async () => {
-        const pag = await buscarNfesRecebidasPorJanela(desde, ate, estado.backfillCursor, QIVE_LIMIT_PAGINA);
-        const res = await importarLoteQive(pag.notas);
-        await registrarRedundancia(res.redundantesPorCertificado);
-        return { ...res, proximoCursor: pag.proximoCursor };
-      });
-      importadas += r.importadas;
-      estado.totais.erros += r.erros;
-      paginas++;
-      if (r.recebidas === 0 || r.proximoCursor == null || r.proximoCursor === estado.backfillCursor) {
-        estado.backfillFase++; // janela esgotada -> próxima
-        estado.backfillCursor = 0;
-      } else {
-        estado.backfillCursor = r.proximoCursor;
-      }
-      // grava só campos do backfill pra não pisar no cursor de notas do qiveSync
-      await step.run(`salvar-fase-${estado.backfillFase}-${estado.backfillCursor}`, async () => {
-        const atual = await lerEstado();
-        atual.backfillFase = estado.backfillFase;
-        atual.backfillCursor = estado.backfillCursor;
-        atual.totais.importadas += r.importadas;
-        await gravar(CHAVE, atual);
-      });
-    }
-    return { importadas, backfillFase: estado.backfillFase, concluido: estado.backfillFase >= 3 };
+  async () => {
+    // Substituído pela carga de 90 dias do qiveSync (API v2). Mantido só para não mexer no registro das funções.
+    return { concluido: true, motivo: "backfill agora é feito pelo qiveSync (v2)" };
   }
 );
 
