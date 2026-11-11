@@ -19,7 +19,7 @@ const ALVO = "DBB DISTRIBUIDORA DE PRODUTOS DE BELEZA LTDA";
 
 async function main() {
   const itens = await prisma.notaItem.findMany({
-    where: { note: { emitenteNome: ALVO } },
+    where: { note: { OR: [{ emitenteNome: { startsWith: "DEVANLAY" } }, { emitenteNome: ALVO }] } },
     select: {
       id: true,
       noteId: true,
@@ -33,7 +33,7 @@ async function main() {
       note: { select: { emitenteNome: true, xmlCompleto: true } },
     },
   });
-  console.log(`NotaItem de ${ALVO}: ${itens.length}\n`);
+  console.log(`NotaItem de Lacoste (Devanlay + DBB): ${itens.length}\n`);
 
   const infCplPorNota = new Map<string, string>();
   const infCpl = (noteId: string, xml: string): string => {

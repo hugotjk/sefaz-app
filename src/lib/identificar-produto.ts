@@ -990,7 +990,7 @@ function referenciaFormula3(A: string, G: string, H: string, P: string, Q: strin
 }
 
 /**
- * Lacoste (DBB Distribuidora) — CALÇADOS: o código da nota é PRODUTO + COR(3) + TAMANHO e a descrição
+ * Lacoste (Devanlay e DBB) — CALÇADOS: o código da nota é PRODUTO + COR(3) + TAMANHO e a descrição
  * termina com o PRODUTO. Referência no sistema = PRODUTO.COR (o tamanho não entra: vem do LACOSTE.BIN).
  *   46CFA0028BR1Y53 / "... 46CFA0028BR" -> 46CFA0028BR.1Y5
  *   51SUC000521G1,5 / "... 51SUC0005"   -> 51SUC0005.21G
@@ -999,7 +999,8 @@ function referenciaFormula3(A: string, G: string, H: string, P: string, Q: strin
 function referenciaLacoste(G: string, H: string): string | null {
   const prod = H.trim().split(/\s+/).pop()?.toUpperCase() ?? "";
   const cod = G.trim().toUpperCase();
-  if (prod.length < 6 || cod.includes(".") || !cod.startsWith(prod)) return null;
+  // produto de calçado tem 8+ caracteres (roupa tem 6 e já é tratada pela regra do hífen/6+3)
+  if (prod.length < 8 || cod.includes(".") || cod.includes("-") || !cod.startsWith(prod)) return null;
   const cor = cod.slice(prod.length, prod.length + 3);
   if (cor.length < 3) return null;
   return `${prod}.${cor}`;
@@ -1018,7 +1019,12 @@ export function identificarReferenciaFornecedor(
   const P = s(informacoesComplementares);
   const Q = s(infAdProd ?? ""); // det/infAdProd — info adicional DO ITEM (não da nota)
 
-  if (igual(A, "DBB DISTRIBUIDORA DE PRODUTOS DE BELEZA LTDA")) {
+  if (
+    igual(A, "DBB DISTRIBUIDORA DE PRODUTOS DE BELEZA LTDA") ||
+    igual(A, "DEVANLAY VENTURES DO BRASIL COMERCIO, IMPORTACAO, EXPORTACAO") ||
+    igual(A, "DEVANLAY VENTURES DO BRASIL COM. IMP. EXP. E PART. LTDA") ||
+    igual(A, "DEVANLAY VENTURES DO BRASIL COM IMP EXP E PART LTDA")
+  ) {
     const v = referenciaLacoste(G, H);
     if (v) return { valor: v, comRegraEspecifica: true };
   }
