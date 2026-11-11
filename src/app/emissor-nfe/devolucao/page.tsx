@@ -10,6 +10,7 @@ interface Analise {
   loja: { cnpj: string; razaoSocial: string; crt: number; serie: number | null; proximoNumero: number };
   contadorPadrao: string;
   infCplModelo: string;
+  producaoLiberada?: boolean;
 }
 interface Destinatario { cnpj: string; nome: string; ie: string; municipio: string; uf: string }
 interface Emissao { id: string; numero: number; serie: number; status: string; cStat: string | null; xMotivo: string | null; ambiente: number }
@@ -55,23 +56,32 @@ export default function DevolucaoPage() {
     await analisar(arquivo);
   }
 
-  async function testarConexao() {
+  async function testarConexao(prod = false) {
     if (!arquivo) return;
     setCarregando(true); setErro(null); setTeste(null);
     const fd = new FormData();
-    fd.set("acao", "testar"); fd.set("xml", arquivo);
+    fd.set("acao", "testar"); fd.set("xml", arquivo); fd.set("ambiente", prod ? "1" : "2");
     const res = await fetch("/api/emissor/devolucao", { method: "POST", body: fd });
     const data = await res.json();
     setCarregando(false);
     if (!res.ok) { setErro(data.error ?? "Erro."); return; }
-    setTeste(`SEFAZ (homologação): ${data.cStat} — ${data.xMotivo}`);
+    setTeste(`SEFAZ (${prod ? "PRODUÇÃO" : "homologação"}): ${data.cStat} — ${data.xMotivo}`);
   }
 
-  async function enviar() {
-    if (!arquivo) return;
+  async function enviar(prod = false) {
+    if (!arquivo || !analise) return;
+    if (prod) {
+      const valor = analise.original.itens
+        .reduce((t, it) => t + Math.round(Number(qtds[it.nItem] || 0) * Number(it.vUnCom) * 100) / 100, 0)
+        .toLocaleString("pt-BR", { minimumFractionDigits: 2 });
+      const ok = window.confirm(
+        `EMITIR NF-e REAL (com valor fiscal)?\n\nLoja: ${analise.loja.razaoSocial}\nSérie ${analise.loja.serie}, nº ${analise.loja.proximoNumero}\nReferente à NF ${analise.original.numero} da ${analise.original.emitente.nome}\n${selecao.length} item(ns), valor aproximado R$ ${valor}\nCase: ${caso}\n\nSó pode ser desfeita por cancelamento (normalmente até 24 h).`
+      );
+      if (!ok) return;
+    }
     setCarregando(true); setErro(null); setEmissao(null);
     const fd = new FormData();
-    fd.set("acao", "enviar"); fd.set("xml", arquivo); fd.set("ambiente", "2");
+    fd.set("acao", "enviar"); fd.set("xml", arquivo); fd.set("ambiente", prod ? "1" : "2");
     fd.set("selecao", JSON.stringify(selecao)); fd.set("infCpl", infFinal); fd.set("caso", caso);
     fd.set("contador", contador ? "1" : "0");
     const res = await fetch("/api/emissor/devolucao", { method: "POST", body: fd });
@@ -214,12 +224,22 @@ export default function DevolucaoPage() {
           <button className="btn" disabled={!pronto || carregando} onClick={gerar}>
             {carregando ? "Gerando..." : "Gerar prévia do XML"}
           </button>
-          <button className="btn" style={{ marginLeft: 8 }} disabled={!pronto || carregando} onClick={enviar}>
+          <button className="btn" style={{ marginLeft: 8 }} disabled={!pronto || carregando} onClick={() => enviar(false)}>
             {carregando ? "Aguarde..." : "Enviar à SEFAZ (homologação)"}
           </button>
-          <button className="btn-secundario" style={{ marginLeft: 8 }} disabled={carregando} onClick={testarConexao}>
+          <button className="btn-secundario" style={{ marginLeft: 8 }} disabled={carregando} onClick={() => testarConexao(false)}>
             Testar conexão
           </button>
+          {analise.producaoLiberada && (
+            <>
+              <button className="btn" style={{ marginLeft: 24, background: "#b91c1c" }} disabled={!pronto || carregando} onClick={() => enviar(true)}>
+                Emitir em PRODUÇÃO
+              </button>
+              <button className="btn-secundario" style={{ marginLeft: 8 }} disabled={carregando} onClick={() => testarConexao(true)}>
+                Testar conexão (produção)
+              </button>
+            </>
+          )}
           <span style={{ marginLeft: 12, fontSize: 13, color: "var(--text-dim)" }}>{selecao.length} item(ns) selecionado(s)</span>
           {teste && <p style={{ fontSize: 13 }}>{teste}</p>}
           {erro && <p className="status-erro" style={{ marginTop: 12 }}>{erro}</p>}
@@ -227,7 +247,7 @@ export default function DevolucaoPage() {
             <div className="card" style={{ marginTop: 16 }}>
               <p style={{ marginTop: 0 }} className={emissao.status === "AUTORIZADA" ? "status-ok" : "status-erro"}>
                 <b>{emissao.status === "AUTORIZADA" ? "Autorizada" : emissao.status === "REJEITADA" ? "Rejeitada" : emissao.status}</b>
-                {" "}(homologação — sem valor fiscal) · NF série {emissao.serie} nº {emissao.numero}
+                {" "}{emissao.ambiente === 2 ? "(homologação — sem valor fiscal)" : "(PRODUÇÃO)"} · NF série {emissao.serie} nº {emissao.numero}
               </p>
               <p style={{ fontSize: 14 }}>{emissao.cStat} — {emissao.xMotivo}</p>
               <a href="/emissor-nfe/notas">Ver em “Notas emitidas”</a>
