@@ -115,24 +115,26 @@ export default function NotasEmitidasPage() {
                 <td style={{ ...td, whiteSpace: "nowrap" }}>{e.notaOriginalNumero}<div style={{ fontSize: 10, color: "var(--text-dim)" }}>case {e.caso}</div></td>
                 <td style={{ ...td, whiteSpace: "nowrap" }}>{Number(e.vNF).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</td>
                 <td style={{ ...td, whiteSpace: "nowrap" }}>{new Date(e.createdAt).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}</td>
-                <td style={{ ...td, whiteSpace: "nowrap" }}>
-                  <a className="btn-secundario" style={{ ...bt, marginRight: 4, textDecoration: "none" }} href={`/api/emissor/emissoes/${e.id}?tipo=xml`}>XML</a>
-                  {e.status === "AUTORIZADA" && (
-                    <a className="btn-secundario" style={{ ...bt, marginRight: 4, textDecoration: "none" }} href={`/api/emissor/emissoes/${e.id}?tipo=danfe`} target="_blank">DANFE</a>
-                  )}
-                  {["INCERTA", "ASSINADA", "AUTORIZADA", "CANCELADA"].includes(e.status) && (
-                    <button className="btn-secundario" style={bt} disabled={ocupado === e.id} onClick={() => acao(e.id, "consultar")}>Consultar</button>
-                  )}
-                  {e.status === "CANCELADA" && (
-                    <a className="btn-secundario" style={{ ...bt, marginRight: 4, textDecoration: "none" }} href={`/api/emissor/emissoes/${e.id}?tipo=cancelamento`}>XML canc.</a>
-                  )}
-                  {e.status === "AUTORIZADA" && (
-                    <button className="btn-secundario" style={{ ...bt, marginLeft: 4 }} disabled={ocupado === e.id}
-                      onClick={() => { setCancelando(e); setJust(""); setErro(null); }}>Cancelar</button>
-                  )}
-                  {["REJEITADA", "INCERTA"].includes(e.status) && (
-                    <button className="btn-secundario" style={{ ...bt, marginLeft: 4 }} disabled={ocupado === e.id} onClick={() => acao(e.id, "reenviar")}>Reenviar</button>
-                  )}
+                <td style={td}>
+                  <div className="eb-acoes">
+                    {["REJEITADA", "INCERTA"].includes(e.status) && (
+                      <button className="eb eb-primario" disabled={ocupado === e.id} onClick={() => acao(e.id, "reenviar")}>Reenviar</button>
+                    )}
+                    {["INCERTA", "ASSINADA", "AUTORIZADA", "CANCELADA"].includes(e.status) && (
+                      <button className="eb" disabled={ocupado === e.id} onClick={() => acao(e.id, "consultar")}>Consultar</button>
+                    )}
+                    <a className="eb" href={`/api/emissor/emissoes/${e.id}?tipo=xml`}>XML</a>
+                    {e.status === "AUTORIZADA" && (
+                      <a className="eb" href={`/api/emissor/emissoes/${e.id}?tipo=danfe`} target="_blank">DANFE</a>
+                    )}
+                    {e.status === "CANCELADA" && (
+                      <a className="eb" href={`/api/emissor/emissoes/${e.id}?tipo=cancelamento`}>XML canc.</a>
+                    )}
+                    {e.status === "AUTORIZADA" && (
+                      <button className="eb eb-perigo" disabled={ocupado === e.id}
+                        onClick={() => { setCancelando(e); setJust(""); setErro(null); }}>Cancelar</button>
+                    )}
+                  </div>
                 </td>
               </tr>
             ))}
@@ -171,4 +173,3 @@ export default function NotasEmitidasPage() {
 
 const th: React.CSSProperties = { padding: "6px 8px", fontWeight: 600 };
 const td: React.CSSProperties = { padding: "5px 8px", verticalAlign: "middle" };
-const bt: React.CSSProperties = { padding: "2px 8px", fontSize: 11, lineHeight: 1.4 };
