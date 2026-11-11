@@ -782,3 +782,21 @@ h2 { font-size: 16px; margin: 0 0 12px; }
 .sidebar-link.ativo::before { display: none; }
 .sidebar-icon { font-size: 15px; width: 20px; text-align: center; }
 .sidebar-tooltip { display: none; }
+
+/* ---- Emissor de NFe: botões compactos e consistentes ---- */
+.eb {
+  display: inline-flex; align-items: center; justify-content: center;
+  height: 30px; padding: 0 12px; font-size: 13px; line-height: 1; white-space: nowrap;
+  border-radius: 7px; border: 1px solid var(--border); background: var(--panel-2); color: var(--text);
+  cursor: pointer; text-decoration: none; font-family: inherit;
+}
+.eb:hover:not(:disabled) { border-color: var(--accent); }
+.eb:disabled { opacity: .5; cursor: not-allowed; }
+.eb-primario { background: var(--accent); border-color: var(--accent); color: #fff; }
+.eb-perigo { background: transparent; border-color: #b91c1c; color: #b91c1c; }
+.eb-perigo:hover:not(:disabled) { background: #b91c1c; border-color: #b91c1c; color: #fff; }
+.eb-leve { background: transparent; border-color: transparent; color: var(--text-dim); }
+.eb-leve:hover:not(:disabled) { border-color: var(--border); color: var(--text); }
+.eb-grupo { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.eb-grupo .eb-sep { flex: 0 0 1px; align-self: stretch; background: var(--border); margin: 0 4px; }
+.eb-acoes { display: flex; align-items: center; justify-content: flex-end; gap: 4px; }

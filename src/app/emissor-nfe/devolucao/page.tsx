@@ -293,32 +293,30 @@ export default function DevolucaoPage() {
             </label>
           </div>
 
-          <button className="btn" disabled={!pronto || carregando} onClick={gerar}>
-            {carregando ? "Gerando..." : "Gerar prévia do XML"}
-          </button>
-          <button className="btn-secundario" style={{ marginLeft: 8 }} disabled={!analise || selecao.length === 0 || carregando} onClick={() => salvarRascunho(false)}>
-            Salvar rascunho
-          </button>
-          <button className="btn-secundario" style={{ marginLeft: 8 }} disabled={!pronto || carregando} onClick={previaDanfe}>
-            Ver prévia do DANFE (PDF)
-          </button>
-          <button className="btn" style={{ marginLeft: 8 }} disabled={!pronto || carregando} onClick={() => enviar(false)}>
-            {carregando ? "Aguarde..." : "Enviar à SEFAZ (homologação)"}
-          </button>
-          <button className="btn-secundario" style={{ marginLeft: 8 }} disabled={carregando} onClick={() => testarConexao(false)}>
-            Testar conexão
-          </button>
-          {analise.producaoLiberada && (
-            <>
-              <button className="btn" style={{ marginLeft: 24, background: "#b91c1c" }} disabled={!pronto || carregando} onClick={() => enviar(true)}>
-                Emitir em PRODUÇÃO
-              </button>
-              <button className="btn-secundario" style={{ marginLeft: 8 }} disabled={carregando} onClick={() => testarConexao(true)}>
-                Testar conexão (produção)
-              </button>
-            </>
-          )}
-          <span style={{ marginLeft: 12, fontSize: 13, color: "var(--text-dim)" }}>{selecao.length} item(ns) selecionado(s)</span>
+          <div className="eb-grupo">
+            <button className="eb" disabled={!pronto || carregando} onClick={gerar}>
+              {carregando ? "Gerando..." : "Prévia do XML"}
+            </button>
+            <button className="eb" disabled={!pronto || carregando} onClick={previaDanfe}>Prévia do DANFE (PDF)</button>
+            <button className="eb" disabled={!analise || selecao.length === 0 || carregando} onClick={() => salvarRascunho(false)}>
+              Salvar rascunho
+            </button>
+            <span className="eb-sep" />
+            <button className="eb eb-primario" disabled={!pronto || carregando} onClick={() => enviar(false)}>
+              {carregando ? "Aguarde..." : "Enviar (homologação)"}
+            </button>
+            <button className="eb eb-leve" disabled={carregando} onClick={() => testarConexao(false)}>Testar conexão</button>
+            {analise.producaoLiberada && (
+              <>
+                <span className="eb-sep" />
+                <button className="eb eb-perigo" disabled={!pronto || carregando} onClick={() => enviar(true)}>
+                  Emitir em PRODUÇÃO
+                </button>
+                <button className="eb eb-leve" disabled={carregando} onClick={() => testarConexao(true)}>Testar (produção)</button>
+              </>
+            )}
+            <span style={{ fontSize: 13, color: "var(--text-dim)" }}>{selecao.length} item(ns)</span>
+          </div>
           {teste && <p style={{ fontSize: 13 }}>{teste}</p>}
           {aviso && <p style={{ fontSize: 13 }}>{aviso}</p>}
           {erro && <p className="status-erro" style={{ marginTop: 12 }}>{erro}</p>}
