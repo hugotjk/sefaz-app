@@ -12,6 +12,10 @@ import path from "path";
 import tls from "tls";
 
 const HOSTS = ["nfe-homologacao.svrs.rs.gov.br", "nfe.svrs.rs.gov.br"];
+// Quando o servidor não manda a raiz e o certificado não traz URL AIA, usa o repositório oficial (SERPRO/ITI).
+const RAIZES_CONHECIDAS: Record<string, string> = {
+  "Autoridade Certificadora Raiz Brasileira v10": "https://repositorio.serpro.gov.br/docs/icpbrasilv10.crt",
+};
 const SAIDA = path.join(__dirname, "..", "src", "certs", "sefaz-cadeia.pem");
 
 const pem = (der: Buffer) =>
@@ -58,11 +62,13 @@ async function main() {
       if (autoassinado) break;
       if (c.issuerCertificate && c.issuerCertificate !== c) { c = c.issuerCertificate; continue; }
       // a cadeia veio incompleta: tenta a URL "CA Issuers" (AIA) do certificado
-      const url = /CA Issuers - URI:(\S+)/.exec(c.infoAccess ? [].concat(c.infoAccess as any).join("\n") : "")?.[1];
+      const url =
+        /CA Issuers - URI:(\S+)/.exec(c.infoAccess ? [].concat(c.infoAccess as any).join("\n") : "")?.[1] ??
+        RAIZES_CONHECIDAS[c.issuer?.CN];
       if (!url) { console.log("  (cadeia incompleta e sem URL AIA)"); break; }
       console.log("  baixando emissor em", url);
       const der = await baixar(url);
-      const x = new (require("crypto").X509Certificate)(der.length && der[0] === 0x30 ? der : Buffer.from(der.toString(), "utf8"));
+      const x = new (require("crypto").X509Certificate)(der);
       c = { fingerprint256: x.fingerprint256, subject: parse(x.subject), issuer: parse(x.issuer), valid_to: x.validTo, raw: x.raw, infoAccess: x.infoAccess };
     }
   }
