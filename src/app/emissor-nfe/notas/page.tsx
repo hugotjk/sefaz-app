@@ -9,7 +9,7 @@ interface Emissao {
 }
 
 const COR: Record<string, string> = {
-  AUTORIZADA: "#15803d", REJEITADA: "#dc2626", DENEGADA: "#dc2626", INCERTA: "#d97706", ASSINADA: "#d97706",
+  AUTORIZADA: "#15803d", CANCELADA: "#6b7280", REJEITADA: "#dc2626", DENEGADA: "#dc2626", INCERTA: "#d97706", ASSINADA: "#d97706",
 };
 
 export default function NotasEmitidasPage() {
@@ -17,6 +17,8 @@ export default function NotasEmitidasPage() {
   const [carregando, setCarregando] = useState(true);
   const [ocupado, setOcupado] = useState<string | null>(null);
   const [erro, setErro] = useState<string | null>(null);
+  const [cancelando, setCancelando] = useState<Emissao | null>(null);
+  const [just, setJust] = useState("");
 
   async function carregar() {
     const res = await fetch("/api/emissor/emissoes");
@@ -34,6 +36,20 @@ export default function NotasEmitidasPage() {
     const data = await res.json();
     if (!res.ok) setErro(data.error ?? "Erro.");
     setOcupado(null);
+    await carregar();
+  }
+
+  async function cancelar() {
+    if (!cancelando) return;
+    setOcupado(cancelando.id); setErro(null);
+    const res = await fetch(`/api/emissor/emissoes/${cancelando.id}`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ acao: "cancelar", justificativa: just }),
+    });
+    const data = await res.json();
+    setOcupado(null);
+    if (!res.ok) { setErro(data.error ?? "Erro."); return; }
+    setCancelando(null); setJust("");
     await carregar();
   }
 
@@ -68,8 +84,15 @@ export default function NotasEmitidasPage() {
                   {e.status === "AUTORIZADA" && (
                     <a className="btn-secundario" style={{ marginRight: 6, textDecoration: "none" }} href={`/api/emissor/emissoes/${e.id}?tipo=danfe`} target="_blank">DANFE</a>
                   )}
-                  {["INCERTA", "ASSINADA", "AUTORIZADA"].includes(e.status) && (
+                  {["INCERTA", "ASSINADA", "AUTORIZADA", "CANCELADA"].includes(e.status) && (
                     <button className="btn-secundario" disabled={ocupado === e.id} onClick={() => acao(e.id, "consultar")}>Consultar</button>
+                  )}
+                  {e.status === "CANCELADA" && (
+                    <a className="btn-secundario" style={{ marginRight: 6, textDecoration: "none" }} href={`/api/emissor/emissoes/${e.id}?tipo=cancelamento`}>XML canc.</a>
+                  )}
+                  {e.status === "AUTORIZADA" && (
+                    <button className="btn-secundario" style={{ marginLeft: 6 }} disabled={ocupado === e.id}
+                      onClick={() => { setCancelando(e); setJust(""); setErro(null); }}>Cancelar</button>
                   )}
                   {["REJEITADA", "INCERTA"].includes(e.status) && (
                     <button className="btn-secundario" style={{ marginLeft: 6 }} disabled={ocupado === e.id} onClick={() => acao(e.id, "reenviar")}>Reenviar</button>
@@ -80,6 +103,32 @@ export default function NotasEmitidasPage() {
           </tbody>
         </table>
       </div>
+
+      {cancelando && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.4)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50 }}
+          onClick={() => !ocupado && setCancelando(null)}>
+          <form className="card" style={{ width: 460, maxWidth: "92vw" }} onClick={(e) => e.stopPropagation()}
+            onSubmit={(e) => { e.preventDefault(); if (just.trim().length >= 15 && !ocupado) cancelar(); }}>
+            <h3 style={{ marginTop: 0 }}>Cancelar NF {cancelando.numero} (série {cancelando.serie})</h3>
+            <p style={{ fontSize: 13, color: "var(--text-dim)" }}>
+              O prazo normal de cancelamento é de até 24 horas após a autorização; a SEFAZ decide se ainda é possível.
+              O cancelamento não pode ser desfeito.
+            </p>
+            <div className="field">
+              <label>Justificativa (mínimo 15 caracteres)</label>
+              <textarea rows={3} value={just} onChange={(e) => setJust(e.target.value)} maxLength={255}
+                style={{ width: "100%", padding: 8, border: "1px solid var(--border)", borderRadius: 6 }} />
+            </div>
+            {erro && <p className="status-erro">{erro}</p>}
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <button type="button" className="btn-secundario" disabled={!!ocupado} onClick={() => setCancelando(null)}>Voltar</button>
+              <button type="submit" className="btn" disabled={!!ocupado || just.trim().length < 15}>
+                {ocupado ? "Cancelando..." : "Cancelar a nota"}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
     </div>
   );
 }

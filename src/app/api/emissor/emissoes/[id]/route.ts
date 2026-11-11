@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { consultarEmissao, emitir } from "@/lib/emissor-envio";
+import { cancelarEmissao, consultarEmissao, emitir } from "@/lib/emissor-envio";
 import { gerarDanfePdf } from "@/lib/danfe-pdf";
 import { parseNFeXml } from "@/lib/parse-nfe-xml";
 
@@ -20,6 +20,12 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
       headers: { "Content-Type": "application/pdf", "Content-Disposition": `inline; filename="${prefixo}DANFE_${e.chave}.pdf"` },
     });
   }
+  if (tipo === "cancelamento") {
+    if (!e.xmlCancelamento) return NextResponse.json({ error: "Nota não cancelada." }, { status: 400 });
+    return new NextResponse(e.xmlCancelamento, {
+      headers: { "Content-Type": "application/xml", "Content-Disposition": `attachment; filename="${prefixo}CANC_${e.chave}.xml"` },
+    });
+  }
   const xml = e.xmlAutorizado ?? e.xmlAssinado;
   if (!xml) return NextResponse.json({ error: "Sem XML." }, { status: 404 });
   return new NextResponse(xml, {
@@ -29,8 +35,9 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
 
 /** acao: consultar (situação na SEFAZ pela chave) | reenviar (mesmos dados e número) */
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
-  const { acao } = await req.json().catch(() => ({}));
+  const { acao, justificativa } = await req.json().catch(() => ({}));
   try {
+    if (acao === "cancelar") return NextResponse.json({ emissao: await cancelarEmissao(params.id, String(justificativa ?? "")) });
     if (acao === "consultar") return NextResponse.json({ emissao: await consultarEmissao(params.id) });
     if (acao === "reenviar") {
       const e = await prisma.emissaoNfe.findUnique({ where: { id: params.id } });

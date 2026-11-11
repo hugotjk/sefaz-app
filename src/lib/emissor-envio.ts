@@ -1,9 +1,10 @@
 import { prisma } from "@/lib/db";
 import { decryptCertificate } from "@/lib/crypto";
-import { assinarNFe } from "@/lib/nfe-assinatura";
+import { assinarEvento, assinarNFe } from "@/lib/nfe-assinatura";
+import { montarCancelamento } from "@/lib/nfe-evento";
 import { CNPJ_CONTADOR_PADRAO, lerNotaOriginal, montarDevolucao } from "@/lib/nfe-devolucao";
 import {
-  autorizarNFe, consultarChaveNFe, montarNfeProc, statusServico,
+  autorizarNFe, consultarChaveNFe, enviarEvento, montarNfeProc, montarProcEvento, statusServico,
   type Ambiente, type RetornoAutorizacao,
 } from "@/lib/nfe-sefaz";
 
@@ -132,6 +133,32 @@ export async function consultarEmissao(id: string) {
     await aplicarRetorno(id, e.xmlAssinado, ret, e.lojaCnpj, e.ambiente as Ambiente, e.numero);
   } else {
     await prisma.emissaoNfe.update({ where: { id }, data: { cStat: ret.cStat, xMotivo: ret.xMotivo } });
+  }
+  return prisma.emissaoNfe.findUniqueOrThrow({ where: { id }, select: LISTA });
+}
+
+/** Cancela uma nota AUTORIZADA (evento 110111). A SEFAZ decide se ainda está no prazo. */
+export async function cancelarEmissao(id: string, xJust: string) {
+  const e = await prisma.emissaoNfe.findUniqueOrThrow({ where: { id } });
+  if (e.status !== "AUTORIZADA" || !e.nProt) throw new Error("Só é possível cancelar notas autorizadas.");
+  if (e.ambiente === 1 && !PRODUCAO_LIBERADA) throw new Error("Produção ainda não está liberada.");
+  const { pfx, senha } = await carregarCertificado(e.lojaCnpj);
+  const assinado = assinarEvento(
+    montarCancelamento({ cnpj: e.lojaCnpj, chave: e.chave, nProt: e.nProt, xJust, ambiente: e.ambiente as Ambiente }),
+    pfx, senha
+  );
+  const ret = await enviarEvento(assinado, e.ambiente as Ambiente, pfx, senha);
+  // 135 = registrado e vinculado; 155 = cancelamento homologado fora do prazo
+  if (["135", "155"].includes(ret.cStat) && ret.retEventoXml) {
+    await prisma.emissaoNfe.update({
+      where: { id },
+      data: {
+        status: "CANCELADA", canceladaEm: new Date(), cancJustificativa: xJust.trim(), cancProtocolo: ret.nProt ?? null,
+        xmlCancelamento: montarProcEvento(assinado, ret.retEventoXml), cStat: ret.cStat, xMotivo: ret.xMotivo,
+      },
+    });
+  } else {
+    throw new Error(`SEFAZ não cancelou: ${ret.cStat} — ${ret.xMotivo}`);
   }
   return prisma.emissaoNfe.findUniqueOrThrow({ where: { id }, select: LISTA });
 }
