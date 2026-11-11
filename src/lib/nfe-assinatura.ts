@@ -28,9 +28,19 @@ export function lerPfx(pfxBase64: string, senha: string) {
  * <Signature> inserida logo após o infNFe — layout exigido pela SEFAZ.
  */
 export function assinarNFe(nfeXml: string, pfxBase64: string, senha: string): string {
+  return assinarElemento(nfeXml, "infNFe", pfxBase64, senha);
+}
+
+/** Assina o <infEvento> de um evento (ex.: cancelamento) — mesmo padrão da NF-e. */
+export function assinarEvento(eventoXml: string, pfxBase64: string, senha: string): string {
+  return assinarElemento(eventoXml, "infEvento", pfxBase64, senha);
+}
+
+function assinarElemento(xml: string, tagInf: "infNFe" | "infEvento", pfxBase64: string, senha: string): string {
+  const nfeXml = xml;
   const { privateKeyPem, certBase64 } = lerPfx(pfxBase64, senha);
-  const id = /<infNFe[^>]*\sId="(NFe\d{44})"/.exec(nfeXml)?.[1];
-  if (!id) throw new Error("infNFe/Id não encontrado no XML.");
+  const id = new RegExp(`<${tagInf}[^>]*\\sId="((?:NFe|ID)\\d+)"`).exec(nfeXml)?.[1];
+  if (!id) throw new Error(`${tagInf}/Id não encontrado no XML.`);
 
   const sig = new SignedXml({
     privateKey: privateKeyPem,
@@ -46,6 +56,6 @@ export function assinarNFe(nfeXml: string, pfxBase64: string, senha: string): st
     ],
     digestAlgorithm: "http://www.w3.org/2000/09/xmldsig#sha1",
   });
-  sig.computeSignature(nfeXml, { location: { reference: `//*[local-name()='infNFe']`, action: "after" } });
+  sig.computeSignature(nfeXml, { location: { reference: `//*[local-name()='${tagInf}']`, action: "after" } });
   return sig.getSignedXml();
 }

@@ -440,6 +440,11 @@ model EmissaoNfe {
   xmlOriginal        String    @db.Text
   xmlAssinado        String?   @db.Text
   xmlAutorizado      String?   @db.Text
+  // Cancelamento (evento 110111)
+  canceladaEm        DateTime?
+  cancJustificativa  String?
+  cancProtocolo      String?
+  xmlCancelamento    String?   @db.Text
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
 

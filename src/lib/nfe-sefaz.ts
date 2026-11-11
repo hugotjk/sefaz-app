@@ -39,6 +39,11 @@ const SERVICOS = {
     ns: "http://www.portalfiscal.inf.br/nfe/wsdl/NFeAutorizacao4",
     action: "nfeAutorizacaoLote",
   },
+  evento: {
+    path: "/ws/recepcaoevento/recepcaoevento4.asmx",
+    ns: "http://www.portalfiscal.inf.br/nfe/wsdl/NFeRecepcaoEvento4",
+    action: "nfeRecepcaoEvento",
+  },
   consulta: {
     path: "/ws/NfeConsulta/NfeConsulta4.asmx",
     ns: "http://www.portalfiscal.inf.br/nfe/wsdl/NFeConsultaProtocolo4",
@@ -151,4 +156,30 @@ export async function consultarChaveNFe(chave: string, ambiente: Ambiente, pfx: 
 /** Monta o arquivo final (nfeProc) = NFe assinada + protocolo de autorização. */
 export function montarNfeProc(nfeAssinada: string, protNFeXml: string): string {
   return `<?xml version="1.0" encoding="utf-8"?><nfeProc xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00">${semDeclaracao(nfeAssinada)}${protNFeXml}</nfeProc>`;
+}
+
+export interface RetornoEvento { cStat: string; xMotivo: string; nProt?: string; dhRegEvento?: string; retEventoXml?: string }
+
+/** Envia um evento já assinado (cancelamento etc.) em lote de 1. */
+export async function enviarEvento(eventoAssinado: string, ambiente: Ambiente, pfx: string, senha: string): Promise<RetornoEvento> {
+  const corpo = `<envEvento xmlns="http://www.portalfiscal.inf.br/nfe" versao="1.00"><idLote>${Date.now().toString().slice(-15)}</idLote>${semDeclaracao(eventoAssinado)}</envEvento>`;
+  const resp = await post("evento", ambiente, corpo, pfx, senha);
+  const j = parser.parse(resp);
+  const inf = achar(j, "retEvento")?.infEvento;
+  const m = /<(?:\w+:)?retEvento[\s\S]*?<\/(?:\w+:)?retEvento>/.exec(resp);
+  const retEventoXml = m?.[0].replace(/\sxmlns(:\w+)?="http:\/\/www\.portalfiscal\.inf\.br\/nfe"/g, "");
+  if (inf)
+    return {
+      cStat: String(inf.cStat), xMotivo: String(inf.xMotivo),
+      nProt: inf.nProt ? String(inf.nProt) : undefined,
+      dhRegEvento: inf.dhRegEvento ? String(inf.dhRegEvento) : undefined, retEventoXml,
+    };
+  const ret = achar(j, "retEnvEvento");
+  if (!ret) throw new Error("Resposta inesperada da SEFAZ (evento): " + resp.slice(0, 300));
+  return { cStat: String(ret.cStat), xMotivo: String(ret.xMotivo) };
+}
+
+/** Arquivo final do evento = evento assinado + retorno da SEFAZ. */
+export function montarProcEvento(eventoAssinado: string, retEventoXml: string): string {
+  return `<?xml version="1.0" encoding="utf-8"?><procEventoNFe xmlns="http://www.portalfiscal.inf.br/nfe" versao="1.00">${semDeclaracao(eventoAssinado)}${retEventoXml}</procEventoNFe>`;
 }
