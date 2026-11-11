@@ -10,6 +10,7 @@ interface Loja {
   crt: number;
   municipio: string | null;
   uf: string | null;
+  logradouro: string; numero: string; complemento: string | null; bairro: string; cep: string; fone: string | null;
   serie: number | null;
   proximoNumero: number;
   serieAntiga: number | null;
@@ -33,6 +34,25 @@ export default function LojasEmissorPage() {
   const [enviando, setEnviando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
+  const [endAlvo, setEndAlvo] = useState<Loja | null>(null); // modal de endereço
+  const [end, setEnd] = useState({ logradouro: "", numero: "", complemento: "", bairro: "", cep: "", fone: "" });
+
+  function abrirEndereco(l: Loja) {
+    setEnd({ logradouro: l.logradouro ?? "", numero: l.numero ?? "", complemento: l.complemento ?? "", bairro: l.bairro ?? "", cep: l.cep ?? "", fone: l.fone ?? "" });
+    setEndAlvo(l); setErro(null);
+  }
+  async function salvarEndereco() {
+    if (!endAlvo) return;
+    setEnviando(true); setErro(null);
+    const res = await fetch(`/api/emissor/lojas/${endAlvo.cnpj}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(end),
+    });
+    const data = await res.json();
+    setEnviando(false);
+    if (!res.ok) { setErro(data.error ?? "Erro ao salvar."); return; }
+    setEndAlvo(null);
+    await carregar();
+  }
 
   async function carregar() {
     setCarregando(true);
@@ -141,6 +161,9 @@ export default function LojasEmissorPage() {
                   <div style={{ fontSize: 12, color: "var(--text-dim)" }}>
                     {l.razaoSocial} · IE {l.ie ?? "—"} · {l.municipio}/{l.uf}
                   </div>
+                  <div style={{ fontSize: 12, color: "var(--text-dim)" }}>
+                    {l.logradouro}, {l.numero}{l.complemento ? ` ${l.complemento}` : ""} · {l.bairro} · CEP {l.cep}
+                  </div>
                 </td>
                 <td style={td}>{fmtCnpj(l.cnpj)}</td>
                 <td style={td}>{l.crt === 3 ? "Normal (CRT 3)" : "Simples (CRT 1)"}</td>
@@ -156,15 +179,45 @@ export default function LojasEmissorPage() {
                   <CampoNumero valor={l.proximoNumero} onSalvar={(v) => salvarCampo(l, "proximoNumero", v)} />
                 </td>
                 <td style={td}>
-                  <button className="btn-secundario" onClick={() => { setAlvo(l); setErro(null); }}>
-                    {l.certificado.texto === "Sem certificado" ? "Enviar certificado" : "Trocar certificado"}
-                  </button>
+                  <div className="eb-acoes">
+                    <button className="eb" onClick={() => abrirEndereco(l)}>Endereço</button>
+                    <button className="eb" onClick={() => { setAlvo(l); setErro(null); }}>
+                      {l.certificado.texto === "Sem certificado" ? "Enviar certificado" : "Trocar certificado"}
+                    </button>
+                  </div>
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
+
+      {endAlvo && (
+        <div
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.4)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50 }}
+          onClick={() => !enviando && setEndAlvo(null)}
+        >
+          <form className="card" style={{ width: 460, maxWidth: "92vw" }} onClick={(e) => e.stopPropagation()}
+            onSubmit={(e) => { e.preventDefault(); if (!enviando) salvarEndereco(); }}>
+            <h3 style={{ marginTop: 0 }}>Endereço — {endAlvo.loja ?? endAlvo.razaoSocial}</h3>
+            <p style={{ fontSize: 13, color: "var(--text-dim)" }}>
+              Aparece como endereço do emitente no XML e no DANFE. Município ({endAlvo.municipio}/{endAlvo.uf}) não muda por aqui.
+            </p>
+            {([["logradouro", "Logradouro"], ["numero", "Número"], ["complemento", "Complemento (opcional)"], ["bairro", "Bairro"], ["cep", "CEP"], ["fone", "Telefone (opcional)"]] as const).map(([k, rot]) => (
+              <div className="field" key={k} style={{ marginBottom: 10 }}>
+                <label>{rot}</label>
+                <input value={end[k]} onChange={(e) => setEnd({ ...end, [k]: e.target.value })}
+                  style={{ width: "100%", padding: "6px 8px", border: "1px solid var(--border)", borderRadius: 6 }} />
+              </div>
+            ))}
+            {erro && <p className="status-erro">{erro}</p>}
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <button type="button" className="eb" disabled={enviando} onClick={() => setEndAlvo(null)}>Cancelar</button>
+              <button type="submit" className="eb eb-primario" disabled={enviando}>{enviando ? "Salvando..." : "Salvar endereço"}</button>
+            </div>
+          </form>
+        </div>
+      )}
 
       {alvo && (
         <div

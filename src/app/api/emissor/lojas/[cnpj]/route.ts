@@ -4,7 +4,7 @@ import { prisma } from "@/lib/db";
 /** Edita série própria, próximo número e CRT de uma loja. */
 export async function PATCH(req: NextRequest, { params }: { params: { cnpj: string } }) {
   const body = await req.json().catch(() => ({}));
-  const data: { serie?: number | null; proximoNumero?: number; crt?: number } = {};
+  const data: Record<string, unknown> = {};
 
   if ("serie" in body) {
     if (body.serie === null || body.serie === "") data.serie = null;
@@ -26,6 +26,20 @@ export async function PATCH(req: NextRequest, { params }: { params: { cnpj: stri
     if (![1, 2, 3].includes(c))
       return NextResponse.json({ error: "CRT deve ser 1, 2 ou 3." }, { status: 400 });
     data.crt = c;
+  }
+
+  // endereço do emitente (aparece no XML e no DANFE)
+  for (const campo of ["logradouro", "numero", "complemento", "bairro", "cep", "fone"] as const) {
+    if (!(campo in body)) continue;
+    let v = String(body[campo] ?? "").trim();
+    if (campo === "cep" || campo === "fone") v = v.replace(/\D/g, "");
+    if (campo === "cep" && v.length !== 8) return NextResponse.json({ error: "CEP deve ter 8 dígitos." }, { status: 400 });
+    if (campo === "fone" && v && (v.length < 6 || v.length > 14))
+      return NextResponse.json({ error: "Telefone deve ter de 6 a 14 dígitos." }, { status: 400 });
+    if (["logradouro", "numero", "bairro"].includes(campo) && !v)
+      return NextResponse.json({ error: `Preencha ${campo}.` }, { status: 400 });
+    if (v.length > 60) return NextResponse.json({ error: `${campo} muito longo (máx. 60).` }, { status: 400 });
+    data[campo] = v === "" ? null : v;
   }
 
   const existe = await prisma.emissorLoja.findUnique({ where: { cnpj: params.cnpj }, select: { cnpj: true } });
