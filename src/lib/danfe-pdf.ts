@@ -64,7 +64,7 @@ function secao(titulo: string): Content {
   return { text: titulo.toUpperCase(), style: "secao", margin: [0, 6, 0, 2] };
 }
 
-export async function gerarDanfePdf(nfe: NFeParaExibir): Promise<Buffer> {
+export async function gerarDanfePdf(nfe: NFeParaExibir, opts: { previa?: boolean } = {}): Promise<Buffer> {
   const itensBody = [
     [
       "Código",
@@ -155,7 +155,7 @@ export async function gerarDanfePdf(nfe: NFeParaExibir): Promise<Buffer> {
 
     { columns: [campo("Natureza da Operação", nfe.natOp), campo(
       "Protocolo de Autorização de Uso",
-      nfe.protocolo ? `${nfe.protocolo} - ${dataHora(nfe.dataAutorizacao)}` : "-"
+      opts.previa ? "PRÉVIA - AINDA NÃO AUTORIZADA" : nfe.protocolo && nfe.protocolo !== "0" ? `${nfe.protocolo} - ${dataHora(nfe.dataAutorizacao)}` : "-"
     )], columnGap: 4 },
 
     secao("Destinatário / Remetente"),
@@ -288,7 +288,9 @@ export async function gerarDanfePdf(nfe: NFeParaExibir): Promise<Buffer> {
   const doc: TDocumentDefinitions = {
     pageSize: "A4",
     pageMargins: [24, 24, 24, 24],
-    ...(nfe.ambiente === "2"
+    ...(opts.previa
+      ? { watermark: { text: "PRÉVIA - NÃO ENVIADA À SEFAZ", color: "#b45309", opacity: 0.15, bold: true, fontSize: 52 } }
+      : nfe.ambiente === "2"
       ? { watermark: { text: "SEM VALOR FISCAL - HOMOLOGAÇÃO", color: "#cc0000", opacity: 0.12, bold: true, fontSize: 48 } }
       : {}),
     defaultStyle: { font: "Roboto", fontSize: 8, color: "#111111" },
