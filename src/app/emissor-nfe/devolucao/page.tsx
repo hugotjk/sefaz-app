@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 interface Item {
   nItem: number; cProd: string; ean: string; xProd: string; qCom: number; vUnCom: string; pICMS: string;
@@ -31,10 +31,33 @@ export default function DevolucaoPage() {
   const [novaSerie, setNovaSerie] = useState("");
   const [emissao, setEmissao] = useState<Emissao | null>(null);
   const [teste, setTeste] = useState<string | null>(null);
+  const [novoCert, setNovoCert] = useState<File | null>(null);
+  const [novaSenha, setNovaSenha] = useState("");
+  const [rascunhoId, setRascunhoId] = useState<string | null>(null);
+  const [aviso, setAviso] = useState<string | null>(null);
+
+  // abre um rascunho salvo: /emissor-nfe/devolucao?rascunho=ID
+  useEffect(() => {
+    const id = new URLSearchParams(window.location.search).get("rascunho");
+    if (!id) return;
+    (async () => {
+      const res = await fetch(`/api/emissor/rascunhos/${id}`);
+      const data = await res.json();
+      if (!res.ok) { setErro(data.error ?? "Rascunho não encontrado."); return; }
+      const r = data.rascunho;
+      const f = new File([r.xmlOriginal], "nota-original.xml", { type: "application/xml" });
+      await analisar(f);
+      const q: Record<number, string> = {};
+      for (const s of r.selecao as { nItem: number; qtd: number }[]) q[s.nItem] = String(s.qtd);
+      setQtds(q); setCaso(r.caso ?? ""); setInfCpl(r.infCpl ?? null); setContador(!!r.contador);
+      setRascunhoId(r.id);
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function analisar(f: File) {
     setArquivo(f); setAnalise(null); setGerado(null); setErro(null); setQtds({}); setCaso(""); setInfCpl(null);
-    setSemLoja(null); setEmissao(null); setTeste(null);
+    setSemLoja(null); setEmissao(null); setTeste(null); setAviso(null); setRascunhoId(null);
     const fd = new FormData();
     fd.set("acao", "analisar"); fd.set("xml", f);
     const res = await fetch("/api/emissor/devolucao", { method: "POST", body: fd });
@@ -49,11 +72,15 @@ export default function DevolucaoPage() {
     setCarregando(true); setErro(null);
     const fd = new FormData();
     fd.set("xml", arquivo); fd.set("crt", novoCrt); fd.set("serie", novaSerie);
+    if (novoCert) { fd.set("certificado", novoCert); fd.set("senha", novaSenha); }
     const res = await fetch("/api/emissor/lojas", { method: "POST", body: fd });
     const data = await res.json();
     setCarregando(false);
     if (!res.ok) { setErro(data.error ?? "Erro ao cadastrar."); return; }
+    const av = data.aviso as string | undefined;
+    setNovoCert(null); setNovaSenha("");
     await analisar(arquivo);
+    if (av) setAviso(av);
   }
 
   async function testarConexao(prod = false) {
@@ -68,8 +95,23 @@ export default function DevolucaoPage() {
     setTeste(`SEFAZ (${prod ? "PRODUÇÃO" : "homologação"}): ${data.cStat} — ${data.xMotivo}`);
   }
 
+  async function salvarRascunho(silencioso = false) {
+    if (!arquivo || !analise) return;
+    const fd = new FormData();
+    fd.set("xml", arquivo); fd.set("selecao", JSON.stringify(selecao)); fd.set("caso", caso);
+    fd.set("infCpl", infFinal); fd.set("personalizado", infCpl !== null ? "1" : "0");
+    fd.set("contador", contador ? "1" : "0");
+    if (rascunhoId) fd.set("id", rascunhoId);
+    const res = await fetch("/api/emissor/rascunhos", { method: "POST", body: fd });
+    const data = await res.json();
+    if (!res.ok) { if (!silencioso) setErro(data.error ?? "Erro ao salvar."); return; }
+    setRascunhoId(data.id);
+    setAviso("Rascunho salvo — aparece em “Notas emitidas”. Nenhum número foi consumido.");
+  }
+
   async function previaDanfe() {
     if (!arquivo) return;
+    await salvarRascunho(true);
     setCarregando(true); setErro(null);
     const fd = new FormData();
     fd.set("acao", "previa-danfe"); fd.set("xml", arquivo);
@@ -97,11 +139,13 @@ export default function DevolucaoPage() {
     fd.set("acao", "enviar"); fd.set("xml", arquivo); fd.set("ambiente", prod ? "1" : "2");
     fd.set("selecao", JSON.stringify(selecao)); fd.set("infCpl", infFinal); fd.set("caso", caso);
     fd.set("contador", contador ? "1" : "0");
+    if (rascunhoId) fd.set("rascunhoId", rascunhoId);
     const res = await fetch("/api/emissor/devolucao", { method: "POST", body: fd });
     const data = await res.json();
     setCarregando(false);
     if (!res.ok) { setErro(data.error ?? "Erro."); return; }
     setEmissao(data.emissao);
+    if (data.emissao?.status === "AUTORIZADA") { setRascunhoId(null); setAviso(null); }
   }
 
   const infAuto = analise ? analise.infCplModelo.replace("{CASE}", caso) : "";
@@ -114,6 +158,7 @@ export default function DevolucaoPage() {
 
   async function gerar() {
     if (!arquivo) return;
+    await salvarRascunho(true);
     setCarregando(true); setErro(null); setGerado(null);
     const fd = new FormData();
     fd.set("acao", "gerar"); fd.set("xml", arquivo);
@@ -144,6 +189,7 @@ export default function DevolucaoPage() {
         </div>
       </div>
       {erro && !analise && <p className="status-erro">{erro}</p>}
+      {aviso && !analise && <p style={{ fontSize: 13 }}>{aviso}</p>}
 
       {semLoja && (
         <div className="card" style={{ marginBottom: 16, fontSize: 14 }}>
@@ -163,10 +209,23 @@ export default function DevolucaoPage() {
               <label>Série própria (opcional agora)</label>
               <input value={novaSerie} inputMode="numeric" onChange={(e) => setNovaSerie(e.target.value.replace(/\D/g, ""))} style={{ width: 90, padding: 6 }} />
             </div>
+            <div className="field" style={{ marginBottom: 0 }}>
+              <label>Certificado A1 (.pfx) — opcional agora</label>
+              <input type="file" accept=".pfx,.p12" onChange={(e) => setNovoCert(e.target.files?.[0] ?? null)} />
+            </div>
+            {novoCert && (
+              <div className="field" style={{ marginBottom: 0 }}>
+                <label>Senha do certificado</label>
+                <input type="password" value={novaSenha} autoComplete="off"
+                  onChange={(e) => setNovaSenha(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && !carregando && cadastrarLoja()}
+                  style={{ width: 160, padding: 6 }} />
+              </div>
+            )}
             <button className="btn" disabled={carregando} onClick={cadastrarLoja}>Cadastrar esta loja</button>
           </div>
           <p style={{ fontSize: 12, color: "var(--text-dim)", marginBottom: 0 }}>
-            Depois envie o certificado dela em “Lojas e certificados”.
+            Se não enviar o certificado agora, envie depois em “Lojas e certificados”.
           </p>
         </div>
       )}
@@ -237,6 +296,9 @@ export default function DevolucaoPage() {
           <button className="btn" disabled={!pronto || carregando} onClick={gerar}>
             {carregando ? "Gerando..." : "Gerar prévia do XML"}
           </button>
+          <button className="btn-secundario" style={{ marginLeft: 8 }} disabled={!analise || selecao.length === 0 || carregando} onClick={() => salvarRascunho(false)}>
+            Salvar rascunho
+          </button>
           <button className="btn-secundario" style={{ marginLeft: 8 }} disabled={!pronto || carregando} onClick={previaDanfe}>
             Ver prévia do DANFE (PDF)
           </button>
@@ -258,6 +320,7 @@ export default function DevolucaoPage() {
           )}
           <span style={{ marginLeft: 12, fontSize: 13, color: "var(--text-dim)" }}>{selecao.length} item(ns) selecionado(s)</span>
           {teste && <p style={{ fontSize: 13 }}>{teste}</p>}
+          {aviso && <p style={{ fontSize: 13 }}>{aviso}</p>}
           {erro && <p className="status-erro" style={{ marginTop: 12 }}>{erro}</p>}
           {emissao && (
             <div className="card" style={{ marginTop: 16 }}>
