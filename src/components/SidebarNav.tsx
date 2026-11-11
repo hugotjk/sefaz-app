@@ -20,6 +20,7 @@ const ITENS: NavItem[] = [
   { nome: "Relatórios", icone: "📊", href: "/relatorios" },
   { nome: "Documentações", icone: "🗂️", href: "/documentacoes" },
   { nome: "Certificados", icone: "🔑", href: "/certificados" },
+  { nome: "Emissor de NFe", icone: "🧾", href: "/emissor-nfe" },
 ];
 
 function estaAtivo(pathname: string, href: string) {
