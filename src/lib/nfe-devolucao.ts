@@ -246,7 +246,7 @@ export function montarDevolucao(p: ParamsDevolucao): ResultadoDevolucao {
     `${tag("xBairro", loja.bairro)}${tag("cMun", loja.codMunicipio)}${tag("xMun", loja.municipio)}${tag("UF", loja.uf)}${tag("CEP", loja.cep)}<cPais>1058</cPais><xPais>Brasil</xPais>${tag("fone", loja.fone)}</enderEmit>` +
     `${tag("IE", loja.ie)}${tag("IM", loja.im ?? "ISENTO")}${tag("CNAE", loja.cnae)}<CRT>${loja.crt}</CRT></emit>`;
   const dest =
-    `<dest>${tag("CNPJ", e.cnpj)}${tag("xNome", e.nome.toUpperCase())}<enderDest>${tag("xLgr", e.logradouro)}${tag("nro", e.numero)}${tag("xCpl", e.complemento)}` +
+    `<dest>${tag("CNPJ", e.cnpj)}${tag("xNome", ambiente === 2 ? "NF-E EMITIDA EM AMBIENTE DE HOMOLOGACAO - SEM VALOR FISCAL" : e.nome.toUpperCase())}<enderDest>${tag("xLgr", e.logradouro)}${tag("nro", e.numero)}${tag("xCpl", e.complemento)}` +
     `${tag("xBairro", e.bairro)}${tag("cMun", e.codMunicipio)}${tag("xMun", e.municipio.toUpperCase())}${tag("UF", e.uf)}${tag("CEP", e.cep)}<cPais>1058</cPais><xPais>BRASIL</xPais></enderDest>` +
     `<indIEDest>1</indIEDest>${tag("IE", e.ie)}</dest>`;
   const aut = p.contadorCnpj ? `<autXML><CNPJ>${p.contadorCnpj}</CNPJ></autXML>` : "";
