@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { gerarDanfePdf } from "@/lib/danfe-pdf";
+import { parseNFeXml } from "@/lib/parse-nfe-xml";
 import { emitir, PRODUCAO_LIBERADA, testarConexao } from "@/lib/emissor-envio";
 import {
   CNPJ_CONTADOR_PADRAO,
@@ -49,7 +51,7 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  if (acao === "gerar") {
+  if (acao === "gerar" || acao === "previa-danfe") {
     if (loja.serie == null)
       return NextResponse.json({ error: "Defina a série própria da loja antes de gerar." }, { status: 400 });
     let selecao: { nItem: number; qtd: number }[];
@@ -65,6 +67,12 @@ export async function POST(req: NextRequest) {
         infCpl: String(form.get("infCpl") ?? ""),
         contadorCnpj: form.get("contador") === "1" ? CNPJ_CONTADOR_PADRAO : null,
       });
+      if (acao === "previa-danfe") {
+        const pdf = await gerarDanfePdf(parseNFeXml(r.xml), { previa: true });
+        return new NextResponse(new Uint8Array(pdf), {
+          headers: { "Content-Type": "application/pdf", "Content-Disposition": `inline; filename="PREVIA_DANFE_${r.chave}.pdf"` },
+        });
+      }
       return NextResponse.json({ ...r, serie: loja.serie, numero: loja.proximoNumero });
     } catch (e: any) {
       return NextResponse.json({ error: e?.message ?? "Erro ao gerar." }, { status: 400 });

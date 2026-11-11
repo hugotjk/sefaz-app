@@ -68,6 +68,19 @@ export default function DevolucaoPage() {
     setTeste(`SEFAZ (${prod ? "PRODUÇÃO" : "homologação"}): ${data.cStat} — ${data.xMotivo}`);
   }
 
+  async function previaDanfe() {
+    if (!arquivo) return;
+    setCarregando(true); setErro(null);
+    const fd = new FormData();
+    fd.set("acao", "previa-danfe"); fd.set("xml", arquivo);
+    fd.set("selecao", JSON.stringify(selecao)); fd.set("infCpl", infFinal); fd.set("contador", contador ? "1" : "0");
+    const res = await fetch("/api/emissor/devolucao", { method: "POST", body: fd });
+    setCarregando(false);
+    if (!res.ok) { setErro((await res.json()).error ?? "Erro."); return; }
+    const url = URL.createObjectURL(await res.blob());
+    window.open(url, "_blank");
+  }
+
   async function enviar(prod = false) {
     if (!arquivo || !analise) return;
     if (prod) {
@@ -223,6 +236,9 @@ export default function DevolucaoPage() {
 
           <button className="btn" disabled={!pronto || carregando} onClick={gerar}>
             {carregando ? "Gerando..." : "Gerar prévia do XML"}
+          </button>
+          <button className="btn-secundario" style={{ marginLeft: 8 }} disabled={!pronto || carregando} onClick={previaDanfe}>
+            Ver prévia do DANFE (PDF)
           </button>
           <button className="btn" style={{ marginLeft: 8 }} disabled={!pronto || carregando} onClick={() => enviar(false)}>
             {carregando ? "Aguarde..." : "Enviar à SEFAZ (homologação)"}
