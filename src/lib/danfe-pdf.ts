@@ -29,7 +29,7 @@ function moeda(v: string) {
 function dataHora(iso: string) {
   if (!iso) return "-";
   const d = new Date(iso);
-  return isNaN(d.getTime()) ? iso : d.toLocaleString("pt-BR");
+  return isNaN(d.getTime()) ? iso : d.toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" });
 }
 function dataCurta(iso: string) {
   if (!iso) return "-";
@@ -186,22 +186,23 @@ export async function gerarDanfePdf(nfe: NFeParaExibir): Promise<Buffer> {
     },
   ];
 
+  const vazio = (v: string) => (v === "0" ? "-" : v);
   if (nfe.transportador.nome || nfe.transportador.volumes !== "0") {
     content.push(
       secao("Transportador / Volumes Transportados"),
       {
         columns: [
-          campo("Nome / Razão Social", nfe.transportador.nome),
+          campo("Nome / Razão Social", vazio(nfe.transportador.nome)),
           campo("Frete por Conta", nfe.transportador.modFrete),
-          campo("CNPJ / CPF", nfe.transportador.cnpj),
+          campo("CNPJ / CPF", vazio(nfe.transportador.cnpj)),
         ],
         columnGap: 4,
       },
       {
         columns: [
           campo("Quantidade", nfe.transportador.volumes),
-          campo("Espécie", nfe.transportador.especie),
-          campo("Marca", nfe.transportador.marca),
+          campo("Espécie", vazio(nfe.transportador.especie)),
+          campo("Marca", vazio(nfe.transportador.marca)),
           campo("Peso Bruto", nfe.transportador.pesoBruto),
           campo("Peso Líquido", nfe.transportador.pesoLiquido),
         ],
@@ -287,6 +288,9 @@ export async function gerarDanfePdf(nfe: NFeParaExibir): Promise<Buffer> {
   const doc: TDocumentDefinitions = {
     pageSize: "A4",
     pageMargins: [24, 24, 24, 24],
+    ...(nfe.ambiente === "2"
+      ? { watermark: { text: "SEM VALOR FISCAL - HOMOLOGAÇÃO", color: "#cc0000", opacity: 0.12, bold: true, fontSize: 48 } }
+      : {}),
     defaultStyle: { font: "Roboto", fontSize: 8, color: "#111111" },
     styles: {
       lbl: { fontSize: 6, color: "#555555", characterSpacing: 0.2 },
