@@ -72,7 +72,9 @@ export async function POST(req: NextRequest) {
   }
   if (acao === "testar") {
     try {
-      const r = await testarConexao(loja.cnpj, 2);
+      const amb = form.get("ambiente") === "1" ? 1 : 2;
+      if (amb === 1 && !PRODUCAO_LIBERADA) throw new Error("Produção ainda não está liberada.");
+      const r = await testarConexao(loja.cnpj, amb);
       return NextResponse.json(r);
     } catch (e: any) {
       return NextResponse.json({ error: e?.message ?? "Falha ao conectar." }, { status: 400 });
