@@ -2,8 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { lerNotaOriginal } from "@/lib/nfe-devolucao";
 import { prisma } from "@/lib/db";
 import { statusCertificado } from "@/lib/emissor-certificado-status";
+import { conferirCertificado, salvarCertificadoLoja } from "@/lib/emissor-certificado";
 
 export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 
 export async function GET() {
   const lojas = await prisma.emissorLoja.findMany({ orderBy: { razaoSocial: "asc" } });
@@ -54,6 +56,20 @@ export async function POST(req: NextRequest) {
   if (await prisma.emissorLoja.findUnique({ where: { cnpj: d.cnpj }, select: { cnpj: true } }))
     return NextResponse.json({ error: "Esta loja já está cadastrada." }, { status: 400 });
 
+  // certificado opcional: se veio, é conferido ANTES de cadastrar a loja (nada fica pela metade)
+  const certArq = form.get("certificado");
+  const certSenha = String(form.get("senha") ?? "");
+  let pfxBase64: string | null = null;
+  if (certArq instanceof File && certArq.size > 0) {
+    if (!certSenha) return NextResponse.json({ error: "Informe a senha do certificado." }, { status: 400 });
+    pfxBase64 = Buffer.from(await certArq.arrayBuffer()).toString("base64");
+    try {
+      await conferirCertificado(pfxBase64, certSenha, d.cnpj);
+    } catch (e: any) {
+      return NextResponse.json({ error: e?.message ?? "Erro no certificado." }, { status: 400 });
+    }
+  }
+
   const loja = await prisma.emissorLoja.create({
     data: {
       cnpj: d.cnpj, razaoSocial: d.nome, ie: d.ie, im: "ISENTO", cnae: "4781400", crt,
@@ -61,5 +77,14 @@ export async function POST(req: NextRequest) {
       codMunicipio: d.codMunicipio, municipio: d.municipio, uf: d.uf, cep: d.cep, fone: d.fone ?? null, serie,
     },
   });
-  return NextResponse.json({ loja });
+  let certificado = false;
+  if (pfxBase64 && certArq instanceof File) {
+    try {
+      await salvarCertificadoLoja(d.cnpj, certArq.name, pfxBase64, certSenha);
+      certificado = true;
+    } catch (e: any) {
+      return NextResponse.json({ loja, aviso: `Loja cadastrada, mas o certificado falhou: ${e?.message}` });
+    }
+  }
+  return NextResponse.json({ loja, certificado });
 }

@@ -451,3 +451,19 @@ model EmissaoNfe {
   @@unique([lojaCnpj, ambiente, serie, numero])
   @@index([lojaCnpj, ambiente])
 }
+
+model EmissaoRascunho {
+  id                 String   @id @default(cuid())
+  lojaCnpj           String
+  fornecedor         String
+  notaOriginalNumero String
+  caso               String   @default("")
+  infCpl             String?  @db.Text
+  contador           Boolean  @default(true)
+  selecao            Json
+  xmlOriginal        String   @db.Text
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@index([lojaCnpj])
+}

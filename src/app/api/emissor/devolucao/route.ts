@@ -103,6 +103,8 @@ export async function POST(req: NextRequest) {
         caso: String(form.get("caso") ?? ""), infCpl: String(form.get("infCpl") ?? ""),
         contador: form.get("contador") === "1", ambiente,
       });
+      const rid = String(form.get("rascunhoId") ?? "");
+      if (rid && emissao.status === "AUTORIZADA") await prisma.emissaoRascunho.deleteMany({ where: { id: rid } });
       return NextResponse.json({ emissao });
     } catch (e: any) {
       return NextResponse.json({ error: e?.message ?? "Erro ao emitir." }, { status: 400 });

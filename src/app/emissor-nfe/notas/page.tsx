@@ -12,7 +12,12 @@ const COR: Record<string, string> = {
   AUTORIZADA: "#15803d", CANCELADA: "#6b7280", REJEITADA: "#dc2626", DENEGADA: "#dc2626", INCERTA: "#d97706", ASSINADA: "#d97706",
 };
 
+interface Rascunho {
+  id: string; loja: string; fornecedor: string; notaOriginalNumero: string; caso: string; itens: number; updatedAt: string;
+}
+
 export default function NotasEmitidasPage() {
+  const [rascunhos, setRascunhos] = useState<Rascunho[]>([]);
   const [lista, setLista] = useState<Emissao[]>([]);
   const [carregando, setCarregando] = useState(true);
   const [ocupado, setOcupado] = useState<string | null>(null);
@@ -24,6 +29,8 @@ export default function NotasEmitidasPage() {
     const res = await fetch("/api/emissor/emissoes");
     const data = await res.json();
     setLista(data.emissoes ?? []);
+    const r = await (await fetch("/api/emissor/rascunhos")).json();
+    setRascunhos(r.rascunhos ?? []);
     setCarregando(false);
   }
   useEffect(() => { carregar(); }, []);
@@ -36,6 +43,12 @@ export default function NotasEmitidasPage() {
     const data = await res.json();
     if (!res.ok) setErro(data.error ?? "Erro.");
     setOcupado(null);
+    await carregar();
+  }
+
+  async function excluirRascunho(id: string) {
+    if (!window.confirm("Excluir este rascunho? Nenhuma nota foi emitida, então nada fiscal é afetado.")) return;
+    await fetch(`/api/emissor/rascunhos/${id}`, { method: "DELETE" });
     await carregar();
   }
 
@@ -56,6 +69,27 @@ export default function NotasEmitidasPage() {
   return (
     <div>
       {erro && <p className="status-erro">{erro}</p>}
+      {rascunhos.length > 0 && (
+        <div className="card" style={{ marginBottom: 16, fontSize: 13 }}>
+          <b>Rascunhos (não enviados à SEFAZ)</b>
+          <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 8 }}>
+            <tbody>
+              {rascunhos.map((r) => (
+                <tr key={r.id} style={{ borderTop: "1px solid var(--border)" }}>
+                  <td style={{ padding: "6px 8px" }}>{r.loja}</td>
+                  <td style={{ padding: "6px 8px" }}>{r.fornecedor} — NF {r.notaOriginalNumero}</td>
+                  <td style={{ padding: "6px 8px" }}>{r.itens} item(ns){r.caso ? ` · case ${r.caso}` : ""}</td>
+                  <td style={{ padding: "6px 8px" }}>{new Date(r.updatedAt).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" })}</td>
+                  <td style={{ padding: "6px 8px", textAlign: "right", whiteSpace: "nowrap" }}>
+                    <a href={`/emissor-nfe/devolucao?rascunho=${r.id}`}>Abrir</a>{" · "}
+                    <a href="#" onClick={(e) => { e.preventDefault(); excluirRascunho(r.id); }}>Excluir</a>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
       <div className="card" style={{ padding: 0, overflowX: "auto" }}>
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
           <thead>
