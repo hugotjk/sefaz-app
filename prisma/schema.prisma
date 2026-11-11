@@ -413,3 +413,36 @@ model EmissorLoja {
   ultimoNumeroAntigo Int?
   updatedAt          DateTime @updatedAt
 }
+
+// Notas emitidas pelo Emissor de NF-e (cada tentativa de envio à SEFAZ).
+// ambiente: 1 = produção, 2 = homologação.
+// status: ASSINADA (gerada/assinada, ainda sem resposta) | AUTORIZADA | REJEITADA |
+//         DENEGADA | INCERTA (sem resposta da SEFAZ: consultar a chave antes de reutilizar o número).
+model EmissaoNfe {
+  id                 String    @id @default(cuid())
+  lojaCnpj           String
+  ambiente           Int
+  serie              Int
+  numero             Int
+  chave              String    @unique
+  status             String
+  cStat              String?
+  xMotivo            String?
+  nProt              String?
+  dhRecbto           DateTime?
+  vNF                String
+  notaOriginalChave  String
+  notaOriginalNumero String
+  caso               String
+  infCpl             String
+  contador           Boolean   @default(true)
+  selecao            Json
+  xmlOriginal        String    @db.Text
+  xmlAssinado        String?   @db.Text
+  xmlAutorizado      String?   @db.Text
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  @@unique([lojaCnpj, ambiente, serie, numero])
+  @@index([lojaCnpj, ambiente])
+}

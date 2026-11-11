@@ -11,6 +11,8 @@ interface Analise {
   contadorPadrao: string;
   infCplModelo: string;
 }
+interface Destinatario { cnpj: string; nome: string; ie: string; municipio: string; uf: string }
+interface Emissao { id: string; numero: number; serie: number; status: string; cStat: string | null; xMotivo: string | null; ambiente: number }
 interface Gerado { xml: string; chave: string; vNF: string; totalItens: number; serie: number; numero: number }
 
 export default function DevolucaoPage() {
@@ -23,15 +25,60 @@ export default function DevolucaoPage() {
   const [erro, setErro] = useState<string | null>(null);
   const [carregando, setCarregando] = useState(false);
   const [gerado, setGerado] = useState<Gerado | null>(null);
+  const [semLoja, setSemLoja] = useState<Destinatario | null>(null);
+  const [novoCrt, setNovoCrt] = useState("1");
+  const [novaSerie, setNovaSerie] = useState("");
+  const [emissao, setEmissao] = useState<Emissao | null>(null);
+  const [teste, setTeste] = useState<string | null>(null);
 
   async function analisar(f: File) {
     setArquivo(f); setAnalise(null); setGerado(null); setErro(null); setQtds({}); setCaso(""); setInfCpl(null);
+    setSemLoja(null); setEmissao(null); setTeste(null);
     const fd = new FormData();
     fd.set("acao", "analisar"); fd.set("xml", f);
     const res = await fetch("/api/emissor/devolucao", { method: "POST", body: fd });
     const data = await res.json();
     if (!res.ok) { setErro(data.error ?? "Erro."); return; }
+    if (data.lojaNaoCadastrada) { setSemLoja(data.destinatario); return; }
     setAnalise(data);
+  }
+
+  async function cadastrarLoja() {
+    if (!arquivo) return;
+    setCarregando(true); setErro(null);
+    const fd = new FormData();
+    fd.set("xml", arquivo); fd.set("crt", novoCrt); fd.set("serie", novaSerie);
+    const res = await fetch("/api/emissor/lojas", { method: "POST", body: fd });
+    const data = await res.json();
+    setCarregando(false);
+    if (!res.ok) { setErro(data.error ?? "Erro ao cadastrar."); return; }
+    await analisar(arquivo);
+  }
+
+  async function testarConexao() {
+    if (!arquivo) return;
+    setCarregando(true); setErro(null); setTeste(null);
+    const fd = new FormData();
+    fd.set("acao", "testar"); fd.set("xml", arquivo);
+    const res = await fetch("/api/emissor/devolucao", { method: "POST", body: fd });
+    const data = await res.json();
+    setCarregando(false);
+    if (!res.ok) { setErro(data.error ?? "Erro."); return; }
+    setTeste(`SEFAZ (homologação): ${data.cStat} — ${data.xMotivo}`);
+  }
+
+  async function enviar() {
+    if (!arquivo) return;
+    setCarregando(true); setErro(null); setEmissao(null);
+    const fd = new FormData();
+    fd.set("acao", "enviar"); fd.set("xml", arquivo); fd.set("ambiente", "2");
+    fd.set("selecao", JSON.stringify(selecao)); fd.set("infCpl", infFinal); fd.set("caso", caso);
+    fd.set("contador", contador ? "1" : "0");
+    const res = await fetch("/api/emissor/devolucao", { method: "POST", body: fd });
+    const data = await res.json();
+    setCarregando(false);
+    if (!res.ok) { setErro(data.error ?? "Erro."); return; }
+    setEmissao(data.emissao);
   }
 
   const infAuto = analise ? analise.infCplModelo.replace("{CASE}", caso) : "";
@@ -74,6 +121,32 @@ export default function DevolucaoPage() {
         </div>
       </div>
       {erro && <p className="status-erro">{erro}</p>}
+
+      {semLoja && (
+        <div className="card" style={{ marginBottom: 16, fontSize: 14 }}>
+          <p style={{ marginTop: 0 }}>
+            <b>Loja ainda não cadastrada:</b> {semLoja.nome} — CNPJ {semLoja.cnpj}, IE {semLoja.ie}, {semLoja.municipio}/{semLoja.uf}.
+            Os dados de endereço vêm da própria nota. Falta você informar o regime e a série:
+          </p>
+          <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "end" }}>
+            <div className="field" style={{ marginBottom: 0 }}>
+              <label>Regime</label>
+              <select value={novoCrt} onChange={(e) => setNovoCrt(e.target.value)} style={{ padding: 6 }}>
+                <option value="1">Simples Nacional (CRT 1)</option>
+                <option value="3">Regime normal (CRT 3)</option>
+              </select>
+            </div>
+            <div className="field" style={{ marginBottom: 0 }}>
+              <label>Série própria (opcional agora)</label>
+              <input value={novaSerie} inputMode="numeric" onChange={(e) => setNovaSerie(e.target.value.replace(/\D/g, ""))} style={{ width: 90, padding: 6 }} />
+            </div>
+            <button className="btn" disabled={carregando} onClick={cadastrarLoja}>Cadastrar esta loja</button>
+          </div>
+          <p style={{ fontSize: 12, color: "var(--text-dim)", marginBottom: 0 }}>
+            Depois envie o certificado dela em “Lojas e certificados”.
+          </p>
+        </div>
+      )}
 
       {analise && (
         <>
@@ -141,7 +214,24 @@ export default function DevolucaoPage() {
           <button className="btn" disabled={!pronto || carregando} onClick={gerar}>
             {carregando ? "Gerando..." : "Gerar prévia do XML"}
           </button>
+          <button className="btn" style={{ marginLeft: 8 }} disabled={!pronto || carregando} onClick={enviar}>
+            {carregando ? "Aguarde..." : "Enviar à SEFAZ (homologação)"}
+          </button>
+          <button className="btn-secundario" style={{ marginLeft: 8 }} disabled={carregando} onClick={testarConexao}>
+            Testar conexão
+          </button>
           <span style={{ marginLeft: 12, fontSize: 13, color: "var(--text-dim)" }}>{selecao.length} item(ns) selecionado(s)</span>
+          {teste && <p style={{ fontSize: 13 }}>{teste}</p>}
+          {emissao && (
+            <div className="card" style={{ marginTop: 16 }}>
+              <p style={{ marginTop: 0 }} className={emissao.status === "AUTORIZADA" ? "status-ok" : "status-erro"}>
+                <b>{emissao.status === "AUTORIZADA" ? "Autorizada" : emissao.status === "REJEITADA" ? "Rejeitada" : emissao.status}</b>
+                {" "}(homologação — sem valor fiscal) · NF série {emissao.serie} nº {emissao.numero}
+              </p>
+              <p style={{ fontSize: 14 }}>{emissao.cStat} — {emissao.xMotivo}</p>
+              <a href="/emissor-nfe/notas">Ver em “Notas emitidas”</a>
+            </div>
+          )}
         </>
       )}
 

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { emitir, PRODUCAO_LIBERADA, testarConexao } from "@/lib/emissor-envio";
 import {
   CNPJ_CONTADOR_PADRAO,
   lerNotaOriginal,
@@ -29,11 +30,11 @@ export async function POST(req: NextRequest) {
   }
 
   const loja = await prisma.emissorLoja.findUnique({ where: { cnpj: original.destCnpj } });
-  if (!loja)
-    return NextResponse.json(
-      { error: `O destinatário da nota (CNPJ ${original.destCnpj}) não está cadastrado em Lojas e certificados.` },
-      { status: 400 }
-    );
+  if (!loja) {
+    if (acao === "analisar")
+      return NextResponse.json({ original, lojaNaoCadastrada: true, destinatario: original.destinatario });
+    return NextResponse.json({ error: "Loja destinatária não cadastrada." }, { status: 400 });
+  }
 
   if (acao === "analisar") {
     return NextResponse.json({
@@ -43,6 +44,7 @@ export async function POST(req: NextRequest) {
         serie: loja.serie, proximoNumero: loja.proximoNumero,
       },
       contadorPadrao: CNPJ_CONTADOR_PADRAO,
+      producaoLiberada: PRODUCAO_LIBERADA,
       infCplModelo: textoInfCpl(loja, original.numero, "{CASE}"),
     });
   }
@@ -66,6 +68,34 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ...r, serie: loja.serie, numero: loja.proximoNumero });
     } catch (e: any) {
       return NextResponse.json({ error: e?.message ?? "Erro ao gerar." }, { status: 400 });
+    }
+  }
+  if (acao === "testar") {
+    try {
+      const r = await testarConexao(loja.cnpj, 2);
+      return NextResponse.json(r);
+    } catch (e: any) {
+      return NextResponse.json({ error: e?.message ?? "Falha ao conectar." }, { status: 400 });
+    }
+  }
+
+  if (acao === "enviar") {
+    let selecao: { nItem: number; qtd: number }[];
+    try {
+      selecao = JSON.parse(String(form.get("selecao") ?? "[]"));
+    } catch {
+      return NextResponse.json({ error: "Seleção inválida." }, { status: 400 });
+    }
+    const ambiente = form.get("ambiente") === "1" ? 1 : 2;
+    try {
+      const emissao = await emitir({
+        xmlOriginal: await arquivo.text(), selecao,
+        caso: String(form.get("caso") ?? ""), infCpl: String(form.get("infCpl") ?? ""),
+        contador: form.get("contador") === "1", ambiente,
+      });
+      return NextResponse.json({ emissao });
+    } catch (e: any) {
+      return NextResponse.json({ error: e?.message ?? "Erro ao emitir." }, { status: 400 });
     }
   }
   return NextResponse.json({ error: "Ação inválida." }, { status: 400 });
