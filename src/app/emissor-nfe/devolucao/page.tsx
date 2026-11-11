@@ -246,31 +246,36 @@ export default function DevolucaoPage() {
           </div>
 
           <div className="card" style={{ padding: 0, overflowX: "auto", marginBottom: 16 }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
               <thead>
-                <tr style={{ textAlign: "left", color: "var(--text-dim)", fontSize: 12 }}>
-                  <th style={th}>Produto</th><th style={th}>EAN</th><th style={th}>Qtd. na nota</th>
-                  <th style={th}>Valor unit.</th><th style={th}>ICMS</th><th style={th}>Devolver</th>
+                <tr style={{ textAlign: "left", color: "var(--text-dim)", fontSize: 11 }}>
+                  <th style={th}>Produto</th><th style={th}>EAN</th>
+                  <th style={{ ...th, textAlign: "right" }}>Qtd</th>
+                  <th style={{ ...th, textAlign: "right" }}>Unit.</th>
+                  <th style={{ ...th, textAlign: "right" }}>ICMS</th>
+                  <th style={th}>Devolver</th>
                 </tr>
               </thead>
               <tbody>
                 {analise.original.itens.map((it) => (
                   <tr key={it.nItem} style={{ borderTop: "1px solid var(--border)" }}>
-                    <td style={td}>{it.xProd}<div style={{ fontSize: 12, color: "var(--text-dim)" }}>{it.cProd}</div></td>
-                    <td style={td}>{it.ean}</td>
-                    <td style={td}>{it.qCom}</td>
-                    <td style={td}>{Number(it.vUnCom).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                    <td style={td}>{Number(it.pICMS)}%</td>
-                    <td style={td}>
+                    <td style={{ ...td, whiteSpace: "nowrap" }}>
+                      {it.xProd} <span style={{ color: "var(--text-dim)", fontSize: 11 }}>{it.cProd}</span>
+                    </td>
+                    <td style={{ ...td, whiteSpace: "nowrap" }}>{it.ean}</td>
+                    <td style={{ ...td, textAlign: "right" }}>{it.qCom}</td>
+                    <td style={{ ...td, textAlign: "right", whiteSpace: "nowrap" }}>{Number(it.vUnCom).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                    <td style={{ ...td, textAlign: "right" }}>{Number(it.pICMS)}%</td>
+                    <td style={{ ...td, whiteSpace: "nowrap" }}>
                       <input
                         inputMode="numeric" value={qtds[it.nItem] ?? ""} placeholder="0"
                         onChange={(e) => {
                           const n = Math.min(it.qCom, Number(e.target.value.replace(/\D/g, "") || 0));
                           setQtds({ ...qtds, [it.nItem]: n ? String(n) : "" });
                         }}
-                        style={{ width: 70, padding: "4px 6px", border: "1px solid var(--border)", borderRadius: 6 }}
+                        style={{ width: 52, height: 24, padding: "0 6px", fontSize: 12, border: "1px solid var(--border)", borderRadius: 5 }}
                       />
-                      <button type="button" className="btn-secundario" style={{ marginLeft: 6, padding: "2px 8px" }}
+                      <button type="button" className="eb" style={{ height: 24, padding: "0 8px", fontSize: 11, marginLeft: 4 }}
                         onClick={() => setQtds({ ...qtds, [it.nItem]: String(it.qCom) })}>tudo</button>
                     </td>
                   </tr>
@@ -349,5 +354,5 @@ export default function DevolucaoPage() {
   );
 }
 
-const th: React.CSSProperties = { padding: "10px 12px", fontWeight: 600 };
-const td: React.CSSProperties = { padding: "10px 12px", verticalAlign: "top" };
+const th: React.CSSProperties = { padding: "6px 10px", fontWeight: 600 };
+const td: React.CSSProperties = { padding: "3px 10px", verticalAlign: "middle" };
