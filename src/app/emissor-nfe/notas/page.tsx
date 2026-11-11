@@ -57,10 +57,10 @@ export default function NotasEmitidasPage() {
     <div>
       {erro && <p className="status-erro">{erro}</p>}
       <div className="card" style={{ padding: 0, overflowX: "auto" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
           <thead>
-            <tr style={{ textAlign: "left", color: "var(--text-dim)", fontSize: 12 }}>
-              <th style={th}>Situação</th><th style={th}>Loja</th><th style={th}>NF</th>
+            <tr style={{ textAlign: "left", color: "var(--text-dim)", fontSize: 11 }}>
+              <th style={th}>Situação</th><th style={th}>Loja</th><th style={th}>Série-nº</th>
               <th style={th}>Referente à NF</th><th style={th}>Valor</th><th style={th}>Data</th><th style={th}></th>
             </tr>
           </thead>
@@ -69,33 +69,35 @@ export default function NotasEmitidasPage() {
             {!carregando && lista.length === 0 && <tr><td style={td} colSpan={7}>Nenhuma nota emitida ainda.</td></tr>}
             {lista.map((e) => (
               <tr key={e.id} style={{ borderTop: "1px solid var(--border)" }}>
-                <td style={td}>
+                <td style={td} title={`${e.cStat ?? ""} ${e.xMotivo ?? ""}`}>
                   <b style={{ color: COR[e.status] ?? "inherit" }}>{e.status === "INCERTA" ? "SEM RESPOSTA" : e.status}</b>
-                  {e.ambiente === 2 && <span style={{ marginLeft: 6, fontSize: 11, background: "var(--panel-2)", padding: "1px 6px", borderRadius: 4 }}>HOMOLOGAÇÃO</span>}
-                  <div style={{ fontSize: 12, color: "var(--text-dim)" }}>{e.cStat} {e.xMotivo}</div>
+                  {e.ambiente === 2 && <span style={{ marginLeft: 4, fontSize: 9, background: "var(--panel-2)", padding: "0 4px", borderRadius: 3 }}>HOMOLOG.</span>}
+                  <div style={{ fontSize: 10, color: "var(--text-dim)", maxWidth: 190, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {e.cStat} {e.xMotivo}
+                  </div>
                 </td>
-                <td style={td}>{e.loja}</td>
-                <td style={td}>série {e.serie} · nº {e.numero}</td>
-                <td style={td}>{e.notaOriginalNumero}<div style={{ fontSize: 12, color: "var(--text-dim)" }}>case {e.caso}</div></td>
-                <td style={td}>{Number(e.vNF).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</td>
-                <td style={td}>{new Date(e.createdAt).toLocaleString("pt-BR")}</td>
+                <td style={{ ...td, maxWidth: 170, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={e.loja}>{e.loja}</td>
+                <td style={{ ...td, whiteSpace: "nowrap" }}>{e.serie}-{e.numero}</td>
+                <td style={{ ...td, whiteSpace: "nowrap" }}>{e.notaOriginalNumero}<div style={{ fontSize: 10, color: "var(--text-dim)" }}>case {e.caso}</div></td>
+                <td style={{ ...td, whiteSpace: "nowrap" }}>{Number(e.vNF).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</td>
+                <td style={{ ...td, whiteSpace: "nowrap" }}>{new Date(e.createdAt).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}</td>
                 <td style={{ ...td, whiteSpace: "nowrap" }}>
-                  <a className="btn-secundario" style={{ marginRight: 6, textDecoration: "none" }} href={`/api/emissor/emissoes/${e.id}?tipo=xml`}>XML</a>
+                  <a className="btn-secundario" style={{ ...bt, marginRight: 4, textDecoration: "none" }} href={`/api/emissor/emissoes/${e.id}?tipo=xml`}>XML</a>
                   {e.status === "AUTORIZADA" && (
-                    <a className="btn-secundario" style={{ marginRight: 6, textDecoration: "none" }} href={`/api/emissor/emissoes/${e.id}?tipo=danfe`} target="_blank">DANFE</a>
+                    <a className="btn-secundario" style={{ ...bt, marginRight: 4, textDecoration: "none" }} href={`/api/emissor/emissoes/${e.id}?tipo=danfe`} target="_blank">DANFE</a>
                   )}
                   {["INCERTA", "ASSINADA", "AUTORIZADA", "CANCELADA"].includes(e.status) && (
-                    <button className="btn-secundario" disabled={ocupado === e.id} onClick={() => acao(e.id, "consultar")}>Consultar</button>
+                    <button className="btn-secundario" style={bt} disabled={ocupado === e.id} onClick={() => acao(e.id, "consultar")}>Consultar</button>
                   )}
                   {e.status === "CANCELADA" && (
-                    <a className="btn-secundario" style={{ marginRight: 6, textDecoration: "none" }} href={`/api/emissor/emissoes/${e.id}?tipo=cancelamento`}>XML canc.</a>
+                    <a className="btn-secundario" style={{ ...bt, marginRight: 4, textDecoration: "none" }} href={`/api/emissor/emissoes/${e.id}?tipo=cancelamento`}>XML canc.</a>
                   )}
                   {e.status === "AUTORIZADA" && (
-                    <button className="btn-secundario" style={{ marginLeft: 6 }} disabled={ocupado === e.id}
+                    <button className="btn-secundario" style={{ ...bt, marginLeft: 4 }} disabled={ocupado === e.id}
                       onClick={() => { setCancelando(e); setJust(""); setErro(null); }}>Cancelar</button>
                   )}
                   {["REJEITADA", "INCERTA"].includes(e.status) && (
-                    <button className="btn-secundario" style={{ marginLeft: 6 }} disabled={ocupado === e.id} onClick={() => acao(e.id, "reenviar")}>Reenviar</button>
+                    <button className="btn-secundario" style={{ ...bt, marginLeft: 4 }} disabled={ocupado === e.id} onClick={() => acao(e.id, "reenviar")}>Reenviar</button>
                   )}
                 </td>
               </tr>
@@ -133,5 +135,6 @@ export default function NotasEmitidasPage() {
   );
 }
 
-const th: React.CSSProperties = { padding: "10px 12px", fontWeight: 600 };
-const td: React.CSSProperties = { padding: "10px 12px", verticalAlign: "top" };
+const th: React.CSSProperties = { padding: "6px 8px", fontWeight: 600 };
+const td: React.CSSProperties = { padding: "5px 8px", verticalAlign: "middle" };
+const bt: React.CSSProperties = { padding: "2px 8px", fontSize: 11, lineHeight: 1.4 };
