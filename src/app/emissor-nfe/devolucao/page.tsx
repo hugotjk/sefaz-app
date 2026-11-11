@@ -120,7 +120,7 @@ export default function DevolucaoPage() {
           <input type="file" accept=".xml" onChange={(e) => e.target.files?.[0] && analisar(e.target.files[0])} />
         </div>
       </div>
-      {erro && <p className="status-erro">{erro}</p>}
+      {erro && !analise && <p className="status-erro">{erro}</p>}
 
       {semLoja && (
         <div className="card" style={{ marginBottom: 16, fontSize: 14 }}>
@@ -222,6 +222,7 @@ export default function DevolucaoPage() {
           </button>
           <span style={{ marginLeft: 12, fontSize: 13, color: "var(--text-dim)" }}>{selecao.length} item(ns) selecionado(s)</span>
           {teste && <p style={{ fontSize: 13 }}>{teste}</p>}
+          {erro && <p className="status-erro" style={{ marginTop: 12 }}>{erro}</p>}
           {emissao && (
             <div className="card" style={{ marginTop: 16 }}>
               <p style={{ marginTop: 0 }} className={emissao.status === "AUTORIZADA" ? "status-ok" : "status-erro"}>
