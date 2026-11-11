@@ -2,13 +2,31 @@
  * Comunicação com os webservices NF-e 4.00 da SVRS (autoriza RJ).
  * Hosts/paths podem ser trocados por env (SEFAZ_NFE_HOST_PROD / SEFAZ_NFE_HOST_HOM) se a SEFAZ mudar.
  */
+import fs from "fs";
 import https from "https";
+import path from "path";
+import tls from "tls";
 import { XMLParser } from "fast-xml-parser";
 
 const HOST: Record<1 | 2, string> = {
   1: process.env.SEFAZ_NFE_HOST_PROD || "nfe.svrs.rs.gov.br",
   2: process.env.SEFAZ_NFE_HOST_HOM || "nfe-homologacao.svrs.rs.gov.br",
 };
+
+/**
+ * Autoridades certificadoras dos servidores da SVRS (ICP-Brasil), que o Node não traz de fábrica.
+ * Vêm de SEFAZ_CA_PEM (texto PEM) ou de src/certs/sefaz-cadeia.pem (gerado por scripts/baixar-cadeia-sefaz.ts).
+ */
+function cadeiaExtra(): string[] {
+  try {
+    const pem =
+      process.env.SEFAZ_CA_PEM ||
+      fs.readFileSync(path.join(process.cwd(), "src", "certs", "sefaz-cadeia.pem"), "utf8");
+    return pem.match(/-----BEGIN CERTIFICATE-----[\s\S]*?-----END CERTIFICATE-----/g) ?? [];
+  } catch {
+    return [];
+  }
+}
 
 const SERVICOS = {
   status: {
@@ -52,6 +70,7 @@ function post(servico: keyof typeof SERVICOS, ambiente: Ambiente, corpo: string,
       {
         host: HOST[ambiente], path: s.path, method: "POST",
         pfx: Buffer.from(pfxBase64, "base64"), passphrase: senha, rejectUnauthorized: true,
+        ca: [...tls.rootCertificates, ...cadeiaExtra()],
         headers: {
           "Content-Type": `application/soap+xml; charset=utf-8; action="${s.ns}/${s.action}"`,
           "Content-Length": Buffer.byteLength(envelope),
