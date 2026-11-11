@@ -176,6 +176,12 @@ export default function LojasEmissorPage() {
             <p style={{ fontSize: 13, color: "var(--text-dim)" }}>
               CNPJ {fmtCnpj(alvo.cnpj)}. O app confere se o certificado é desta loja antes de salvar.
             </p>
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (!enviando && arquivo && senha) enviarCertificado();
+              }}
+            >
             <div className="field">
               <label>Arquivo .pfx</label>
               <input type="file" accept=".pfx,.p12" onChange={(e) => setArquivo(e.target.files?.[0] ?? null)} />
@@ -186,11 +192,12 @@ export default function LojasEmissorPage() {
             </div>
             {erro && <p className="status-erro">{erro}</p>}
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-              <button className="btn-secundario" disabled={enviando} onClick={() => setAlvo(null)}>Cancelar</button>
-              <button className="btn" disabled={enviando || !arquivo || !senha} onClick={enviarCertificado}>
+              <button type="button" className="btn-secundario" disabled={enviando} onClick={() => setAlvo(null)}>Cancelar</button>
+              <button type="submit" className="btn" disabled={enviando || !arquivo || !senha}>
                 {enviando ? "Enviando..." : "Salvar certificado"}
               </button>
             </div>
+            </form>
           </div>
         </div>
       )}
