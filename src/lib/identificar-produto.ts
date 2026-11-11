@@ -989,6 +989,22 @@ function referenciaFormula3(A: string, G: string, H: string, P: string, Q: strin
   return null;
 }
 
+/**
+ * Lacoste (DBB Distribuidora) — CALÇADOS: o código da nota é PRODUTO + COR(3) + TAMANHO e a descrição
+ * termina com o PRODUTO. Referência no sistema = PRODUTO.COR (o tamanho não entra: vem do LACOSTE.BIN).
+ *   46CFA0028BR1Y53 / "... 46CFA0028BR" -> 46CFA0028BR.1Y5
+ *   51SUC000521G1,5 / "... 51SUC0005"   -> 51SUC0005.21G
+ * Só aplica se o código começa com o produto da descrição e ainda não tem ponto (roupas ficam como estão).
+ */
+function referenciaLacoste(G: string, H: string): string | null {
+  const prod = H.trim().split(/\s+/).pop()?.toUpperCase() ?? "";
+  const cod = G.trim().toUpperCase();
+  if (prod.length < 6 || cod.includes(".") || !cod.startsWith(prod)) return null;
+  const cor = cod.slice(prod.length, prod.length + 3);
+  if (cor.length < 3) return null;
+  return `${prod}.${cor}`;
+}
+
 export function identificarReferenciaFornecedor(
   razaoSocialEmitente: string,
   codigoProduto: string,
@@ -1001,6 +1017,11 @@ export function identificarReferenciaFornecedor(
   const H = s(descricaoProduto);
   const P = s(informacoesComplementares);
   const Q = s(infAdProd ?? ""); // det/infAdProd — info adicional DO ITEM (não da nota)
+
+  if (igual(A, "DBB DISTRIBUIDORA DE PRODUTOS DE BELEZA LTDA")) {
+    const v = referenciaLacoste(G, H);
+    if (v) return { valor: v, comRegraEspecifica: true };
+  }
 
   // Tenta Fórmula 2; se a empresa não casou lá, tenta Fórmula 3.
   for (const fn of [referenciaFormula2, referenciaFormula3]) {
