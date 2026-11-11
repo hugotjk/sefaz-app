@@ -55,6 +55,10 @@ export interface NotaOriginal {
     uf: string; cep: string;
   };
   destCnpj: string;
+  destinatario: {
+    cnpj: string; nome: string; ie: string; logradouro: string; numero: string; complemento?: string;
+    bairro: string; codMunicipio: string; municipio: string; uf: string; cep: string; fone?: string;
+  };
   itens: ItemOriginal[];
 }
 
@@ -103,6 +107,14 @@ export function lerNotaOriginal(xml: string): NotaOriginal {
       uf: String(a.UF), cep: String(a.CEP),
     },
     destCnpj: String(inf.dest?.CNPJ ?? ""),
+    destinatario: {
+      cnpj: String(inf.dest?.CNPJ ?? ""), nome: String(inf.dest?.xNome ?? ""), ie: String(inf.dest?.IE ?? ""),
+      logradouro: String(inf.dest?.enderDest?.xLgr ?? ""), numero: String(inf.dest?.enderDest?.nro ?? ""),
+      complemento: inf.dest?.enderDest?.xCpl ? String(inf.dest.enderDest.xCpl) : undefined,
+      bairro: String(inf.dest?.enderDest?.xBairro ?? ""), codMunicipio: String(inf.dest?.enderDest?.cMun ?? ""),
+      municipio: String(inf.dest?.enderDest?.xMun ?? ""), uf: String(inf.dest?.enderDest?.UF ?? ""),
+      cep: String(inf.dest?.enderDest?.CEP ?? ""), fone: inf.dest?.enderDest?.fone ? String(inf.dest.enderDest.fone) : undefined,
+    },
     itens,
   };
 }
