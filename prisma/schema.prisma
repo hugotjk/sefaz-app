@@ -385,3 +385,31 @@ model DocumentoLoja {
 
   @@index([escopo, chave])
 }
+
+// Emissor de NF-e (devolução de compra): cadastro fiscal de cada loja emitente.
+// O certificado A1 fica na tabela Certificate (mesmo CNPJ), compartilhada com a
+// sincronização da SEFAZ. Populado por scripts/seed-emissor-lojas.ts.
+model EmissorLoja {
+  cnpj               String   @id // só dígitos
+  razaoSocial        String
+  ie                 String?
+  im                 String?
+  cnae               String?
+  crt                Int // 1 = Simples Nacional, 3 = Regime normal
+  logradouro         String?
+  numero             String?
+  complemento        String?
+  bairro             String?
+  codMunicipio       String?
+  municipio          String?
+  uf                 String?
+  cep                String?
+  fone               String?
+  // Série própria do emissor do app (null até o usuário definir) e o próximo
+  // número a usar nela. As NF-e antigas (outro sistema) ficam só de referência.
+  serie              Int?
+  proximoNumero      Int      @default(1)
+  serieAntiga        Int?
+  ultimoNumeroAntigo Int?
+  updatedAt          DateTime @updatedAt
+}
