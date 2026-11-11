@@ -7,6 +7,7 @@ import https from "https";
 import path from "path";
 import tls from "tls";
 import { XMLParser } from "fast-xml-parser";
+import { lerPfx } from "./nfe-assinatura";
 
 const HOST: Record<1 | 2, string> = {
   1: process.env.SEFAZ_NFE_HOST_PROD || "nfe.svrs.rs.gov.br",
@@ -70,11 +71,14 @@ function post(servico: keyof typeof SERVICOS, ambiente: Ambiente, corpo: string,
   const envelope =
     `<?xml version="1.0" encoding="utf-8"?><soap12:Envelope xmlns:soap12="http://www.w3.org/2003/05/soap-envelope"><soap12:Body>` +
     `<nfeDadosMsg xmlns="${s.ns}">${corpo}</nfeDadosMsg></soap12:Body></soap12:Envelope>`;
+  // Lê o .pfx com node-forge (aceita criptografia antiga, ex. RC2) e entrega key/cert em PEM;
+  // o OpenSSL 3 do Node recusa esses .pfx ("Unsupported PKCS12 PFX data").
+  const { privateKeyPem, certPem } = lerPfx(pfxBase64, senha);
   return new Promise<string>((resolve, reject) => {
     const req = https.request(
       {
         host: HOST[ambiente], path: s.path, method: "POST",
-        pfx: Buffer.from(pfxBase64, "base64"), passphrase: senha, rejectUnauthorized: true,
+        key: privateKeyPem, cert: certPem, rejectUnauthorized: true,
         ca: [...tls.rootCertificates, ...cadeiaExtra()],
         headers: {
           "Content-Type": `application/soap+xml; charset=utf-8; action="${s.ns}/${s.action}"`,
