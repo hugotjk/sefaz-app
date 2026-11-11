@@ -134,9 +134,12 @@ export function lerProtocolo(resp: string): RetornoAutorizacao {
   return { cStat: String(ret.cStat), xMotivo: String(ret.xMotivo) };
 }
 
+/** Remove a declaração <?xml ...?>: não pode aparecer no meio de outro XML (envelope SOAP / nfeProc). */
+const semDeclaracao = (xml: string) => xml.replace(/^\s*<\?xml[^>]*\?>\s*/, "");
+
 /** Envia uma NF-e assinada (lote de 1, síncrono). */
 export async function autorizarNFe(nfeAssinada: string, ambiente: Ambiente, pfx: string, senha: string): Promise<RetornoAutorizacao> {
-  const corpo = `<enviNFe xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00"><idLote>${Date.now().toString().slice(-15)}</idLote><indSinc>1</indSinc>${nfeAssinada}</enviNFe>`;
+  const corpo = `<enviNFe xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00"><idLote>${Date.now().toString().slice(-15)}</idLote><indSinc>1</indSinc>${semDeclaracao(nfeAssinada)}</enviNFe>`;
   return lerProtocolo(await post("autorizacao", ambiente, corpo, pfx, senha));
 }
 
@@ -147,5 +150,5 @@ export async function consultarChaveNFe(chave: string, ambiente: Ambiente, pfx: 
 
 /** Monta o arquivo final (nfeProc) = NFe assinada + protocolo de autorização. */
 export function montarNfeProc(nfeAssinada: string, protNFeXml: string): string {
-  return `<?xml version="1.0" encoding="utf-8"?><nfeProc xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00">${nfeAssinada}${protNFeXml}</nfeProc>`;
+  return `<?xml version="1.0" encoding="utf-8"?><nfeProc xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00">${semDeclaracao(nfeAssinada)}${protNFeXml}</nfeProc>`;
 }
