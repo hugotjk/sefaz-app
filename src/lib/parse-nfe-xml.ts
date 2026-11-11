@@ -168,6 +168,8 @@ export interface NFeParaExibir {
   };
 
   informacoesComplementares: string;
+  /** 1 = produção, 2 = homologação (sem valor fiscal) */
+  ambiente?: string;
 }
 
 function enderecoTexto(end: any): string {
@@ -323,5 +325,6 @@ function extrairCampos(infNFe: any, protNFe: any): NFeParaExibir {
     },
 
     informacoesComplementares: n(infAdic.infCpl),
+    ambiente: infNFe.ide?.tpAmb ? String(infNFe.ide.tpAmb) : undefined,
   };
 }
