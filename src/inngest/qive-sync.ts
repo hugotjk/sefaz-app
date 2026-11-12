@@ -98,7 +98,7 @@ async function bancoCheio(): Promise<{ cheio: boolean; mb: number }> {
 /** CNPJs de destinatário a consultar: lojas ativas + certificados + destinatários já vistos nas notas. */
 async function cnpjsDaConta(): Promise<string[]> {
   const lojas = await prisma.lojaCadastro.findMany({ where: { ativa: true }, select: { cnpj: true } });
-  const certs = await prisma.certificate.findMany({ select: { cnpj: true } });
+  const certs = await prisma.certificate.findMany({ where: { consultaAtiva: true }, select: { cnpj: true } });
   const notas = await prisma.$queryRaw<{ c: string }[]>`SELECT DISTINCT "cnpjDestino" AS c FROM "Note" WHERE "cnpjDestino" IS NOT NULL`;
   const set = new Set<string>();
   for (const x of [...lojas.map((l) => l.cnpj), ...certs.map((c) => c.cnpj), ...notas.map((n) => n.c)]) {

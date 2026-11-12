@@ -17,6 +17,7 @@ interface CertificadoSalvo {
   status: "PENDING" | "ACTIVE" | "PASSWORD_ERROR" | "EXPIRED";
   lastError: string | null;
   backfillDone: boolean;
+  consultaAtiva: boolean;
   validUntil: string | null;
   createdAt: string;
   _count: { notes: number };
@@ -32,6 +33,7 @@ interface LojaSemCertificado {
 }
 
 function statusLabel(c: CertificadoSalvo) {
+  if (!c.consultaAtiva && c.status === "ACTIVE") return { texto: "Consulta pausada (só emissão)", classe: "" };
   if (c.status === "PASSWORD_ERROR") return { texto: "Senha incorreta — reenvie", classe: "status-erro" };
   if (c.status === "EXPIRED") return { texto: "Expirado", classe: "status-erro" };
   if (c.status === "ACTIVE" && !c.backfillDone)
@@ -295,6 +297,7 @@ export default function CertificadosPage() {
                 <th>Status</th>
                 <th>Notas salvas</th>
                 <th>Válido até</th>
+                <th></th>
               </tr>
             </thead>
             <tbody>
@@ -307,6 +310,18 @@ export default function CertificadosPage() {
                     <td><span className={s.classe}>{s.texto}</span></td>
                     <td>{c._count.notes}</td>
                     <td>{c.validUntil ? new Date(c.validUntil).toLocaleDateString("pt-BR") : "-"}</td>
+                    <td>
+                      <button className="btn-secundario" style={{ padding: "2px 8px", fontSize: 11 }}
+                        onClick={async () => {
+                          await fetch(`/api/certificados/${c.id}`, {
+                            method: "PATCH", headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ consultaAtiva: !c.consultaAtiva }),
+                          });
+                          await carregarCertificados();
+                        }}>
+                        {c.consultaAtiva ? "Pausar consulta" : "Retomar consulta"}
+                      </button>
+                    </td>
                   </tr>
                 );
               })}

@@ -8,6 +8,9 @@ export async function POST(_req: NextRequest, { params }: { params: { id: string
   if (!certificado) {
     return NextResponse.json({ error: "Certificado não encontrado." }, { status: 404 });
   }
+  if (!certificado.consultaAtiva) {
+    return NextResponse.json({ error: "A consulta deste certificado está pausada." }, { status: 400 });
+  }
   if (certificado.status !== "ACTIVE") {
     return NextResponse.json(
       { error: `Certificado está com status ${certificado.status}, não é possível sincronizar.` },

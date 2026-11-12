@@ -18,6 +18,7 @@ export async function GET() {
       status: true,
       lastError: true,
       backfillDone: true,
+      consultaAtiva: true,
       validUntil: true,
       createdAt: true,
       _count: { select: { notes: true } },

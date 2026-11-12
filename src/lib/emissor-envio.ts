@@ -12,7 +12,8 @@ import {
 export const PRODUCAO_LIBERADA = process.env.EMISSOR_NFE_PRODUCAO === "1";
 
 export async function carregarCertificado(cnpj: string) {
-  const cert = await prisma.certificate.findUnique({ where: { cnpj } });
+  // certificado próprio de emissão; se não houver, usa o da consulta (compatibilidade)
+  const cert = (await prisma.emissorCertificado.findUnique({ where: { cnpj } })) ?? (await prisma.certificate.findUnique({ where: { cnpj } }));
   if (!cert) throw new Error("Esta loja não tem certificado cadastrado.");
   if (cert.validUntil && cert.validUntil.getTime() < Date.now()) throw new Error("O certificado desta loja está vencido.");
   const { pfxBase64, password } = decryptCertificate(cert);
