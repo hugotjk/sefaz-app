@@ -78,6 +78,8 @@ export interface ItemNFe {
   ncm: string;
   cfop: string;
   cst: string;
+  /** orig (origem da mercadoria) — o DANFE mostra origem+CST/CSOSN (ex.: 0900). */
+  origem: string;
   unidade: string;
   quantidade: string;
   valorUnitario: string;
@@ -109,6 +111,8 @@ export interface NFeParaExibir {
   natOp: string;
   tipoOperacao: string; // "0 - Entrada" | "1 - Saída"
   dataEmissao: string;
+  /** dhSaiEnt (ou dhEmi quando ausente) */
+  dataSaida?: string;
   protocolo: string;
   dataAutorizacao: string;
 
@@ -118,6 +122,7 @@ export interface NFeParaExibir {
     ie: string;
     endereco: string;
     telefone: string;
+    bairro?: string; municipio?: string; uf?: string; cep?: string; im?: string;
   };
   destinatario: {
     nome: string;
@@ -236,6 +241,7 @@ function extrairCampos(infNFe: any, protNFe: any): NFeParaExibir {
       ncm: n(prod.NCM),
       cfop: n(prod.CFOP),
       cst: n(icmsGrupo.CST ?? icmsGrupo.CSOSN),
+      origem: icmsGrupo.orig === undefined ? "" : String(icmsGrupo.orig),
       unidade: n(prod.uCom),
       quantidade: n(prod.qCom),
       valorUnitario: n(prod.vUnCom),
@@ -267,6 +273,7 @@ function extrairCampos(infNFe: any, protNFe: any): NFeParaExibir {
     natOp: n(ide.natOp),
     tipoOperacao: tpNF === "0" ? "0 - Entrada" : tpNF === "1" ? "1 - Saída" : "",
     dataEmissao: n(ide.dhEmi),
+    dataSaida: String(ide.dhSaiEnt ?? ide.dhEmi ?? ""),
     protocolo: n(protNFe?.nProt),
     dataAutorizacao: n(protNFe?.dhRecbto),
 
@@ -276,6 +283,11 @@ function extrairCampos(infNFe: any, protNFe: any): NFeParaExibir {
       ie: n(emit.IE),
       endereco: enderecoTexto(emit.enderEmit),
       telefone: n(emit.enderEmit?.fone),
+      bairro: n(emit.enderEmit?.xBairro),
+      municipio: n(emit.enderEmit?.xMun),
+      uf: n(emit.enderEmit?.UF),
+      cep: n(emit.enderEmit?.CEP),
+      im: emit.IM === undefined ? "" : String(emit.IM),
     },
     destinatario: {
       nome: n(dest.xNome),

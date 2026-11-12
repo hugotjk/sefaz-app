@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { cancelarEmissao, consultarEmissao, emitir } from "@/lib/emissor-envio";
-import { gerarDanfePdf } from "@/lib/danfe-pdf";
+import { gerarDanfePadrao as gerarDanfePdf } from "@/lib/danfe-padrao";
 import { parseNFeXml } from "@/lib/parse-nfe-xml";
 
 export const runtime = "nodejs";

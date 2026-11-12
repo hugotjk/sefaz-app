@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { gerarDanfePdf } from "@/lib/danfe-pdf";
+import { gerarDanfePadrao as gerarDanfePdf } from "@/lib/danfe-padrao";
 import { parseNFeXml } from "@/lib/parse-nfe-xml";
 import { emitir, PRODUCAO_LIBERADA, testarConexao } from "@/lib/emissor-envio";
 import {
