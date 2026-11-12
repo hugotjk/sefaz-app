@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 
 interface Item {
-  nItem: number; cProd: string; ean: string; xProd: string; qCom: number; vUnCom: string; pICMS: string;
+  nItem: number; cProd: string; ean: string; tamanho?: string; xProd: string; qCom: number; vUnCom: string; pICMS: string;
 }
 interface Analise {
   original: { chave: string; numero: string; serie: string; emitente: { nome: string }; itens: Item[] };
@@ -249,7 +249,7 @@ export default function DevolucaoPage() {
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
               <thead>
                 <tr style={{ textAlign: "left", color: "var(--text-dim)", fontSize: 11 }}>
-                  <th style={th}>Produto</th><th style={th}>EAN</th>
+                  <th style={th}>Produto</th><th style={th}>EAN</th><th style={th}>Tam.</th>
                   <th style={{ ...th, textAlign: "right" }}>Qtd</th>
                   <th style={{ ...th, textAlign: "right" }}>Unit.</th>
                   <th style={{ ...th, textAlign: "right" }}>ICMS</th>
@@ -263,6 +263,7 @@ export default function DevolucaoPage() {
                       {it.xProd} <span style={{ color: "var(--text-dim)", fontSize: 11 }}>{it.cProd}</span>
                     </td>
                     <td style={{ ...td, whiteSpace: "nowrap" }}>{it.ean}</td>
+                    <td style={{ ...td, whiteSpace: "nowrap", fontWeight: 600 }}>{it.tamanho ?? ""}</td>
                     <td style={{ ...td, textAlign: "right" }}>{it.qCom}</td>
                     <td style={{ ...td, textAlign: "right", whiteSpace: "nowrap" }}>{Number(it.vUnCom).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                     <td style={{ ...td, textAlign: "right" }}>{Number(it.pICMS)}%</td>
