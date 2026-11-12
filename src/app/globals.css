@@ -823,3 +823,6 @@ h2 { font-size: 16px; margin: 0 0 12px; }
   .card { overflow-x: auto; }
   h1 { font-size: 22px; }
 }
+
+/* Emissor de NFe usa mais da largura da tela (tabelas largas) */
+.app-main:has(.emissor-largo) { max-width: 1800px; }
