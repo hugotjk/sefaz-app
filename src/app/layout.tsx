@@ -1,6 +1,9 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import { SidebarNav } from "@/components/SidebarNav";
+import { MenuMobile } from "@/components/MenuMobile";
+
+export const viewport = { width: "device-width", initialScale: 1 };
 
 export const metadata: Metadata = {
   title: "Painel da Loja",
@@ -11,6 +14,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="pt-BR">
       <body>
+        <MenuMobile />
         <div className="app-shell-sidebar">
           <aside className="sidebar">
             <div className="sidebar-logo">Painel da Loja</div>
