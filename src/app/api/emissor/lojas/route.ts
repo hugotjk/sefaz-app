@@ -10,7 +10,8 @@ export const runtime = "nodejs";
 export async function GET() {
   const lojas = await prisma.emissorLoja.findMany({ orderBy: { razaoSocial: "asc" } });
   const cnpjs = lojas.map((l) => l.cnpj);
-  const [certs, refs] = await Promise.all([
+  const [certsEmissao, certsConsulta, refs] = await Promise.all([
+    prisma.emissorCertificado.findMany({ where: { cnpj: { in: cnpjs } }, select: { cnpj: true, validUntil: true } }),
     prisma.certificate.findMany({
       where: { cnpj: { in: cnpjs } },
       select: { cnpj: true, status: true, validUntil: true },
@@ -20,7 +21,11 @@ export async function GET() {
       select: { cnpj: true, loja: true },
     }),
   ]);
-  const certPorCnpj = new Map(certs.map((c) => [c.cnpj, c]));
+  // o certificado de emissão tem prioridade; sem ele, vale o da consulta (compatibilidade)
+  const certPorCnpj = new Map<string, { status: string; validUntil: Date | null }>(
+    certsConsulta.map((c) => [c.cnpj, c])
+  );
+  for (const c of certsEmissao) certPorCnpj.set(c.cnpj, { status: "ACTIVE", validUntil: c.validUntil });
   const nomePorCnpj = new Map(refs.map((r) => [r.cnpj, r.loja]));
 
   return NextResponse.json({

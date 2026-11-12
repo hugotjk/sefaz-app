@@ -4,7 +4,7 @@ import { inngest } from "@/lib/inngest";
 
 export async function POST() {
   const certificados = await prisma.certificate.findMany({
-    where: { status: "ACTIVE" },
+    where: { status: "ACTIVE", consultaAtiva: true },
     select: { id: true },
   });
 

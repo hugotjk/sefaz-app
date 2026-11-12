@@ -204,10 +204,26 @@ model Certificate {
   // se true, ainda estamos na carga inicial (histórico completo)
   backfillDone   Boolean           @default(false)
   validUntil     DateTime?
+  // false = certificado "pausado" para a consulta de notas na SEFAZ (não entra nos syncs/cron).
+  consultaAtiva  Boolean           @default(true)
   createdAt      DateTime          @default(now())
   updatedAt      DateTime          @updatedAt
 
   notes          Note[]
+}
+
+// Certificado A1 usado SÓ para emitir NF-e (Emissor). Não é sincronizado com a SEFAZ
+// (nada de consulta de notas/Inngest) — fica separado do "Certificate" da consulta.
+model EmissorCertificado {
+  cnpj          String   @id
+  razaoSocial   String?
+  fileName      String
+  encryptedBlob String
+  iv            String
+  authTag       String
+  validUntil    DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 }
 
 enum NoteStatus {

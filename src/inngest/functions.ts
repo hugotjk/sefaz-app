@@ -141,6 +141,9 @@ async function processarCertificado(
   if (certificado.status !== "ACTIVE") {
     return { pulado: true, motivo: `status = ${certificado.status}` };
   }
+  if (!certificado.consultaAtiva) {
+    return { pulado: true, motivo: "consulta pausada (certificado só para emissão)" };
+  }
 
   if (certificado.validUntil && new Date(certificado.validUntil) < new Date()) {
     await step.run(`cert-${certificateId}-marcar-vencido`, async () => {
@@ -347,7 +350,7 @@ export const cronHorario = inngest.createFunction(
 
     const certificados = await step.run("buscar-certificados-ativos", async () => {
       return prisma.certificate.findMany({
-        where: { status: "ACTIVE" },
+        where: { status: "ACTIVE", consultaAtiva: true },
         select: { id: true, backfillDone: true },
       });
     });
