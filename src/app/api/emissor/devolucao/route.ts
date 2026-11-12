@@ -40,6 +40,17 @@ export async function POST(req: NextRequest) {
   }
 
   if (acao === "analisar") {
+    // tamanho de cada item, pelo EAN, na base de variações já sincronizada (em branco se não houver)
+    const eans = Array.from(new Set(original.itens.map((i) => i.ean).filter((e) => e && /^\d+$/.test(e))));
+    const vars = eans.length
+      ? await prisma.variacaoProduto.findMany({
+          where: { ean: { in: eans }, tamanho: { not: null } },
+          select: { ean: true, tamanho: true },
+        })
+      : [];
+    const tamPorEan = new Map<string, string>();
+    for (const v of vars) if (v.ean && v.tamanho?.trim() && !tamPorEan.has(v.ean)) tamPorEan.set(v.ean, v.tamanho.trim());
+    original.itens = original.itens.map((i) => ({ ...i, tamanho: tamPorEan.get(i.ean) ?? "" })) as typeof original.itens;
     return NextResponse.json({
       original,
       loja: {
