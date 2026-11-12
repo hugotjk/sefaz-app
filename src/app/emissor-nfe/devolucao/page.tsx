@@ -114,7 +114,7 @@ export default function DevolucaoPage() {
     await salvarRascunho(true);
     setCarregando(true); setErro(null);
     const fd = new FormData();
-    fd.set("acao", "previa-danfe"); fd.set("xml", arquivo);
+    fd.set("acao", "previa-danfe"); fd.set("xml", arquivo); fd.set("caso", caso);
     fd.set("selecao", JSON.stringify(selecao)); fd.set("infCpl", infFinal); fd.set("contador", contador ? "1" : "0");
     const res = await fetch("/api/emissor/devolucao", { method: "POST", body: fd });
     setCarregando(false);
