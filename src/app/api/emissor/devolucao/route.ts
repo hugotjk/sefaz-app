@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { contentDisposition, nomeArquivoNota } from "@/lib/nome-arquivo-nota";
 import { gerarDanfePadrao as gerarDanfePdf } from "@/lib/danfe-padrao";
 import { parseNFeXml } from "@/lib/parse-nfe-xml";
 import { emitir, PRODUCAO_LIBERADA, testarConexao } from "@/lib/emissor-envio";
@@ -70,7 +71,7 @@ export async function POST(req: NextRequest) {
       if (acao === "previa-danfe") {
         const pdf = await gerarDanfePdf(parseNFeXml(r.xml), { previa: true });
         return new NextResponse(new Uint8Array(pdf), {
-          headers: { "Content-Type": "application/pdf", "Content-Disposition": `inline; filename="PREVIA_DANFE_${r.chave}.pdf"` },
+          headers: { "Content-Type": "application/pdf", "Content-Disposition": contentDisposition("inline", nomeArquivoNota({ razaoSocial: loja.razaoSocial, serie: loja.serie, numero: loja.proximoNumero, caso: String(form.get("caso") ?? ""), ext: "pdf", prefixo: "PREVIA_" })) },
         });
       }
       return NextResponse.json({ ...r, serie: loja.serie, numero: loja.proximoNumero });

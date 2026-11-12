@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { cancelarEmissao, consultarEmissao, emitir } from "@/lib/emissor-envio";
 import { gerarDanfePadrao as gerarDanfePdf } from "@/lib/danfe-padrao";
 import { parseNFeXml } from "@/lib/parse-nfe-xml";
+import { contentDisposition, nomeArquivoNota } from "@/lib/nome-arquivo-nota";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -13,23 +14,26 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
   if (!e) return NextResponse.json({ error: "Não encontrada." }, { status: 404 });
   const tipo = req.nextUrl.searchParams.get("tipo") ?? "xml";
   const prefixo = e.ambiente === 2 ? "HOMOLOG_" : "";
+  const loja = await prisma.emissorLoja.findUnique({ where: { cnpj: e.lojaCnpj }, select: { razaoSocial: true } });
+  const nome = (ext: "xml" | "pdf", sufixo = "") =>
+    nomeArquivoNota({ razaoSocial: loja?.razaoSocial ?? e.lojaCnpj, serie: e.serie, numero: e.numero, caso: e.caso, ext, prefixo, sufixo });
   if (tipo === "danfe") {
     if (!e.xmlAutorizado) return NextResponse.json({ error: "A nota ainda não foi autorizada." }, { status: 400 });
     const pdf = await gerarDanfePdf(parseNFeXml(e.xmlAutorizado));
     return new NextResponse(new Uint8Array(pdf), {
-      headers: { "Content-Type": "application/pdf", "Content-Disposition": `inline; filename="${prefixo}DANFE_${e.chave}.pdf"` },
+      headers: { "Content-Type": "application/pdf", "Content-Disposition": contentDisposition("inline", nome("pdf")) },
     });
   }
   if (tipo === "cancelamento") {
     if (!e.xmlCancelamento) return NextResponse.json({ error: "Nota não cancelada." }, { status: 400 });
     return new NextResponse(e.xmlCancelamento, {
-      headers: { "Content-Type": "application/xml", "Content-Disposition": `attachment; filename="${prefixo}CANC_${e.chave}.xml"` },
+      headers: { "Content-Type": "application/xml", "Content-Disposition": contentDisposition("attachment", nome("xml", "_cancelamento")) },
     });
   }
   const xml = e.xmlAutorizado ?? e.xmlAssinado;
   if (!xml) return NextResponse.json({ error: "Sem XML." }, { status: 404 });
   return new NextResponse(xml, {
-    headers: { "Content-Type": "application/xml", "Content-Disposition": `attachment; filename="${prefixo}NFe_${e.chave}.xml"` },
+    headers: { "Content-Type": "application/xml", "Content-Disposition": contentDisposition("attachment", nome("xml")) },
   });
 }
 
