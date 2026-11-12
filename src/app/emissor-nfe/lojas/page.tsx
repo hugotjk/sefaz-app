@@ -122,7 +122,7 @@ export default function LojasEmissorPage() {
           placeholder="Buscar por CNPJ, razão social ou loja"
           value={busca}
           onChange={(e) => setBusca(e.target.value)}
-          style={{ minWidth: 320, padding: "8px 10px", border: "1px solid var(--border)", borderRadius: 8 }}
+          style={{ minWidth: 320, height: 30, padding: "0 10px", fontSize: 13, border: "1px solid var(--border)", borderRadius: 7 }}
         />
         <span style={{ fontSize: 13, color: "var(--text-dim)" }}>
           <Bolinha cor="verde" /> {resumo.verde} válidos · <Bolinha cor="amarelo" /> {resumo.amarelo} a vencer ·{" "}
@@ -132,9 +132,9 @@ export default function LojasEmissorPage() {
       {msg && <p className="status-erro">{msg}</p>}
 
       <div className="card" style={{ padding: 0, overflowX: "auto" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
           <thead>
-            <tr style={{ textAlign: "left", color: "var(--text-dim)", fontSize: 12 }}>
+            <tr style={{ textAlign: "left", color: "var(--text-dim)", fontSize: 11 }}>
               <th style={th}>Certificado</th>
               <th style={th}>Loja</th>
               <th style={th}>CNPJ</th>
@@ -153,26 +153,26 @@ export default function LojasEmissorPage() {
             )}
             {filtradas.map((l) => (
               <tr key={l.cnpj} style={{ borderTop: "1px solid var(--border)" }}>
-                <td style={td}>
-                  <Bolinha cor={l.certificado.cor} /> <span style={{ fontSize: 13 }}>{l.certificado.texto}</span>
+                <td style={{ ...td, whiteSpace: "nowrap" }}>
+                  <Bolinha cor={l.certificado.cor} /> {l.certificado.texto}
                 </td>
-                <td style={td}>
-                  <div>{l.loja ?? l.razaoSocial}</div>
-                  <div style={{ fontSize: 12, color: "var(--text-dim)" }}>
+                <td
+                  style={{ ...td, maxWidth: 360, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                  title={`${l.razaoSocial} · IE ${l.ie ?? "—"} · ${l.logradouro}, ${l.numero}${l.complemento ? ` ${l.complemento}` : ""} · ${l.bairro} · ${l.municipio}/${l.uf} · CEP ${l.cep}`}
+                >
+                  <b style={{ fontWeight: 600 }}>{l.loja ?? l.razaoSocial}</b>
+                  <div style={{ fontSize: 10, color: "var(--text-dim)", overflow: "hidden", textOverflow: "ellipsis" }}>
                     {l.razaoSocial} · IE {l.ie ?? "—"} · {l.municipio}/{l.uf}
                   </div>
-                  <div style={{ fontSize: 12, color: "var(--text-dim)" }}>
-                    {l.logradouro}, {l.numero}{l.complemento ? ` ${l.complemento}` : ""} · {l.bairro} · CEP {l.cep}
-                  </div>
                 </td>
-                <td style={td}>{fmtCnpj(l.cnpj)}</td>
-                <td style={td}>{l.crt === 3 ? "Normal (CRT 3)" : "Simples (CRT 1)"}</td>
-                <td style={td}>
+                <td style={{ ...td, whiteSpace: "nowrap" }}>{fmtCnpj(l.cnpj)}</td>
+                <td style={{ ...td, whiteSpace: "nowrap" }}>{l.crt === 3 ? "Normal (CRT 3)" : "Simples (CRT 1)"}</td>
+                <td style={{ ...td, whiteSpace: "nowrap" }}>
                   <CampoNumero valor={l.serie} onSalvar={(v) => salvarCampo(l, "serie", v)} />
                   {l.serieAntiga != null && (
-                    <div style={{ fontSize: 11, color: "var(--text-dim)" }}>
-                      em uso no outro sistema: {l.serieAntiga} (até nº {l.ultimoNumeroAntigo})
-                    </div>
+                    <span style={{ marginLeft: 6, fontSize: 10, color: "var(--text-dim)" }}>
+                      outro sistema: {l.serieAntiga} (até nº {l.ultimoNumeroAntigo})
+                    </span>
                   )}
                 </td>
                 <td style={td}>
@@ -258,8 +258,8 @@ export default function LojasEmissorPage() {
   );
 }
 
-const th: React.CSSProperties = { padding: "10px 12px", fontWeight: 600 };
-const td: React.CSSProperties = { padding: "10px 12px", verticalAlign: "top" };
+const th: React.CSSProperties = { padding: "6px 8px", fontWeight: 600 };
+const td: React.CSSProperties = { padding: "5px 8px", verticalAlign: "middle" };
 
 function Bolinha({ cor }: { cor: "verde" | "amarelo" | "vermelho" }) {
   return (
@@ -281,7 +281,7 @@ function CampoNumero({ valor, onSalvar }: { valor: number | null; onSalvar: (v: 
       onChange={(e) => setV(e.target.value.replace(/\D/g, ""))}
       onBlur={() => v !== (valor == null ? "" : String(valor)) && onSalvar(v)}
       onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
-      style={{ width: 80, padding: "4px 6px", border: "1px solid var(--border)", borderRadius: 6 }}
+      style={{ width: 60, height: 24, padding: "0 6px", fontSize: 12, border: "1px solid var(--border)", borderRadius: 5 }}
     />
   );
 }

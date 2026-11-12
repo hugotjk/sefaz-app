@@ -12,7 +12,7 @@ const ABAS = [
 export default function EmissorLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname() || "";
   return (
-    <div>
+    <div className="emissor-largo">
       <h1>Emissor de NF-e</h1>
       <div style={{ display: "flex", gap: 8, marginBottom: 20, borderBottom: "1px solid var(--border)" }}>
         {ABAS.map((a) =>
