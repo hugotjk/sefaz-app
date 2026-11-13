@@ -841,7 +841,13 @@ function referenciaFormula2(A: string, G: string, H: string, P: string, Q: strin
   }
   // LM Produtos Licenciados (Cebola): referência = os números do início da descrição
   //   "4405-GARRAFA ALUMINIO..." -> "4405"
-  if (igual(A, "LM PRODUTOS LICENCIADOS LTDA")) return G; // agora: igual ao código da NF
+  // Se a descrição não começa com número (ex.: "FLA-BARALHO-..."), usa o código da NF sem zeros à esquerda
+  //   ("004226" -> "4226"; "804079" continua "804079").
+  if (igual(A, "LM PRODUTOS LICENCIADOS LTDA")) {
+    const m = H.match(/^\s*(\d+)/);
+    if (m) return m[1];
+    return G.replace(/^0+(?=\d)/, "");
+  }
   // Premier: código sem o trecho depois do último "-" (tamanho) — mesmo
   // padrão da Maxima Apparel.
   if (igual(A, "PREMIER DIST DE VESTUARIOS CALCADOS EQUIPAMENTOS E ACESSORIO")) {
