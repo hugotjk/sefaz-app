@@ -301,6 +301,14 @@ function identificarModeloRaw(
     /^\d{4}\.FL\d{4}$/i.test(G.trim())
   )
     return "RDOIS";
+  // R Dois: linha Thug Nine (código "26012702-02", descrição "CHINELO THUG NINE ...").
+  if (
+    (igual(A, "R DOIS INJETADOS LTDA.") ||
+      igual(A, "R DOIS INJETADOS NORDESTE LTDA") ||
+      igual(A, "R DOIS INJETADOS LTDA")) &&
+    /THUG\s*NINE/i.test(H)
+  )
+    return "Thug Nine";
   if (
     igual(A, "GRUPO INVENTI LTDA") ||
     igual(A, "R DOIS INJETADOS LTDA.") ||
@@ -669,6 +677,8 @@ function referenciaFormula2(A: string, G: string, H: string, P: string, Q: strin
   {
     // Linha Flamengo (RDOIS): o catálogo guarda a referência IGUAL ao código da NF (ex.: 1703.FL0008).
     if (/^\d{4}\.FL\d{4}$/i.test(G.trim())) return G.trim();
+    // Thug Nine: o catálogo guarda a referência IGUAL ao código da NF (ex.: 26012702-02).
+    if (/THUG\s*NINE/i.test(H)) return G.trim();
     // Reef (R2). Referência = código base + "_" + código da cor.
     //  - código base: sem o sufixo "/N" ("RF016.0100/3" -> "RF016.0100");
     //  - código da cor: o trecho com dígito que vem logo antes do "-" que
