@@ -30,6 +30,7 @@ async function main() {
       codigoProduto: true,
       descricao: true,
       ean: true,
+      infAdProd: true,
       modeloIdentificado: true,
       referenciaFornecedorIdentificada: true,
       referenciaComRegraEspecifica: true,
@@ -60,7 +61,8 @@ async function main() {
       emit,
       it.codigoProduto,
       it.descricao,
-      infCpl(it.noteId, it.note.xmlCompleto)
+      infCpl(it.noteId, it.note.xmlCompleto),
+      it.infAdProd ?? undefined
     );
     return {
       it,
@@ -69,6 +71,7 @@ async function main() {
       referencia: ref.valor,
       comRegra: ref.comRegraEspecifica,
       mudouRef: ref.valor !== (it.referenciaFornecedorIdentificada ?? ""),
+      mudouModelo: (modelo ?? "") !== (it.modeloIdentificado ?? ""),
     };
   });
 
@@ -86,6 +89,7 @@ async function main() {
   const temCadDepois = flags.filter(Boolean).length;
   const viraramCadastro = recalc.filter((r, i) => !r.it.temCadastro && flags[i]);
 
+  console.log(`Modelo mudou em ${recalc.filter((r) => r.mudouModelo).length}/${recalc.length} itens.`);
   console.log(`Referência mudou em ${mudaramRef.length}/${recalc.length} itens.`);
   if (mudaramRef.length) {
     console.log("Amostra (código | ref antiga => ref nova):");
