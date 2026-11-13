@@ -3,8 +3,8 @@
  * temCadastro dos NotaItem JÁ existentes da MALHARIA RIKAM — depois da mudança da regra
  * (agora a referência é o código da nota como está, com pontos).
  *
- *   Dry-run (só conta):  npx tsx --env-file=.env scripts/recalcular-xeryus-radu.ts
- *   Aplicar:             npx tsx --env-file=.env scripts/recalcular-xeryus-radu.ts --apply
+ *   Dry-run (só conta):  npx tsx --env-file=.env scripts/recalcular-fornecedores.ts
+ *   Aplicar:             npx tsx --env-file=.env scripts/recalcular-fornecedores.ts --apply
  */
 import { prisma } from "../src/lib/db";
 import {
@@ -18,6 +18,7 @@ const APLICAR = process.argv.includes("--apply");
 const ALVOS = [
   "XERYUS IMP. DISTRIB. DE ARTIGOS P/ VESTUARIO LTDA",
   "RADU INDUSTRIA IMPORTACAO E EXPORTACAO LTDA",
+  "CHP BRANDS BRASIL LTDA",
 ];
 
 async function main() {

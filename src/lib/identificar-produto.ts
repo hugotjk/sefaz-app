@@ -1010,6 +1010,21 @@ function referenciaLacoste(G: string, H: string): string | null {
   return `${prod}.${cor}`;
 }
 
+const CORES_2_PALAVRAS = ["OFF WHITE", "DARK KHAKI", "OX GRAY", "CURDS& WHEY"];
+function referenciaChampion(infAdProd: string, descricao: string): string | null {
+  const base = infAdProd.toUpperCase().replace(/[^A-Z0-9]/g, "");
+  if (!base) return null;
+  let w = descricao.trim().toUpperCase().split(/\s+/);
+  const ehTamanho = (x: string) => /\//.test(x) || /^(UNICO|UN|U|P|M|G|GG|XG|XGG|PP|\d{1,2})$/.test(x);
+  while (w.length && ehTamanho(w[w.length - 1])) w = w.slice(0, -1);
+  if (!w.length) return base.slice(0, 20);
+  const ult2 = w.slice(-2).join(" ");
+  const cor = CORES_2_PALAVRAS.some((c) => ult2.endsWith(c) || ult2 === c)
+    ? CORES_2_PALAVRAS.find((c) => ult2.endsWith(c))! 
+    : w[w.length - 1];
+  return (base + cor.replace(/[^A-Z0-9]/g, "")).slice(0, 20);
+}
+
 export function identificarReferenciaFornecedor(
   razaoSocialEmitente: string,
   codigoProduto: string,
@@ -1030,6 +1045,13 @@ export function identificarReferenciaFornecedor(
     igual(A, "DEVANLAY VENTURES DO BRASIL COM IMP EXP E PART LTDA")
   ) {
     const v = referenciaLacoste(G, H);
+    if (v) return { valor: v, comRegraEspecifica: true };
+  }
+
+  // CHP BRANDS (Champion): referência do catálogo = infAdProd sem espaços + cor (última palavra da
+  // descrição antes do tamanho; algumas cores têm 2 palavras), só letras/números, máx. 20 caracteres.
+  if (igual(A, "CHP BRANDS BRASIL LTDA") && Q && Q !== "0") {
+    const v = referenciaChampion(Q, H);
     if (v) return { valor: v, comRegraEspecifica: true };
   }
 
