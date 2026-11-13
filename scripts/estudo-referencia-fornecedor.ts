@@ -89,7 +89,7 @@ async function estudar(alvo: string) {
   }
 
   // Acerto de cada regra candidata (mesma comparação do app: trim + maiúsculas)
-  const unicos = [...new Map(pares.map((p) => [`${p.cod}|${p.ref}`, p])).values()];
+  const unicos: Par[] = [...new Map<string, Par>(pares.map((p): [string, Par] => [`${p.cod}|${p.ref}`, p])).values()];
   const placar = regras
     .map((r) => ({ nome: r.nome, acertos: unicos.filter((p) => norm(r.f(p.cod, p.desc)) === norm(p.ref)).length }))
     .sort((a, b) => b.acertos - a.acertos);
