@@ -267,6 +267,9 @@ function identificarModeloRaw(
     return eqi(h3, "REF") ? "Reef" : "Redley";
   if (igual(A, "DASS NORDESTE CALCADOS E ARTIGOS ESPORTIVOS S.A.")) return "Umbro";
   if (igual(A, "XERYUS IMP. DISTRIB. DE ARTIGOS P/ VESTUARIO LTDA")) return /FLUMINENSE|\bFLU\b/i.test(H) ? "Xeryus Flu" : "Xeryus Fla";
+  // Radu (Bagaggio): catálogo tem "BAGAGGIO FLA" (Flamengo e demais) e "FLUMINENSE"; referência = código puro (fallback)
+  if (igual(A, "RADU INDUSTRIA IMPORTACAO E EXPORTACAO LTDA"))
+    return /FLUMINENSE|\bFLU\b/i.test(H) ? "Fluminense" : "Bagaggio Fla";
   if (igual(A, "ALPAR  DO BRASIL IND.COM.LTDA") || igual(A, "ALPAR DO BRASIL S/A")) return "NIKE"; // dois espaços em "ALPAR  DO" (grafia antiga)
   if (igual(A, "VIA COUNTRY IND E COM DE CALC LTDA") || igual(A, "NIRUT IND E COM CALC LTDA"))
     return "Farm";
