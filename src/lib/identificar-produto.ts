@@ -350,6 +350,19 @@ function identificarModeloRaw(
   // Modelo fixo por empresa (sempre o mesmo valor). Comparação case-insensitive
   // (helper `igual`). As 23 primeiras vieram de um ramo genérico "Flamengo"
   // que foi quebrado em regras específicas.
+  // M&L Sport (copos): no catálogo o modelo é o CLUBE que aparece na descrição ("COPO 550ML ML SPORT BOTAFOGO ...").
+  // Sem clube reconhecido, mantém "Copos M&L".
+  if (igual(A, "M&L SPORT INNOVATION MARKETING ESPORTIVO LTDA")) {
+    const hu = H.toUpperCase();
+    if (hu.includes("BOTAFOGO")) return "Botafogo";
+    if (hu.includes("VASCO")) return "Vasco";
+    if (hu.includes("FLUMINENSE")) return "Fluminense";
+    if (hu.includes("FLAMENGO")) return "Flamengo";
+    return "Copos M&L";
+  }
+  // Superação (cachecóis): no catálogo o modelo é o clube (FLU01.. = Fluminense; "Personalizado" = Flamengo).
+  if (igual(A, "SUPERACAO COMERCIO DE ARTIGOS DO VESTUARIO LTDA"))
+    return /FLUMINENSE|^\s*FLU\d/i.test(H + " " + G) ? "Fluminense" : "Flamengo";
   const MODELOS_POR_EMPRESA: [string, string][] = [
     ["M WILDNER ACESSORIOS LTDA", "Arena Couros"],
     ["SPORT BEL LTDA", "Bel Watch"],
