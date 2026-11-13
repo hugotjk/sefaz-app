@@ -824,6 +824,14 @@ function referenciaFormula2(A: string, G: string, H: string, P: string, Q: strin
     return G;
   // Leva de 19 empresas com Referência confirmada = código puro, sem
   // transformação.
+  // RANC (natação): o catálogo guarda o código SEM o último dígito (que é o tamanho) + "INF"/"ADT"
+  //   1001 (INF) -> 100INF · 1404 (AD) -> 140ADT · 141 (sunga AD) -> 14ADT.
+  // Sem INF/AD na descrição (ex.: toucas "T.U"), fica o código puro.
+  if (igual(A, "RANC CONFECCOES LTDA ME")) {
+    const sufixo = /INF/i.test(H) ? "INF" : /(^|[^A-Za-z])ADT?([^A-Za-z]|$)/i.test(H) ? "ADT" : "";
+    if (sufixo && /^\d{3,4}$/.test(G.trim())) return G.trim().slice(0, -1) + sufixo;
+    return G;
+  }
   if (
     [
       "KRYSTALMIX COMERCIO E DISTRIBUIDORA DE PRODUTOS E UTENSILIOS",
