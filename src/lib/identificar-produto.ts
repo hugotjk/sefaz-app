@@ -72,6 +72,7 @@ function igual(a: string, b: string): boolean {
 // Palavras do nome do Modelo que NÃO seguem Title Case simples (siglas /
 // grafias de marca). chave = forma minúscula; valor = grafia canônica.
 const MODELO_PALAVRA_ESPECIAL: Record<string, string> = {
+  jc: "JC",
   tsc: "TSC",
   "m&l": "M&L",
   emc: "EMC",
@@ -148,6 +149,41 @@ export const EMPRESAS_THUG_DUBS = [
  * `Note.emitenteNome`.
  */
 export const EMPRESAS_BANIDAS: string[] = [
+  // "NAO VAMOS USAR" (planilha de fornecedores sem regra, 13/11/2026)
+  "BSKR COMERCIO DE ROUPAS LTDA",
+  "COMERCIAL ATACADISTA NECHIO LTDA",
+  "IRMAOS BENASSI PROD. E DISTR. DE FRUTAS LTDA",
+  "JME RAUTA COMERCIAL DISTRIBUIDORA LTDA",
+  "BRASSI LOCACAO DE EQUIPAMENTOS LTDA",
+  "GELATO IMPERIAL INDUSTRIA COMERCIO E SERVICOS LTDA",
+  "NATURCONGELADOS COMERCIO DE FRUTAS E ALIMENTOS LTDA",
+  "NECHIO INDUSTRIA E COMERCIO DE ALIMENTOS",
+  "DPNP INDUSTRIA COMERCIO E SERVICOS DE REFRIGERACAO LTDA",
+  "CONGELADOS DELICIA COMERCIO DE ALIMENTOS LTDA.",
+  "TUTTI QUITUTE PROODUTOS ALIMENTÍCIOS LTDA (MATRIZ)",
+  "Aliance Distribuidora de Alimentos LTDA - ME",
+  "BERTA TRANSPORTES E LOGISTICA LTDA",
+  "FONTE COMERCIAL DE ALIMENTOS LTDA",
+  "SANCHEZ CANO LTDA",
+  "NOVA RICK DOCES GULOSEIMAS LTDA",
+  "PORTAL BEBIDAS 2018 E GENEROS ALIMENTICIOS LTDA",
+  "PETRUZ FRUITY INDUSTRIA, COMERCIO E DISTRIBUIDORA LTDA - PA",
+  "SIVEL COMERCIAL DE ALIMENTOS LTDA",
+  "Aqui O Sonho Comecou Embalagens Ltda",
+  "AZV COMERCIAL IMPORT LTDA",
+  "Printbag Embalagens Ltda",
+  "SUPERPEL COMERCIO DE PAPEIS EIRELI   EPP",
+  "BELA IACA POLPAS DE FRUTAS INDUSTRIA E COMERCIO LTDA",
+  "COMERCIAL MOVEIS DE ESCRITORIO LTDA",
+  "VIDA EM GRAOS COM E IND DE PRODS ALIMENT IMP EXP LTDA",
+  "WAZ  IMPORTACAO E COMERCIO LTDA",
+  "BARBOSA COMERCIO VAREJO & ATACADO LTDA",
+  "CONTROLID IND COM DE HARD E SERV DE TEC LTDA",
+  "KAZU BOMBONIERI E LANCHONETE LTDA",
+  "PIXPEL EMBALAGENS SUSTENTAVEIS LTDA",
+  "PREMIUM MACHINE IMPORTACAO E EXPORTACAO",
+  "TELEXPERTS TELECOMUNICACOES S A",
+  "1OO RISK COMERCIAL E DISTRIBUIDORA LTDA",
   "GLAYCE MENDES DE SOUSA 05687449779",
   "JAE ILHA DESCARTAVEIS E LIMPEZA LTDA",
   "TOP CESTA DE ALIMENTOS LTDA",
@@ -269,7 +305,7 @@ function identificarModeloRaw(
   if (igual(A, "XERYUS IMP. DISTRIB. DE ARTIGOS P/ VESTUARIO LTDA")) return "Xeryus";
   // Radu: modelo único "Bagaggio"; referência = código puro (fallback)
   if (igual(A, "RADU INDUSTRIA IMPORTACAO E EXPORTACAO LTDA")) return "Bagaggio";
-  if (igual(A, "ALPAR  DO BRASIL IND.COM.LTDA") || igual(A, "ALPAR DO BRASIL S/A")) return "NIKE"; // dois espaços em "ALPAR  DO" (grafia antiga)
+  if (igual(A, "ALPAR  DO BRASIL IND.COM.LTDA") || igual(A, "ALPAR DO BRASIL S/A") || igual(A, "ALPAR  DO BRASIL S/A")) return "NIKE"; // dois espaços em "ALPAR  DO" (grafia antiga)
   if (igual(A, "VIA COUNTRY IND E COM DE CALC LTDA") || igual(A, "NIRUT IND E COM CALC LTDA"))
     return "Farm";
   if (igual(A, "SAVE COMERCIAL E IMPORTADORA LTDA")) return "JANSPORT";
@@ -343,6 +379,10 @@ function identificarModeloRaw(
     ["AURA COMERCIO DE ARTIGOS DO VESTUARIO LTDA", "n1"],
     ["TOREL COMERCIO DE ARTIGOS ESPORTIVOS LTDA ME", "torel fla"],
     ["LM PRODUTOS LICENCIADOS LTDA", "Cebola"],
+    ["CAMISARIA CBS RIO FC LTDA", "Camisaria"],
+    ["TGK STARS COMERCIO DE ARTIGOS ESPORTIVOS LTDA", "Liga Retro"],
+    ["BC Sartori Artigos Esportivos ME", "JC Bandeiras"],
+    ["CD COMERCIO ATAC MATERIAL ESPORTIVO LTDA", "Havaianas"],
     ["P. A. SOLUCOES CRIATIVAS EM ARTEFATOS DE PLASTICOS EIRELI", "Fut Toy"],
   ];
   // Malhas D Estefano: o Modelo vem da descrição (55RJ / WQS / BOARD).
@@ -781,6 +821,8 @@ function referenciaFormula2(A: string, G: string, H: string, P: string, Q: strin
       "Bel Watch Comercial Importadora e Exportadora Eireli",
       "TOREL COMERCIO DE ARTIGOS ESPORTIVOS LTDA ME",
       "BC SARTORI ARTIGOS ESPORTIVOS ME",
+      "JTX COMERCIO DE PRESENTES E ARMARINHOS LTDA",
+      "MILLED BRASIL DURGA COMERCIAL LTDA",
       "GENIUS 1 PARTICIPACOES JOIAS E ARTIGOS DE LUXO LTDA",
       "TVB INDUSTRIA E COMERCIO LTDA",
       "SUPERACAO COMERCIO DE ARTIGOS DO VESTUARIO LTDA",
@@ -799,10 +841,7 @@ function referenciaFormula2(A: string, G: string, H: string, P: string, Q: strin
   }
   // LM Produtos Licenciados (Cebola): referência = os números do início da descrição
   //   "4405-GARRAFA ALUMINIO..." -> "4405"
-  if (igual(A, "LM PRODUTOS LICENCIADOS LTDA")) {
-    const m = H.match(/^\s*(\d+)/);
-    return m ? m[1] : "";
-  }
+  if (igual(A, "LM PRODUTOS LICENCIADOS LTDA")) return G; // agora: igual ao código da NF
   // Premier: código sem o trecho depois do último "-" (tamanho) — mesmo
   // padrão da Maxima Apparel.
   if (igual(A, "PREMIER DIST DE VESTUARIOS CALCADOS EQUIPAMENTOS E ACESSORIO")) {
@@ -885,7 +924,7 @@ function referenciaFormula3(A: string, G: string, H: string, P: string, Q: strin
     return esquerda(G, G.length - ultimoNome(H).length);
   // Alpar do Brasil S/A (grafia nova): referência = o que vem depois de "REF:"
   // na descrição (até o primeiro espaço); sem "REF:" cai no código puro.
-  if (igual(A, "ALPAR DO BRASIL S/A")) {
+  if (igual(A, "ALPAR DO BRASIL S/A") || igual(A, "ALPAR  DO BRASIL S/A")) {
     const m = H.match(/REF:\s*(\S+)/i);
     return m ? m[1].replace(/-+$/, "") : G;
   }
@@ -895,6 +934,15 @@ function referenciaFormula3(A: string, G: string, H: string, P: string, Q: strin
   if (igual(A, "NEW ERA BRASIL LTDA")) return G.trim().split(/\s+/)[0] ?? "";
   if (igual(A, "1QA+ Confeccoes Eireli (Torcida Baby)"))
     return esquerda(G, localizar(".FLA", G) - 1);
+  // Camisaria CBS: tudo antes do último ponto (FLU005.02.M -> FLU005.02)
+  if (igual(A, "CAMISARIA CBS RIO FC LTDA")) {
+    const i = G.lastIndexOf(".");
+    return i > 0 ? G.slice(0, i) : G;
+  }
+  // TGK Stars (Liga Retro): 8 primeiros caracteres do código
+  if (igual(A, "TGK STARS COMERCIO DE ARTIGOS ESPORTIVOS LTDA")) return esquerda(G, 8);
+  // CD Comércio (Havaianas): 4 primeiros caracteres do código
+  if (igual(A, "CD COMERCIO ATAC MATERIAL ESPORTIVO LTDA")) return esquerda(G, 4);
   // Rikam: o catálogo guarda a referência IGUAL ao código da nota, com pontos e sufixo
   // (ex.: UN.17200.99.FE, UN.84200.01.JV) — 96% do catálogo. Antes tirava ".JV" e os pontos.
   if (igual(A, "MALHARIA RIKAM LTDA")) return G;
