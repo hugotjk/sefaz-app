@@ -893,7 +893,9 @@ function referenciaFormula3(A: string, G: string, H: string, P: string, Q: strin
   if (igual(A, "NEW ERA BRASIL LTDA")) return G.trim().split(/\s+/)[0] ?? "";
   if (igual(A, "1QA+ Confeccoes Eireli (Torcida Baby)"))
     return esquerda(G, localizar(".FLA", G) - 1);
-  if (igual(A, "MALHARIA RIKAM LTDA")) return substituir(substituir(G, ".JV", ""), ".", "");
+  // Rikam: o catálogo guarda a referência IGUAL ao código da nota, com pontos e sufixo
+  // (ex.: UN.17200.99.FE, UN.84200.01.JV) — 96% do catálogo. Antes tirava ".JV" e os pontos.
+  if (igual(A, "MALHARIA RIKAM LTDA")) return G;
   if (igual(A, "Torcida Baby do Brasil Ltda")) return esquerda(G, localizar(".", G) - 1);
   if (igual(A, "BRAZILINE INDUSTRIA E COMERCIO LTDA")) return esquerda(G, 11);
   if (igual(A, "ITF FERRARI PRODUTOS LICENCIADOS LTDA")) {
