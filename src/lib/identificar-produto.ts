@@ -829,6 +829,8 @@ function referenciaFormula2(A: string, G: string, H: string, P: string, Q: strin
   // Sem INF/AD na descrição (ex.: toucas "T.U"), fica o código puro.
   if (igual(A, "RANC CONFECCOES LTDA ME")) {
     const sufixo = /INF/i.test(H) ? "INF" : /(^|[^A-Za-z])ADT?([^A-Za-z]|$)/i.test(H) ? "ADT" : "";
+    // Alcinha: códigos sequenciais por tamanho (AD 108–111, INF 113–115) -> referência "11ADT" / "11INF".
+    if (sufixo && /ALCINHA/i.test(H)) return "11" + sufixo;
     if (sufixo && /^\d{3,4}$/.test(G.trim())) return G.trim().slice(0, -1) + sufixo;
     return G;
   }
