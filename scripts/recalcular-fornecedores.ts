@@ -34,7 +34,10 @@ const ALVOS = [
 
 async function main() {
   const itens = await prisma.notaItem.findMany({
-    where: { note: { emitenteNome: { in: ALVOS } } },
+    where: {
+      // sem diferenciar maiúsculas/minúsculas (há notas com "R Dois Injetados Nordeste Ltda")
+      OR: ALVOS.map((a) => ({ note: { emitenteNome: { equals: a, mode: "insensitive" as const } } })),
+    },
     select: {
       id: true,
       noteId: true,
