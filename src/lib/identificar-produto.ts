@@ -1048,6 +1048,15 @@ export function identificarReferenciaFornecedor(
     if (v) return { valor: v, comRegraEspecifica: true };
   }
 
+  // Radu e Xeryus: a referência do catálogo é o código da nota como está. É uma regra (não ausência de
+  // regra), então não devem aparecer na lista de fornecedores "sem regra de referência".
+  if (
+    igual(A, "RADU INDUSTRIA IMPORTACAO E EXPORTACAO LTDA") ||
+    igual(A, "XERYUS IMP. DISTRIB. DE ARTIGOS P/ VESTUARIO LTDA")
+  ) {
+    return { valor: G, comRegraEspecifica: true };
+  }
+
   // CHP BRANDS (Champion): referência do catálogo = infAdProd sem espaços + cor (última palavra da
   // descrição antes do tamanho; algumas cores têm 2 palavras), só letras/números, máx. 20 caracteres.
   if (igual(A, "CHP BRANDS BRASIL LTDA") && Q && Q !== "0") {
