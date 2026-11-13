@@ -131,6 +131,16 @@ async function main() {
     }
   }
 
+  const perderam = recalc.filter((r, i) => r.it.temCadastro && !flags[i]);
+  console.log(`\nItens que TINHAM cadastro e PERDERIAM: ${perderam.length}`);
+  const porForn = new Map<string, typeof perderam>();
+  for (const r of perderam) porForn.set(r.emit, [...(porForn.get(r.emit) ?? []), r]);
+  for (const [f, l] of porForn) {
+    console.log(`  ${f} — ${l.length} itens (amostra: código | descrição | ref antiga => ref nova | modelo antigo => novo)`);
+    for (const r of l.slice(0, 4))
+      console.log(`    ${r.it.codigoProduto} | ${r.it.descricao} | ${r.it.referenciaFornecedorIdentificada} => ${r.referencia} | ${r.it.modeloIdentificado} => ${r.modelo}`);
+  }
+
   if (!APLICAR) {
     console.log("\n[DRY-RUN] Nada gravado. Rode com --apply para atualizar.");
     await prisma.$disconnect();
