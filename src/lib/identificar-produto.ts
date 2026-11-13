@@ -73,6 +73,7 @@ function igual(a: string, b: string): boolean {
 // grafias de marca). chave = forma minúscula; valor = grafia canônica.
 const MODELO_PALAVRA_ESPECIAL: Record<string, string> = {
   jc: "JC",
+  rdois: "RDOIS",
   tsc: "TSC",
   "m&l": "M&L",
   emc: "EMC",
@@ -291,6 +292,15 @@ function identificarModeloRaw(
     if (eqi(primeiraPalavra, "SUFGAN")) return "SUFGANG";
     return primeiraPalavra;
   }
+  // R Dois: chinelos/sandálias do Flamengo (código "1703.FL0008") são do modelo RDOIS no catálogo;
+  // o resto (códigos "RF…") é Reef.
+  if (
+    (igual(A, "R DOIS INJETADOS LTDA.") ||
+      igual(A, "R DOIS INJETADOS NORDESTE LTDA") ||
+      igual(A, "R DOIS INJETADOS LTDA")) &&
+    /^\d{4}\.FL\d{4}$/i.test(G.trim())
+  )
+    return "RDOIS";
   if (
     igual(A, "GRUPO INVENTI LTDA") ||
     igual(A, "R DOIS INJETADOS LTDA.") ||
@@ -657,6 +667,8 @@ function referenciaFormula2(A: string, G: string, H: string, P: string, Q: strin
     igual(A, "R DOIS INJETADOS LTDA")
   )
   {
+    // Linha Flamengo (RDOIS): o catálogo guarda a referência IGUAL ao código da NF (ex.: 1703.FL0008).
+    if (/^\d{4}\.FL\d{4}$/i.test(G.trim())) return G.trim();
     // Reef (R2). Referência = código base + "_" + código da cor.
     //  - código base: sem o sufixo "/N" ("RF016.0100/3" -> "RF016.0100");
     //  - código da cor: o trecho com dígito que vem logo antes do "-" que
