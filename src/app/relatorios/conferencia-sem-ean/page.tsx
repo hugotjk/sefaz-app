@@ -31,6 +31,7 @@ interface Resposta {
 
 const chaveModelo = (m: string | null) => m ?? " sem-modelo";
 const MAX_EANS_VISIVEIS = 4;
+const CHAVE_SELECAO = "conferencia-sem-ean:selecionados";
 
 function ymd(d: Date) {
   return d.toISOString().slice(0, 10);
@@ -55,8 +56,26 @@ export default function ConferenciaSemEanPage() {
   const [abertos, setAbertos] = useState<Set<string>>(new Set());
   // Produtos marcados para a planilha de Alteração de Cadastro (chave = [modelo, referencia]); mantém entre páginas/filtros.
   const [selecionados, setSelecionados] = useState<Set<string>>(new Set());
+  const [selecaoCarregada, setSelecaoCarregada] = useState(false);
   const [exportando, setExportando] = useState(false);
   const [msgExport, setMsgExport] = useState<string | null>(null);
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(CHAVE_SELECAO);
+      if (raw) setSelecionados(new Set(JSON.parse(raw) as string[]));
+    } catch {
+      /* sem storage: segue só em memória */
+    }
+    setSelecaoCarregada(true);
+  }, []);
+  useEffect(() => {
+    if (!selecaoCarregada) return;
+    try {
+      localStorage.setItem(CHAVE_SELECAO, JSON.stringify([...selecionados]));
+    } catch {
+      /* ignora */
+    }
+  }, [selecionados, selecaoCarregada]);
 
   useEffect(() => {
     const id = setTimeout(() => {
@@ -143,18 +162,6 @@ export default function ConferenciaSemEanPage() {
       return prox;
     });
   }
-  function marcarPagina() {
-    setSelecionados((prev) => {
-      const prox = new Set(prev);
-      const todos = grupos.every((g) => g.produtos.every((p) => prox.has(p.chave)));
-      for (const g of grupos) for (const p of g.produtos) {
-        if (todos) prox.delete(p.chave);
-        else prox.add(p.chave);
-      }
-      return prox;
-    });
-  }
-
   async function exportar() {
     if (selecionados.size === 0 || exportando) return;
     setExportando(true);
@@ -317,77 +324,104 @@ export default function ConferenciaSemEanPage() {
                 {totalModelos === 1 ? "" : "s"}
                 {carregando ? " · atualizando…" : ""}
               </p>
-              <button
-                type="button"
-                className="btn-secundario"
-                style={{ padding: "5px 10px", fontSize: 12 }}
-                onClick={alternarTodos}
-              >
-                {todosAbertos ? "Recolher todos" : "Expandir todos"}
-              </button>
-            </div>
-
-            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 12, fontSize: 13 }}>
-              <button type="button" className="btn-secundario" style={{ width: "auto", padding: "5px 10px", fontSize: 12 }} onClick={marcarPagina}>
-                Marcar/desmarcar todos da página
-              </button>
-              <span style={{ color: "var(--text-dim)" }}>
-                {selecionados.size.toLocaleString("pt-BR")} produto{selecionados.size === 1 ? "" : "s"} marcado{selecionados.size === 1 ? "" : "s"} para alteração de cadastro (só produtos da MULTI)
-              </span>
-              {selecionados.size > 0 && (
-                <button type="button" className="btn-secundario" style={{ width: "auto", padding: "5px 10px", fontSize: 12 }} onClick={() => setSelecionados(new Set())}>
-                  Limpar seleção
+              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                <span style={{ fontSize: 12, color: "var(--text-dim)" }}>
+                  {selecionados.size.toLocaleString("pt-BR")} selecionado
+                  {selecionados.size === 1 ? "" : "s"} para alterar
+                </span>
+                {selecionados.size > 0 && (
+                  <button
+                    type="button"
+                    className="btn-secundario"
+                    style={{ padding: "5px 10px", fontSize: 12 }}
+                    onClick={() => setSelecionados(new Set())}
+                  >
+                    Limpar seleção
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="btn"
+                  style={{ padding: "5px 12px", fontSize: 12 }}
+                  disabled={selecionados.size === 0 || exportando}
+                  title={
+                    selecionados.size === 0
+                      ? "Marque os produtos que quer alterar"
+                      : "Baixar a planilha de alteração de cadastro"
+                  }
+                  onClick={exportar}
+                >
+                  {exportando ? "Gerando…" : "⬇ Exportar planilha"}
                 </button>
-              )}
-              <button type="button" style={{ width: "auto", padding: "5px 12px", fontSize: 12 }} disabled={selecionados.size === 0 || exportando} onClick={exportar}>
-                {exportando ? "Gerando…" : "Exportar alteração de cadastro"}
-              </button>
-              {msgExport && <span style={{ color: msgExport.startsWith("Erro") ? "var(--red)" : "var(--text-dim)" }}>{msgExport}</span>}
+                <button
+                  type="button"
+                  className="btn-secundario"
+                  style={{ padding: "5px 10px", fontSize: 12 }}
+                  onClick={alternarTodos}
+                >
+                  {todosAbertos ? "Recolher todos" : "Expandir todos"}
+                </button>
+              </div>
             </div>
+            {msgExport && (
+              <p
+                style={{
+                  fontSize: 12,
+                  margin: "-4px 0 12px",
+                  color: msgExport.startsWith("Erro") ? "var(--red)" : "var(--text-dim)",
+                }}
+              >
+                {msgExport}
+              </p>
+            )}
 
             <div className="cp-grupos">
               {grupos.map((g) => {
                 const ck = chaveModelo(g.modelo);
                 const aberto = abertos.has(ck);
-                const marcadosNoGrupo = g.produtos.filter((p) => selecionados.has(p.chave)).length;
+                const marcados = g.produtos.filter((p) => selecionados.has(p.chave)).length;
                 return (
                   <div key={ck} className={`cp-grupo${aberto ? " aberto" : ""}`}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <input
-                      type="checkbox"
-                      title="Marcar todas as referências deste modelo"
-                      style={{ width: "auto", marginLeft: 8 }}
-                      checked={g.produtos.length > 0 && marcadosNoGrupo === g.produtos.length}
-                      ref={(el) => { if (el) el.indeterminate = marcadosNoGrupo > 0 && marcadosNoGrupo < g.produtos.length; }}
-                      onChange={() => alternarModeloSel(g)}
-                    />
-                    <button
-                      type="button"
-                      className="cp-grupo-cab"
-                      style={{ flex: 1 }}
-                      onClick={() => alternarGrupo(ck)}
-                      aria-expanded={aberto}
-                    >
-                      <span className="cp-chevron">▶</span>
-                      <span className="cp-grupo-modelo">
-                        {g.modelo || <span className="cp-sem-modelo">(sem modelo)</span>}
-                      </span>
-                      <span className="cp-grupo-cont">
-                        {g.produtos.length} referência{g.produtos.length === 1 ? "" : "s"}
-                        {marcadosNoGrupo > 0 ? ` · ${marcadosNoGrupo} marcada${marcadosNoGrupo === 1 ? "" : "s"}` : ""}
-                      </span>
-                    </button>
+                    <div className="cp-grupo-topo">
+                      <label className="cp-sel" title="Marcar/desmarcar todos os produtos deste modelo">
+                        <input
+                          type="checkbox"
+                          checked={marcados === g.produtos.length && g.produtos.length > 0}
+                          ref={(el) => {
+                            if (el) el.indeterminate = marcados > 0 && marcados < g.produtos.length;
+                          }}
+                          onChange={() => alternarModeloSel(g)}
+                          aria-label={`Selecionar todos os produtos de ${g.modelo ?? "sem modelo"}`}
+                        />
+                      </label>
+                      <button
+                        type="button"
+                        className="cp-grupo-cab"
+                        onClick={() => alternarGrupo(ck)}
+                        aria-expanded={aberto}
+                      >
+                        <span className="cp-chevron">▶</span>
+                        <span className="cp-grupo-modelo">
+                          {g.modelo || <span className="cp-sem-modelo">(sem modelo)</span>}
+                        </span>
+                        <span className="cp-grupo-cont">
+                          {marcados > 0 ? `${marcados}/` : ""}
+                          {g.produtos.length} referência{g.produtos.length === 1 ? "" : "s"}
+                        </span>
+                      </button>
                     </div>
                     {aberto && (
                       <div className="cp-refs">
                         {g.produtos.map((p) => (
-                          <div key={p.chave} className="cp-ref">
-                            <input
-                              type="checkbox"
-                              style={{ width: "auto", marginRight: 8 }}
-                              checked={selecionados.has(p.chave)}
-                              onChange={() => alternarProduto(p.chave)}
-                            />
+                          <div key={p.chave} className="cp-ref cp-ref-selecionavel">
+                            <label className="cp-sel" title="Marcar este produto">
+                              <input
+                                type="checkbox"
+                                checked={selecionados.has(p.chave)}
+                                onChange={() => alternarProduto(p.chave)}
+                                aria-label={`Selecionar ${p.referencia ?? "produto"}`}
+                              />
+                            </label>
                             <span className="cp-ref-ref">{p.referencia || "-"}</span>
                             <span className="cp-ref-desc">
                               <span className="cp-ref-desc-txt" title={p.descricao}>
