@@ -482,7 +482,14 @@ export async function gerarCadastroXlsx(
       tamBruto && norm(it.modelo) === "LACOSTE" && !tamanhoPlausivel(tamBruto) ? null : tamBruto;
     const tam = tamBrutoOk ? canonicalizarTamanho(tamBrutoOk) : null;
     // PUMA: o tamanho do PDV (GG) não é o texto da nota (XL): tira a última palavra da descrição.
-    const tamNaDescricao = norm(it.modelo) === "PUMA" && tamBrutoOk ? ultimoNome(it.descricao) : tamBruto;
+    // CHAMPION: a nota traz o tamanho como "G/L", "GG/XL", "M/M", "P/S"... no fim da
+    // descrição, e o tamanho do PDV é só a 1ª parte (G, GG...). Tira a última palavra
+    // inteira, senão a descrição de cada tamanho fica diferente e vira uma linha por tamanho.
+    const modeloDescTam = norm(it.modelo);
+    const tamNaDescricao =
+      (modeloDescTam === "PUMA" || modeloDescTam === "CHAMPION") && tamBrutoOk
+        ? ultimoNome(it.descricao)
+        : tamBruto;
     const desc = descricaoSemTamanho(it.descricao, tamNaDescricao);
     const chave = JSON.stringify([it.modelo, it.referencia, desc]);
     const l = grupos.get(chave) ?? [];
