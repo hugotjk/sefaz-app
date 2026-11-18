@@ -183,7 +183,7 @@ export default function ConferenciaSemEanPage() {
       const avisos: string[] = [];
       if (r.semProdutoPdv?.length) avisos.push(`${r.semProdutoPdv.length} sem produto na MULTI (fora da planilha)`);
       if (r.eansSemPosicao?.length) avisos.push(`${r.eansSemPosicao.length} EAN(s) da nota não encaixados (célula EANs em amarelo): ${r.eansSemPosicao.slice(0, 3).join(" | ")}${r.eansSemPosicao.length > 3 ? " …" : ""}`);
-      setMsgExport(`${nome}: ${r.linhas ?? "?"} linha${r.linhas === 1 ? "" : "s"} · ${r.eansPreenchidos ?? 0} EAN(s) da nota encaixados` + (avisos.length ? ` · atenção: ${avisos.join("; ")}` : ""));
+      setMsgExport(`${nome}: ${r.linhas ?? "?"} linha${r.linhas === 1 ? "" : "s"} · ${r.eansPreenchidos ?? 0} EAN(s) preenchidos em tamanhos sem EAN · ${r.tamanhosNovos ?? 0} tamanho(s) novo(s) cadastrado(s) com EAN` + (avisos.length ? ` · atenção: ${avisos.join("; ")}` : ""));
     } catch (e: any) {
       setMsgExport(`Erro: ${e.message}`);
     } finally {

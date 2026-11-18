@@ -105,7 +105,7 @@ function chaveOrdem(t: string): [number, number, string] {
   if (i >= 0) return [0, i, t];
   return [2, 0, t];
 }
-function compararTamanhos(a: string, b: string) {
+export function compararTamanhos(a: string, b: string) {
   const x = chaveOrdem(a);
   const y = chaveOrdem(b);
   return x[0] - y[0] || x[1] - y[1] || x[2].localeCompare(y[2]);

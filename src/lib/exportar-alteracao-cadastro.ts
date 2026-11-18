@@ -1,9 +1,9 @@
 import ExcelJS from "exceljs";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
-import { COLUNAS_ALTERACAO, REDE_MULTI, formulaY, formulasDaLinha } from "@/lib/alteracao-formulas";
+import { COLUNAS_ALTERACAO, REDE_MULTI, formulasDaLinha } from "@/lib/alteracao-formulas";
 import { canonicalizarTamanho } from "@/lib/identificar-tamanho";
-import { parseChaves, tamanhoEDescricaoDoItem } from "@/lib/exportar-cadastro-produtos";
+import { compararTamanhos, parseChaves, tamanhoEDescricaoDoItem } from "@/lib/exportar-cadastro-produtos";
 import { idApiDoProduto } from "@/lib/produto-id";
 
 /**
@@ -11,15 +11,19 @@ import { idApiDoProduto } from "@/lib/produto-id";
  * rede MULTI — NÃO a referência do fornecedor da nota) é preenchida pelo app. O resto são as fórmulas
  * dbsleek do modelo, que buscam tudo no PDV ao abrir no Excel.
  *
- * Coluna EANs: mantém a fórmula do modelo (um EAN por tamanho, na ordem dos tamanhos, "[VAZIO]" onde o PDV
- * não tem) e, só nas posições em que o PDV está vazio, entra o EAN da nota DAQUELE tamanho e DAQUELA cor.
- * Nunca duplica nem desloca: o EAN fica na mesma posição do tamanho da coluna Tamanhos.
+ * Duas coisas que a planilha faz pelo app (cor, grupo, preço etc. vêm do dbsleek):
+ *  1) tamanho que o produto já tem no PDV, mas sem EAN: o EAN da nota entra na posição desse tamanho;
+ *  2) tamanho que o produto ainda NÃO tem no PDV: o tamanho entra no fim da coluna Tamanhos e o EAN dele
+ *     no fim da coluna EANs (mesma posição).
+ * Nunca duplica nem desloca: o EAN fica sempre na mesma posição do tamanho. A ligação nota -> produto do PDV
+ * (para pôr o EAN na linha certa quando há várias cores) é feita internamente, a tela não mostra nada disso.
  */
 
 export interface ResumoAlteracaoCadastro {
   linhas: number;
   semProdutoPdv: string[]; // "MODELO REFERENCIA" sem produto na rede MULTI
-  eansPreenchidos: number; // EANs da nota encaixados na posição do tamanho
+  eansPreenchidos: number; // EANs da nota encaixados em tamanhos que já existem no PDV
+  tamanhosNovos: number; // tamanhos novos (com EAN) acrescentados ao fim das colunas Tamanhos/EANs
   eansSemPosicao: string[]; // EANs da nota que não deu para encaixar (EAN — motivo)
 }
 
@@ -47,17 +51,32 @@ function chavesDeTamanho(canon: string): string[] {
 }
 const lit = (s: string) => `"${s.replace(/"/g, '""')}"`;
 
-/** Fórmula posicional: o EAN do PDV vale; onde está "[VAZIO]" entra o EAN da nota do tamanho da posição. Null se passar do limite. */
-export function formulaEansPosicional(n: number, slots: number, porTamanho: Map<string, string>): string | null {
+const parteL = (n: number) => Array.from({ length: 15 }, (_, k) => `IFERROR(${tamF(n, k + 1)},"")`);
+
+/** Tamanhos: os do PDV (fórmula do modelo) + os novos no fim. */
+function formulaTamanhos(n: number, novos: string[]): string {
+  return `SUBSTITUTE(TRIM(${[...parteL(n), lit(novos.join(" "))].join('&" "&')})," ",";")`;
+}
+
+/**
+ * EANs: o do PDV vale; onde está "[VAZIO]" entra o EAN da nota do tamanho daquela posição; os EANs dos
+ * tamanhos novos vão no fim, na mesma ordem dos tamanhos novos. Null se passar do limite do Excel.
+ */
+function formulaEansPosicional(n: number, slots: number, existentes: Map<string, string>, novosEans: string[]): string | null {
   const chaves: string[] = [];
   const eans: string[] = [];
-  for (const [canon, ean] of porTamanho) for (const k of chavesDeTamanho(canon)) { chaves.push(k); eans.push(ean); }
+  for (const [canon, ean] of existentes) for (const k of chavesDeTamanho(canon)) { chaves.push(k); eans.push(ean); }
   const arrC = `{${chaves.map(lit).join(",")}}`;
   const arrE = `{${eans.map(lit).join(",")}}`;
   const partes: string[] = [];
   for (let i = 1; i <= slots; i++) {
-    partes.push(`SUBSTITUTE(${eanF(n, i)},"[VAZIO]",IFERROR(INDEX(${arrE},MATCH(${tamDeL(n, i)},${arrC},0)),"[VAZIO]"))`);
+    partes.push(
+      existentes.size
+        ? `SUBSTITUTE(${eanF(n, i)},"[VAZIO]",IFERROR(INDEX(${arrE},MATCH(${tamDeL(n, i)},${arrC},0)),"[VAZIO]"))`
+        : eanF(n, i)
+    );
   }
+  if (novosEans.length) partes.push(lit(novosEans.join(" ")));
   const f = `SUBSTITUTE(SUBSTITUTE(TRIM(${partes.join('&" "&')})," ",";"),"[VAZIO]","")`;
   return f.length <= MAX_FORMULA ? f : null;
 }
@@ -69,7 +88,7 @@ export async function gerarAlteracaoCadastroXlsx(
   chaves: unknown
 ): Promise<{ buffer: Buffer; resumo: ResumoAlteracaoCadastro }> {
   const pares = parseChaves(chaves).filter((p) => p.modelo && p.referencia);
-  const resumo: ResumoAlteracaoCadastro = { linhas: 0, semProdutoPdv: [], eansPreenchidos: 0, eansSemPosicao: [] };
+  const resumo: ResumoAlteracaoCadastro = { linhas: 0, semProdutoPdv: [], eansPreenchidos: 0, tamanhosNovos: 0, eansSemPosicao: [] };
 
   const mods = pares.map((p) => p.modelo!.trim().toUpperCase());
   const refs = pares.map((p) => p.referencia!.trim().toUpperCase());
@@ -134,13 +153,12 @@ export async function gerarAlteracaoCadastroXlsx(
     grupos.set(gk, g);
   }
 
-  // produto -> (tamanho canônico -> EAN da nota); e o que sobra sem posição
-  const colocar = new Map<string, Map<string, string>>();
+  // produto -> EANs da nota a encaixar (tamanhos que já existem) e tamanhos novos (a cadastrar)
+  interface Plano { existentes: Map<string, string>; novos: Map<string, string> }
+  const colocar = new Map<string, Plano>();
   const sobras = new Map<string, string[]>(); // por par: "EAN — motivo"
-  const comNotaFaltando = new Set<string>();
   for (const g of grupos.values()) {
     if (!g.faltando.length) continue;
-    comNotaFaltando.add(g.par);
     const prods = produtosPorPar.get(g.par) ?? [];
     let alvo: ProdLocal | null = null;
     let melhor = 0;
@@ -149,23 +167,28 @@ export async function gerarAlteracaoCadastroXlsx(
       if (n > melhor) { melhor = n; alvo = p; }
     }
     if (!alvo && prods.length === 1) alvo = prods[0];
+    const semTam = g.faltando.filter((x) => !x.tam).length;
     for (const f of g.faltando) {
       const motivo = (m: string) => sobras.set(g.par, [...(sobras.get(g.par) ?? []), `${f.ean} — ${m}`]);
-      if (!alvo) { motivo(prods.length ? "não deu para saber de qual cor/produto é" : "sem produto na MULTI"); continue; }
-      const tams = new Set(alvo.vars.map((v) => (v.tamanho ? canonicalizarTamanho(v.tamanho) : "")));
+      if (!alvo) { motivo(prods.length ? "não deu para saber de qual produto (cor) do PDV é" : "sem produto na MULTI"); continue; }
+      const tams = new Set(alvo.vars.map((v) => (v.tamanho ? canonicalizarTamanho(v.tamanho) : "")).filter(Boolean));
       let tam = f.tam;
-      // produto de tamanho único e uma só pendência: não precisa saber o tamanho da nota
-      if (!tam || !tams.has(tam)) {
-        const unicos = [...tams].filter(Boolean);
-        const pend = g.faltando.filter((x) => !x.tam || !tams.has(x.tam)).length;
-        if (unicos.length === 1 && pend === 1) tam = unicos[0];
-        else { motivo(`tamanho "${f.tam ?? "?"}" não existe nas variações desse produto no PDV`); continue; }
+      if (!tam) {
+        // sem tamanho na nota: só dá para colocar se o produto tem um único tamanho e esta é a única pendência
+        if (tams.size === 1 && semTam === 1) tam = [...tams][0];
+        else { motivo("tamanho não identificado na nota"); continue; }
       }
-      const jaTemEan = alvo.vars.some((v) => v.tamanho && canonicalizarTamanho(v.tamanho) === tam && v.ean);
-      if (jaTemEan) { motivo(`o PDV já tem outro EAN no tamanho ${tam}`); continue; }
-      const m = colocar.get(alvo.chave) ?? new Map<string, string>();
-      if (!m.has(tam)) { m.set(tam, f.ean); colocar.set(alvo.chave, m); }
-      else motivo(`dois EANs da nota para o tamanho ${tam}`);
+      const plano = colocar.get(alvo.chave) ?? { existentes: new Map<string, string>(), novos: new Map<string, string>() };
+      if (tams.has(tam)) {
+        const jaTemEan = alvo.vars.some((v) => v.tamanho && canonicalizarTamanho(v.tamanho) === tam && v.ean);
+        if (jaTemEan) { motivo(`o PDV já tem outro EAN no tamanho ${tam}`); continue; }
+        if (plano.existentes.has(tam)) { motivo(`dois EANs da nota para o tamanho ${tam}`); continue; }
+        plano.existentes.set(tam, f.ean);
+      } else {
+        if (plano.novos.has(tam)) { motivo(`dois EANs da nota para o tamanho novo ${tam}`); continue; }
+        plano.novos.set(tam, f.ean);
+      }
+      colocar.set(alvo.chave, plano);
     }
   }
 
@@ -202,20 +225,32 @@ export async function gerarAlteracaoCadastroXlsx(
       fx[20] = { f: `_xll.dbsleek("MOSTRA","DBASE.BIN","PRODUTOS","PRECO_VAREJO_OFFRIO","REFERENCIA","=",$A${n},"REDE","=","MULTI")`, array: true };
       fx[23] = { f: `TRIM(_xll.dbsleek("MOSTRA","DBASE.BIN","PRODUTOS",W$1,"REFERENCIA","=",$A${n},"REDE","=","MULTI"))`, array: true };
 
-      // EANs: posicional quando há EAN da nota a encaixar neste produto
+      // Tamanhos novos e EANs da nota, quando houver para este produto
       const plano = colocar.get(prod.chave);
       let amarelar = (sobras.get(k)?.length ?? 0) > 0;
-      if (plano?.size) {
+      if (plano && (plano.existentes.size || plano.novos.size)) {
         const nTam = new Set(prod.vars.map((v) => (v.tamanho ?? "").trim()).filter(Boolean)).size;
-        const f = formulaEansPosicional(n, Math.min(15, nTam + 1), plano);
-        if (f) {
+        const novosOrdenados = [...plano.novos.entries()].sort((a, b) => compararTamanhos(a[0], b[0]));
+        // com tamanho novo no fim, as posições têm de ser exatas (sem folga); sem ele, 1 posição de folga
+        const slots = Math.min(15, novosOrdenados.length ? nTam : nTam + 1);
+        const f = formulaEansPosicional(n, slots, plano.existentes, novosOrdenados.map(([, e]) => e));
+        if (f && nTam + novosOrdenados.length <= 15) {
           fx[25] = { f, array: false };
-          resumo.eansPreenchidos += plano.size;
+          if (novosOrdenados.length) fx[12] = { f: formulaTamanhos(n, novosOrdenados.map(([t]) => t)), array: false };
+          resumo.eansPreenchidos += plano.existentes.size;
+          resumo.tamanhosNovos += novosOrdenados.length;
         } else {
           amarelar = true;
-          for (const e of plano.values()) resumo.eansSemPosicao.push(`${p.modelo} ${p.referencia}: ${e} — fórmula longa demais (muitos tamanhos/EANs); preencher à mão`);
+          for (const e of [...plano.existentes.values(), ...plano.novos.values()])
+            resumo.eansSemPosicao.push(`${p.modelo} ${p.referencia}: ${e} — fórmula longa demais (muitos tamanhos/EANs); preencher à mão`);
         }
       }
+      // O dbsleek devolve "[VAZIO]" quando o campo está vazio no PDV: na planilha tem que sair em branco.
+      for (const col of [2, 3, 4, 5, 6, 7, 8, 10, 11, 14, 16, 18, 20, 23, 27]) {
+        const x = fx[col];
+        x.f = `IF(${x.f}="[VAZIO]","",${x.f})`;
+      }
+      fx[12].f = `SUBSTITUTE(${fx[12].f},"[VAZIO]","")`;
       for (const [col, x] of Object.entries(fx)) {
         const c = row.getCell(Number(col));
         c.numFmt = "General";
