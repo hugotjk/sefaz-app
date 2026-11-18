@@ -7,6 +7,8 @@
  *   Gravar:                                       npx tsx --env-file=.env scripts/sincronizar-qive-manual.ts --apply
  *
  * Opções: --dias=10 (janela de emissão; padrão 10)  --sem-eventos  --cnpj=00000000000000 (só 1 CNPJ)
+ *   --parte=1/3 (divide os CNPJs em 3 partes para rodar em janelas paralelas; rode 1/3, 2/3 e 3/3).
+ *   Os eventos (cancelamento etc.) só rodam na parte 1.
  */
 import { prisma } from "../src/lib/db";
 import {
@@ -22,6 +24,7 @@ const SEM_EVENTOS = process.argv.includes("--sem-eventos");
 const arg = (n: string) => process.argv.find((x) => x.startsWith(`--${n}=`))?.slice(n.length + 3);
 const DIAS = Number(arg("dias") ?? 10);
 const SO_CNPJ = arg("cnpj")?.replace(/\D/g, "");
+const [PARTE, DE_PARTES] = (arg("parte") ?? "1/1").split("/").map(Number);
 const LIMITE_BANCO_MB = Number(process.env.QIVE_LIMITE_BANCO_MB || 700);
 const CHAVE_REDUNDANCIA = "qive-sync:certificados-redundantes";
 
@@ -64,7 +67,9 @@ async function main() {
   const de = menosDias(hoje, DIAS - 1);
   let cnpjs = await cnpjsDaConta();
   if (SO_CNPJ) cnpjs = cnpjs.filter((c) => c === SO_CNPJ);
-  console.log(`${APLICAR ? "[APPLY]" : "[SIMULAÇÃO]"} Qive v2: ${cnpjs.length} CNPJs | emissão de ${de} a ${hoje}`);
+  cnpjs.sort();
+  if (DE_PARTES > 1) cnpjs = cnpjs.filter((_, i) => i % DE_PARTES === PARTE - 1);
+  console.log(`${APLICAR ? "[APPLY]" : "[SIMULAÇÃO]"} Qive v2 (parte ${PARTE}/${DE_PARTES}): ${cnpjs.length} CNPJs | emissão de ${de} a ${hoje}`);
 
   let faltariam = 0, importadas = 0, jaExistiam = 0, erros = 0;
   const falhas: string[] = [];
@@ -106,7 +111,7 @@ async function main() {
   }
 
   let eventosAplicados = 0;
-  if (APLICAR && !SEM_EVENTOS) {
+  if (APLICAR && !SEM_EVENTOS && PARTE === 1) {
     const desde = dia(new Date(Date.now() - 2 * 86_400_000));
     let cursor = 0;
     for (let p = 0; p < 50; p++) {
