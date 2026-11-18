@@ -63,8 +63,29 @@ async function main() {
             AND "referenciaFornecedorIdentificada" IS NOT NULL)
      GROUP BY v."produtoId", v."redeId"`);
   let fila = prioritarias.map((r) => ({ produtoId: r.produtoId, redeId: r.redeId, n: Number(r.n) }));
+  // Mesma definição de "aguardando" da Conferência sem EAN: itens de nota com EAN que nenhuma variação tem,
+  // cujo (modelo, referência) existe no catálogo e algum produto tem variação sem EAN OU não tem variação nenhuma.
+  const doRelatorio = await prisma.$queryRaw<{ produtoId: string; redeId: number; n: bigint }[]>(Prisma.sql`
+    WITH chaves AS (
+      SELECT DISTINCT upper(trim(i."modeloIdentificado")) AS mod_u, upper(trim(i."referenciaFornecedorIdentificada")) AS ref_u
+        FROM "NotaItem" i
+       WHERE i.ean ~ '^[0-9]{8,14}$'
+         AND COALESCE(i."modeloIdentificado",'') <> '' AND COALESCE(i."referenciaFornecedorIdentificada",'') <> ''
+         AND NOT EXISTS (SELECT 1 FROM "VariacaoProduto" v WHERE v.ean = i.ean))
+    SELECT p.id AS "produtoId", p."redeId" AS "redeId", count(v.id) AS n
+      FROM chaves c
+      JOIN "Produto" p ON upper(trim(p."referenciaFornecedor")) = c.ref_u AND upper(trim(p."modeloNome")) = c.mod_u
+      LEFT JOIN "VariacaoProduto" v ON v."produtoId" = p.id
+     WHERE 1=1 ${REDE != null ? Prisma.sql`AND p."redeId" = ${REDE}` : Prisma.empty}
+     GROUP BY p.id, p."redeId"
+    HAVING bool_or(v.ean IS NULL)`);
+  const jaFila = new Set(fila.map((f) => f.produtoId));
+  const extraRel = doRelatorio.filter((r) => !jaFila.has(r.produtoId)).map((r) => ({ produtoId: r.produtoId, redeId: r.redeId, n: Number(r.n) }));
+  const semVarLocal = extraRel.filter((r) => r.n === 0).length;
+  console.log(`definição do relatório: + ${extraRel.length} produtos (${semVarLocal} deles sem nenhuma variação local)`);
+  fila = fila.concat(extraRel);
   const totalVar = fila.reduce((s, r) => s + r.n, 0);
-  console.log(`${APLICAR ? "[APPLY]" : "[SIMULAÇÃO]"} prioritárias: ${fila.length} produtos, ${totalVar} variações sem EAN`);
+  console.log(`${APLICAR ? "[APPLY]" : "[SIMULAÇÃO]"} prioritárias (por referência de nota sem cadastro): ${fila.length} produtos, ${totalVar} variações sem EAN`);
 
   if (TODOS) {
     const ja = new Set(fila.map((f) => f.produtoId));
@@ -95,13 +116,17 @@ async function main() {
       try {
         const lista = await listarComRetry(redeId, produtoId);
         if (lista.length === 0) semVariacao++;
-        const ops = lista.map((v: any) =>
-          prisma.variacaoProduto.updateMany({
-            where: { id: String(v.Id) },
-            // "" quando o PDV não tem EAN: sai da fila e não é reconsultado.
-            data: { ean: (v.EAN ?? "").trim(), cor: v.Cor || null, tamanho: v.Tamanho || null },
-          })
+        const existentes = new Set(
+          (await comRetryDb(() => prisma.variacaoProduto.findMany({ where: { produtoId }, select: { id: true } }))).map((x) => x.id)
         );
+        const ops = lista.map((v: any) => {
+          // "" quando o PDV não tem EAN: sai da fila e não é reconsultado.
+          const data = { ean: (v.EAN ?? "").trim(), cor: v.Cor || null, tamanho: v.Tamanho || null };
+          const id = String(v.Id);
+          return existentes.has(id)
+            ? prisma.variacaoProduto.update({ where: { id }, data })
+            : prisma.variacaoProduto.create({ data: { id, produtoId, redeId, ...data } });
+        });
         if (ops.length) await comRetryDb(() => prisma.$transaction(ops));
         atualizadas += lista.length;
         lote.push(produtoId);
