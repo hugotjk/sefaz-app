@@ -105,7 +105,7 @@ function chaveOrdem(t: string): [number, number, string] {
   if (i >= 0) return [0, i, t];
   return [2, 0, t];
 }
-function compararTamanhos(a: string, b: string) {
+export function compararTamanhos(a: string, b: string) {
   const x = chaveOrdem(a);
   const y = chaveOrdem(b);
   return x[0] - y[0] || x[1] - y[1] || x[2].localeCompare(y[2]);
@@ -452,6 +452,25 @@ function normalizarUnidade(u: string | undefined): string {
   if (["PR", "PAR", "PARES"].includes(v)) return "PAR";
   if (["PÇ", "PEÇA", "PECA", "PCS", "PC"].includes(v)) return "PC";
   return v;
+}
+
+/**
+ * Tamanho (na grafia do PDV) e descrição sem tamanho de um item de nota — MESMA regra usada para
+ * agrupar as linhas da planilha de cadastro (usada para casar EAN da nota com o produto/cor do PDV).
+ */
+export function tamanhoEDescricaoDoItem(it: {
+  emitente: string | null; modelo: string | null; codigo: string; descricao: string;
+  ean: string | null; infAdProd: string | null; referencia: string | null;
+}): { tam: string | null; descSemTam: string } {
+  const tamBruto =
+    identificarTamanho({
+      emitente: it.emitente ?? "", modelo: it.modelo, codigo: it.codigo, descricao: it.descricao,
+      ean: it.ean, infAdProd: it.infAdProd, referencia: it.referencia,
+    }) ?? tamanhoGenerico({ codigo: it.codigo, descricao: it.descricao, infAdProd: it.infAdProd });
+  const ok = tamBruto && norm(it.modelo) === "LACOSTE" && !tamanhoPlausivel(tamBruto) ? null : tamBruto;
+  const m = norm(it.modelo);
+  const tamNaDesc = (m === "PUMA" || m === "CHAMPION") && ok ? ultimoNome(it.descricao) : tamBruto;
+  return { tam: ok ? canonicalizarTamanho(ok) : null, descSemTam: descricaoSemTamanho(it.descricao, tamNaDesc) };
 }
 
 export async function gerarCadastroXlsx(

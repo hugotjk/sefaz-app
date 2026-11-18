@@ -53,6 +53,10 @@ export default function ConferenciaSemEanPage() {
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState<string | null>(null);
   const [abertos, setAbertos] = useState<Set<string>>(new Set());
+  // Produtos marcados para a planilha de Alteração de Cadastro (chave = [modelo, referencia]); mantém entre páginas/filtros.
+  const [selecionados, setSelecionados] = useState<Set<string>>(new Set());
+  const [exportando, setExportando] = useState(false);
+  const [msgExport, setMsgExport] = useState<string | null>(null);
 
   useEffect(() => {
     const id = setTimeout(() => {
@@ -118,6 +122,73 @@ export default function ConferenciaSemEanPage() {
 
   function alternarTodos() {
     setAbertos(todosAbertos ? new Set() : new Set(todasChaves));
+  }
+
+  function alternarProduto(chave: string) {
+    setSelecionados((prev) => {
+      const prox = new Set(prev);
+      if (prox.has(chave)) prox.delete(chave);
+      else prox.add(chave);
+      return prox;
+    });
+  }
+  function alternarModeloSel(g: GrupoModelo) {
+    setSelecionados((prev) => {
+      const prox = new Set(prev);
+      const todos = g.produtos.every((p) => prox.has(p.chave));
+      for (const p of g.produtos) {
+        if (todos) prox.delete(p.chave);
+        else prox.add(p.chave);
+      }
+      return prox;
+    });
+  }
+  function marcarPagina() {
+    setSelecionados((prev) => {
+      const prox = new Set(prev);
+      const todos = grupos.every((g) => g.produtos.every((p) => prox.has(p.chave)));
+      for (const g of grupos) for (const p of g.produtos) {
+        if (todos) prox.delete(p.chave);
+        else prox.add(p.chave);
+      }
+      return prox;
+    });
+  }
+
+  async function exportar() {
+    if (selecionados.size === 0 || exportando) return;
+    setExportando(true);
+    setMsgExport(null);
+    try {
+      const res = await fetch("/api/relatorios/conferencia-sem-ean/exportar", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ chaves: [...selecionados] }),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        throw new Error(j.error || "Erro ao gerar o arquivo.");
+      }
+      const nome = res.headers.get("X-Nome-Arquivo") || "ALTERACAO_DE_CADASTRO.xlsx";
+      const r = JSON.parse(decodeURIComponent(res.headers.get("X-Resumo") || "{}"));
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = nome;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      const avisos: string[] = [];
+      if (r.semProdutoPdv?.length) avisos.push(`${r.semProdutoPdv.length} sem produto na MULTI (fora da planilha)`);
+      if (r.eansSemPosicao?.length) avisos.push(`${r.eansSemPosicao.length} EAN(s) da nota não encaixados (célula EANs em amarelo): ${r.eansSemPosicao.slice(0, 3).join(" | ")}${r.eansSemPosicao.length > 3 ? " …" : ""}`);
+      setMsgExport(`${nome}: ${r.linhas ?? "?"} linha${r.linhas === 1 ? "" : "s"} · ${r.eansPreenchidos ?? 0} EAN(s) preenchidos em tamanhos sem EAN · ${r.tamanhosNovos ?? 0} tamanho(s) novo(s) cadastrado(s) com EAN` + (avisos.length ? ` · atenção: ${avisos.join("; ")}` : ""));
+    } catch (e: any) {
+      setMsgExport(`Erro: ${e.message}`);
+    } finally {
+      setExportando(false);
+    }
   }
 
   const totalModelos = dados?.totalModelos ?? 0;
@@ -256,15 +327,44 @@ export default function ConferenciaSemEanPage() {
               </button>
             </div>
 
+            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 12, fontSize: 13 }}>
+              <button type="button" className="btn-secundario" style={{ width: "auto", padding: "5px 10px", fontSize: 12 }} onClick={marcarPagina}>
+                Marcar/desmarcar todos da página
+              </button>
+              <span style={{ color: "var(--text-dim)" }}>
+                {selecionados.size.toLocaleString("pt-BR")} produto{selecionados.size === 1 ? "" : "s"} marcado{selecionados.size === 1 ? "" : "s"} para alteração de cadastro (só produtos da MULTI)
+              </span>
+              {selecionados.size > 0 && (
+                <button type="button" className="btn-secundario" style={{ width: "auto", padding: "5px 10px", fontSize: 12 }} onClick={() => setSelecionados(new Set())}>
+                  Limpar seleção
+                </button>
+              )}
+              <button type="button" style={{ width: "auto", padding: "5px 12px", fontSize: 12 }} disabled={selecionados.size === 0 || exportando} onClick={exportar}>
+                {exportando ? "Gerando…" : "Exportar alteração de cadastro"}
+              </button>
+              {msgExport && <span style={{ color: msgExport.startsWith("Erro") ? "var(--red)" : "var(--text-dim)" }}>{msgExport}</span>}
+            </div>
+
             <div className="cp-grupos">
               {grupos.map((g) => {
                 const ck = chaveModelo(g.modelo);
                 const aberto = abertos.has(ck);
+                const marcadosNoGrupo = g.produtos.filter((p) => selecionados.has(p.chave)).length;
                 return (
                   <div key={ck} className={`cp-grupo${aberto ? " aberto" : ""}`}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <input
+                      type="checkbox"
+                      title="Marcar todas as referências deste modelo"
+                      style={{ width: "auto", marginLeft: 8 }}
+                      checked={g.produtos.length > 0 && marcadosNoGrupo === g.produtos.length}
+                      ref={(el) => { if (el) el.indeterminate = marcadosNoGrupo > 0 && marcadosNoGrupo < g.produtos.length; }}
+                      onChange={() => alternarModeloSel(g)}
+                    />
                     <button
                       type="button"
                       className="cp-grupo-cab"
+                      style={{ flex: 1 }}
                       onClick={() => alternarGrupo(ck)}
                       aria-expanded={aberto}
                     >
@@ -274,12 +374,20 @@ export default function ConferenciaSemEanPage() {
                       </span>
                       <span className="cp-grupo-cont">
                         {g.produtos.length} referência{g.produtos.length === 1 ? "" : "s"}
+                        {marcadosNoGrupo > 0 ? ` · ${marcadosNoGrupo} marcada${marcadosNoGrupo === 1 ? "" : "s"}` : ""}
                       </span>
                     </button>
+                    </div>
                     {aberto && (
                       <div className="cp-refs">
                         {g.produtos.map((p) => (
                           <div key={p.chave} className="cp-ref">
+                            <input
+                              type="checkbox"
+                              style={{ width: "auto", marginRight: 8 }}
+                              checked={selecionados.has(p.chave)}
+                              onChange={() => alternarProduto(p.chave)}
+                            />
                             <span className="cp-ref-ref">{p.referencia || "-"}</span>
                             <span className="cp-ref-desc">
                               <span className="cp-ref-desc-txt" title={p.descricao}>
