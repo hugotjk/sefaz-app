@@ -32,6 +32,9 @@ const PAGINAS_EVENTOS_POR_EXECUCAO = 8;
 const CHAVE = "qive-sync:estado";
 const CHAVE_V2 = "qive-sync:v2";
 const DIAS_JANELA_V2 = 10;
+// CNPJs processados por step (1 step = 1 "execution" no Inngest) e tempo máximo por step.
+const CNPJS_POR_STEP_V2 = 15;
+const ORCAMENTO_MS_STEP_V2 = 200_000;
 const CHAVE_REDUNDANCIA = "qive-sync:certificados-redundantes";
 
 interface JanelaPendente {
@@ -154,36 +157,56 @@ export const qiveSync = inngest.createFunction(
     let jaExistiam = 0;
     let erros = 0;
     const falhas: string[] = [];
-    for (const cnpj of cnpjs) {
-      const r = await step.run(`v2-${cnpj}`, async () => {
-        try {
-          const lista = await listarChavesV2(cnpj, de, hoje);
-          if (lista.length === 0) return { imp: 0, ja: 0, err: 0, falha: false };
-          const chaves = lista.map((x) => x.chave);
-          const tem = new Set(
-            (await prisma.note.findMany({ where: { chaveAcesso: { in: chaves } }, select: { chaveAcesso: true } })).map(
-              (n) => n.chaveAcesso
-            )
-          );
-          const faltam = lista.filter((x) => !tem.has(x.chave));
-          if (faltam.length === 0) return { imp: 0, ja: lista.length, err: 0, falha: false };
-          const datas = faltam.map((x) => x.emissao.slice(0, 10)).filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d)).sort();
-          // janela mínima que cobre as faltantes (±1 dia por causa de fuso)
-          const d1 = datas.length ? menosDias(datas[0], 1) : de;
-          const d2 = datas.length ? menosDias(datas[datas.length - 1], -1) : hoje;
-          const notas = await buscarNfesV2(cnpj, d1 < de ? de : d1, d2 > hoje ? hoje : d2);
-          const falt = new Set(faltam.map((x) => x.chave));
-          const res = await importarLoteQive(notas.filter((n) => falt.has(n.access_key)));
-          await registrarRedundancia(res.redundantesPorCertificado);
-          return { imp: res.importadas, ja: lista.length - faltam.length + res.jaExistiam, err: res.erros, falha: false };
-        } catch {
-          return { imp: 0, ja: 0, err: 1, falha: true };
+    // Vários CNPJs por step: antes era 1 step por CNPJ (centenas de steps por run, de hora
+    // em hora), o que estourou a cota do Inngest. Cada CNPJ continua isolado por try/catch.
+    const processarCnpj = async (cnpj: string) => {
+      try {
+        const lista = await listarChavesV2(cnpj, de, hoje);
+        if (lista.length === 0) return { imp: 0, ja: 0, err: 0, falha: false };
+        const chaves = lista.map((x) => x.chave);
+        const tem = new Set(
+          (await prisma.note.findMany({ where: { chaveAcesso: { in: chaves } }, select: { chaveAcesso: true } })).map(
+            (n) => n.chaveAcesso
+          )
+        );
+        const faltam = lista.filter((x) => !tem.has(x.chave));
+        if (faltam.length === 0) return { imp: 0, ja: lista.length, err: 0, falha: false };
+        const datas = faltam.map((x) => x.emissao.slice(0, 10)).filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d)).sort();
+        // janela mínima que cobre as faltantes (±1 dia por causa de fuso)
+        const d1 = datas.length ? menosDias(datas[0], 1) : de;
+        const d2 = datas.length ? menosDias(datas[datas.length - 1], -1) : hoje;
+        const notas = await buscarNfesV2(cnpj, d1 < de ? de : d1, d2 > hoje ? hoje : d2);
+        const falt = new Set(faltam.map((x) => x.chave));
+        const res = await importarLoteQive(notas.filter((n) => falt.has(n.access_key)));
+        await registrarRedundancia(res.redundantesPorCertificado);
+        return { imp: res.importadas, ja: lista.length - faltam.length + res.jaExistiam, err: res.erros, falha: false };
+      } catch {
+        return { imp: 0, ja: 0, err: 1, falha: true };
+      }
+    };
+    for (let i = 0; i < cnpjs.length; i += CNPJS_POR_STEP_V2) {
+      const lote = cnpjs.slice(i, i + CNPJS_POR_STEP_V2);
+      const r = await step.run(`v2-lote-${i / CNPJS_POR_STEP_V2}`, async () => {
+        const tot = { imp: 0, ja: 0, err: 0, falhas: [] as string[] };
+        const inicio = Date.now();
+        for (const cnpj of lote) {
+          // Sem tempo no step (limite de ~300s por invocação): o resto fica pro próximo ciclo.
+          if (Date.now() - inicio > ORCAMENTO_MS_STEP_V2) {
+            tot.falhas.push(cnpj);
+            continue;
+          }
+          const x = await processarCnpj(cnpj);
+          tot.imp += x.imp;
+          tot.ja += x.ja;
+          tot.err += x.err;
+          if (x.falha) tot.falhas.push(cnpj);
         }
+        return tot;
       });
       importadas += r.imp;
       jaExistiam += r.ja;
       erros += r.err;
-      if (r.falha) falhas.push(cnpj);
+      falhas.push(...r.falhas);
     }
     estado.totais.erros += erros;
     const terminou = falhas.length === 0;
