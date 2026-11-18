@@ -180,8 +180,10 @@ export default function ConferenciaSemEanPage() {
       a.click();
       a.remove();
       URL.revokeObjectURL(url);
-      const aviso = r.semProdutoPdv?.length ? ` · atenção: ${r.semProdutoPdv.length} sem produto na MULTI (fora da planilha)` : "";
-      setMsgExport(`${nome}: ${r.linhas ?? "?"} linha${r.linhas === 1 ? "" : "s"}${aviso}`);
+      const avisos: string[] = [];
+      if (r.semProdutoPdv?.length) avisos.push(`${r.semProdutoPdv.length} sem produto na MULTI (fora da planilha)`);
+      if (r.eansSemPosicao?.length) avisos.push(`${r.eansSemPosicao.length} EAN(s) da nota não encaixados (célula EANs em amarelo): ${r.eansSemPosicao.slice(0, 3).join(" | ")}${r.eansSemPosicao.length > 3 ? " …" : ""}`);
+      setMsgExport(`${nome}: ${r.linhas ?? "?"} linha${r.linhas === 1 ? "" : "s"} · ${r.eansPreenchidos ?? 0} EAN(s) da nota encaixados` + (avisos.length ? ` · atenção: ${avisos.join("; ")}` : ""));
     } catch (e: any) {
       setMsgExport(`Erro: ${e.message}`);
     } finally {
