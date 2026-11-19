@@ -1,6 +1,7 @@
 import { Prisma } from "@prisma/client";
 import ExcelJS from "exceljs";
 import { prisma } from "@/lib/db";
+import { realcarReferenciasDuplicadas } from "@/lib/realce-duplicados";
 import { parseNFeXml } from "@/lib/parse-nfe-xml";
 import {
   canonicalizarTamanho,
@@ -784,6 +785,7 @@ export async function gerarCadastroXlsx(
   resumo.linhas = linhas.length;
   resumo.eanRepetido = [...eansVistos.values()].filter((n) => n > 1).length;
 
+  realcarReferenciasDuplicadas(ws, "J");
   const buffer = Buffer.from(await wb.xlsx.writeBuffer());
   return { buffer, resumo };
 }
