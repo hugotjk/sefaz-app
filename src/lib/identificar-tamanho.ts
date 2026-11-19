@@ -51,6 +51,8 @@ const porModelo = (...nomes: string[]) => (e: EntradaTamanho) => !!e.modelo && n
 const ult = (t: string) => ultimoNome(t);
 
 const REGRAS: Regra[] = [
+  // ALLMIX (canecas, garrafas, copos...): só existe tamanho único; números na descrição ("LUVA COM 1") são quantidade do kit.
+  { quando: porModelo("ALLMIX"), valor: () => "UN" },
   { quando: porEmitente("RIDE GROUP CALCADOS LTDA"), valor: (e) => direita(e.codigo, 2) },
   {
     quando: porEmitente("MATMAMAT CONFECCOES LTDA"),
