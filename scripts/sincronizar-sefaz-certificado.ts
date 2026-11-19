@@ -117,4 +117,4 @@ async function main() {
     console.log("\nObs.: as notas entram só com o resumo. Rode de novo com --xml (ou abra a nota no app) para trazer o XML completo e os itens.");
   }
 }
-main().catch((e) => console.error(String(e?.message ?? e))).finally(() => prisma.$disconnect());
+main().catch((e) => { console.error(String(e?.message ?? e)); process.exitCode = 1; }).finally(() => prisma.$disconnect());
