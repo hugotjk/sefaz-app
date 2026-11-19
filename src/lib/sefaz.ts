@@ -1,4 +1,5 @@
 import https from "https";
+import tls from "tls";
 import zlib from "zlib";
 import forge from "node-forge";
 import { XMLParser } from "fast-xml-parser";
@@ -62,6 +63,44 @@ export function validarSenhaCertificado(pfxBase64: string, senha: string): boole
   }
 }
 
+/**
+ * Credenciais TLS a partir do .pfx. O Node (OpenSSL 3) recusa .pfx exportados com criptografia antiga
+ * (RC2-40 / 3DES do Windows antigo): "Unsupported PKCS12 PFX data". O node-forge abre esses arquivos, então
+ * nesse caso extraímos a chave privada e a cadeia de certificados em PEM e passamos `key`/`cert` no lugar de `pfx`.
+ */
+export function credenciaisTls(
+  pfxBuffer: Buffer,
+  senha: string
+): { pfx: Buffer; passphrase: string } | { key: string; cert: string } {
+  try {
+    // Testa se o OpenSSL do Node aceita o .pfx como está (caso comum): não precisa converter.
+    tls.createSecureContext({ pfx: pfxBuffer, passphrase: senha });
+    return { pfx: pfxBuffer, passphrase: senha };
+  } catch (e: any) {
+    const msg = String(e?.message ?? "").toLowerCase();
+    if (!msg.includes("unsupported") && !msg.includes("legacy") && !msg.includes("pkcs12")) throw e; // senha errada etc.: segue o fluxo normal de erro
+  }
+  const asn1 = forge.asn1.fromDer(forge.util.createBuffer(pfxBuffer.toString("binary")));
+  const p12 = forge.pkcs12.pkcs12FromAsn1(asn1, senha);
+  const bagsChave = [
+    ...(p12.getBags({ bagType: forge.pki.oids.pkcs8ShroudedKeyBag })[forge.pki.oids.pkcs8ShroudedKeyBag] ?? []),
+    ...(p12.getBags({ bagType: forge.pki.oids.keyBag })[forge.pki.oids.keyBag] ?? []),
+  ];
+  const chave: any = bagsChave.find((b) => b.key)?.key;
+  if (!chave) throw new Error("Não achei a chave privada dentro do .pfx.");
+  const certs = (p12.getBags({ bagType: forge.pki.oids.certBag })[forge.pki.oids.certBag] ?? [])
+    .map((b) => b.cert)
+    .filter(Boolean) as forge.pki.Certificate[];
+  if (!certs.length) throw new Error("Não achei o certificado dentro do .pfx.");
+  // certificado do titular primeiro (o que casa com a chave), depois a cadeia
+  const folha = certs.find((c) => (c.publicKey as any)?.n?.compareTo?.(chave.n) === 0) ?? certs[0];
+  const ordenados = [folha, ...certs.filter((c) => c !== folha)];
+  return {
+    key: forge.pki.privateKeyToPem(chave),
+    cert: ordenados.map((c) => forge.pki.certificateToPem(c)).join(""),
+  };
+}
+
 interface SoapHttpResult {
   statusCode: number;
   body: string;
@@ -81,13 +120,20 @@ function soapPost(params: {
   const { host, path, body, pfxBuffer, senha } = params;
 
   return new Promise((resolve, reject) => {
+    let cred: ReturnType<typeof credenciaisTls>;
+    try {
+      cred = credenciaisTls(pfxBuffer, senha);
+    } catch (e: any) {
+      const m = String(e?.message ?? "").toLowerCase();
+      reject(m.includes("mac verify failure") || m.includes("bad decrypt") ? new SenhaInvalidaError() : e);
+      return;
+    }
     const req = https.request(
       {
         host,
         path,
         method: "POST",
-        pfx: pfxBuffer,
-        passphrase: senha,
+        ...cred,
         rejectUnauthorized: true,
         headers: {
           "Content-Type": SOAP_CONTENT_TYPE,
