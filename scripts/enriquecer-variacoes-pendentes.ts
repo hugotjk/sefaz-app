@@ -9,6 +9,8 @@
  *   Simulação (só conta):  npx tsx --env-file=.env scripts/enriquecer-variacoes-pendentes.ts
  *   Gravar:                npx tsx --env-file=.env scripts/enriquecer-variacoes-pendentes.ts --apply
  *
+ * --refazer: reconsulta no PDV os produtos que o relatório lista (modelo+referência com EAN de nota faltando),
+ *   mesmo os que já tinham sido consultados — use depois de cadastrar EAN no PDV.
  * Opções: --todos  --limite=500 (máx. de produtos)  --paralelo=4 (consultas simultâneas ao PDV)  --rede=2
  * Seguro para repetir: quem já tem EAN sai da fila. Se interromper (Ctrl+C), é só rodar de novo.
  */
@@ -20,6 +22,8 @@ import { idApiDoProduto } from "../src/lib/produto-id";
 const prisma = new PrismaClient();
 const APLICAR = process.argv.includes("--apply");
 const TODOS = process.argv.includes("--todos");
+// --refazer: reconsulta TAMBÉM produtos cujas variações já foram consultadas (EAN "" no app) — pega EAN cadastrado depois no PDV.
+const REFAZER = process.argv.includes("--refazer");
 const arg = (n: string) => process.argv.find((x) => x.startsWith(`--${n}=`))?.slice(n.length + 3);
 const LIMITE = arg("limite") ? Number(arg("limite")) : Infinity;
 const PARALELO = Math.max(1, Math.min(8, Number(arg("paralelo") ?? 4)));
@@ -78,11 +82,11 @@ async function main() {
       LEFT JOIN "VariacaoProduto" v ON v."produtoId" = p.id
      WHERE 1=1 ${REDE != null ? Prisma.sql`AND p."redeId" = ${REDE}` : Prisma.empty}
      GROUP BY p.id, p."redeId"
-    HAVING bool_or(v.ean IS NULL)`);
+    ${REFAZER ? Prisma.empty : Prisma.sql`HAVING bool_or(v.ean IS NULL)`}`);
   const jaFila = new Set(fila.map((f) => f.produtoId));
   const extraRel = doRelatorio.filter((r) => !jaFila.has(r.produtoId)).map((r) => ({ produtoId: r.produtoId, redeId: r.redeId, n: Number(r.n) }));
   const semVarLocal = extraRel.filter((r) => r.n === 0).length;
-  console.log(`definição do relatório: + ${extraRel.length} produtos (${semVarLocal} deles sem nenhuma variação local)`);
+  console.log(`${REFAZER ? "[--refazer] " : ""}definição do relatório: + ${extraRel.length} produtos (${semVarLocal} deles sem nenhuma variação local)`);
   fila = fila.concat(extraRel);
   const totalVar = fila.reduce((s, r) => s + r.n, 0);
   console.log(`${APLICAR ? "[APPLY]" : "[SIMULAÇÃO]"} prioritárias (por referência de nota sem cadastro): ${fila.length} produtos, ${totalVar} variações sem EAN`);
