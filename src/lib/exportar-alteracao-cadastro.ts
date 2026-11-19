@@ -49,6 +49,12 @@ function chavesDeTamanho(canon: string): string[] {
   if (canon.includes(",")) out.add(canon.replace(",", "."));
   return [...out];
 }
+/** Tamanho "solto": o PDV infantil usa "2A", "10A"; a nota traz "2", "10". Compara pelos dígitos. */
+const solto = (t: string | null | undefined): string => {
+  const c = canonicalizarTamanho(t);
+  const m = /^(\d{1,2})A$/.exec(c);
+  return m ? m[1] : c;
+};
 const lit = (s: string) => `"${s.replace(/"/g, '""')}"`;
 
 const parteL = (n: number) => Array.from({ length: 15 }, (_, k) => `IFERROR(${tamF(n, k + 1)},"")`);
@@ -62,10 +68,12 @@ function formulaTamanhos(n: number, novos: string[]): string {
  * EANs: o do PDV vale; onde está "[VAZIO]" entra o EAN da nota do tamanho daquela posição; os EANs dos
  * tamanhos novos vão no fim, na mesma ordem dos tamanhos novos. Null se passar do limite do Excel.
  */
-function formulaEansPosicional(n: number, slots: number, existentes: Map<string, string>, novosEans: string[]): string | null {
+function formulaEansPosicional(n: number, slots: number, existentes: Map<string, { ean: string; pdv: string }>, novosEans: string[]): string | null {
   const chaves: string[] = [];
   const eans: string[] = [];
-  for (const [canon, ean] of existentes) for (const k of chavesDeTamanho(canon)) { chaves.push(k); eans.push(ean); }
+  for (const [canon, { ean, pdv }] of existentes) {
+    for (const k of new Set([pdv.trim().toUpperCase(), ...chavesDeTamanho(canon)])) { chaves.push(k); eans.push(ean); }
+  }
   const arrC = `{${chaves.map(lit).join(",")}}`;
   const arrE = `{${eans.map(lit).join(",")}}`;
   const partes: string[] = [];
@@ -154,7 +162,7 @@ export async function gerarAlteracaoCadastroXlsx(
   }
 
   // produto -> EANs da nota a encaixar (tamanhos que já existem) e tamanhos novos (a cadastrar)
-  interface Plano { existentes: Map<string, string>; novos: Map<string, string> }
+  interface Plano { existentes: Map<string, { ean: string; pdv: string }>; novos: Map<string, string> }
   const colocar = new Map<string, Plano>();
   const sobras = new Map<string, string[]>(); // por par: "EAN — motivo"
   for (const g of grupos.values()) {
@@ -168,27 +176,38 @@ export async function gerarAlteracaoCadastroXlsx(
     }
     if (!alvo && prods.length === 1) alvo = prods[0];
     const semTam = g.faltando.filter((x) => !x.tam).length;
+    const tamanhosDe = (p: ProdLocal) => new Map(p.vars.filter((v) => v.tamanho).map((v) => [solto(v.tamanho), v.tamanho!.trim()]));
     for (const f of g.faltando) {
       const motivo = (m: string) => sobras.set(g.par, [...(sobras.get(g.par) ?? []), `${f.ean} — ${m}`]);
-      if (!alvo) { motivo(prods.length ? "não deu para saber de qual produto (cor) do PDV é" : "sem produto na MULTI"); continue; }
-      const tams = new Set(alvo.vars.map((v) => (v.tamanho ? canonicalizarTamanho(v.tamanho) : "")).filter(Boolean));
-      let tam = f.tam;
+      let a: ProdLocal | null = alvo;
+      // Vários produtos com a mesma referência (ex.: adulto e infantil) e sem EAN para ligar: o tamanho decide,
+      // se existir em um único deles.
+      if (!a && prods.length > 1 && f.tam) {
+        const cands = prods.filter((p) => tamanhosDe(p).has(solto(f.tam)));
+        if (cands.length === 1) a = cands[0];
+      }
+      if (!a) { motivo(prods.length ? "não deu para saber de qual produto (cor) do PDV é" : "sem produto na MULTI"); continue; }
+      const tams = tamanhosDe(a);
+      let tam = f.tam ? solto(f.tam) : null;
       if (!tam) {
         // sem tamanho na nota: só dá para colocar se o produto tem um único tamanho e esta é a única pendência
-        if (tams.size === 1 && semTam === 1) tam = [...tams][0];
+        if (tams.size === 1 && semTam === 1) tam = [...tams.keys()][0];
         else { motivo("tamanho não identificado na nota"); continue; }
       }
-      const plano = colocar.get(alvo.chave) ?? { existentes: new Map<string, string>(), novos: new Map<string, string>() };
+      const plano = colocar.get(a.chave) ?? { existentes: new Map<string, { ean: string; pdv: string }>(), novos: new Map<string, string>() };
       if (tams.has(tam)) {
-        const jaTemEan = alvo.vars.some((v) => v.tamanho && canonicalizarTamanho(v.tamanho) === tam && v.ean);
+        const jaTemEan = a.vars.some((v) => v.tamanho && solto(v.tamanho) === tam && v.ean);
         if (jaTemEan) { motivo(`o PDV já tem outro EAN no tamanho ${tam}`); continue; }
         if (plano.existentes.has(tam)) { motivo(`dois EANs da nota para o tamanho ${tam}`); continue; }
-        plano.existentes.set(tam, f.ean);
+        plano.existentes.set(tam, { ean: f.ean, pdv: tams.get(tam)! });
       } else {
-        if (plano.novos.has(tam)) { motivo(`dois EANs da nota para o tamanho novo ${tam}`); continue; }
-        plano.novos.set(tam, f.ean);
+        // tamanho novo: se o produto usa a grafia "10A", escreve "10A"
+        const usaA = [...tams.values()].some((v) => /^\d{1,2}A$/i.test(v.trim()));
+        const grafia = usaA && /^\d{1,2}$/.test(tam) ? `${tam}A` : tam;
+        if (plano.novos.has(grafia)) { motivo(`dois EANs da nota para o tamanho novo ${grafia}`); continue; }
+        plano.novos.set(grafia, f.ean);
       }
-      colocar.set(alvo.chave, plano);
+      colocar.set(a.chave, plano);
     }
   }
 
@@ -241,7 +260,7 @@ export async function gerarAlteracaoCadastroXlsx(
           resumo.tamanhosNovos += novosOrdenados.length;
         } else {
           amarelar = true;
-          for (const e of [...plano.existentes.values(), ...plano.novos.values()])
+          for (const e of [...[...plano.existentes.values()].map((x) => x.ean), ...plano.novos.values()])
             resumo.eansSemPosicao.push(`${p.modelo} ${p.referencia}: ${e} — fórmula longa demais (muitos tamanhos/EANs); preencher à mão`);
         }
       }
