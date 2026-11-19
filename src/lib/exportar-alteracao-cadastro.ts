@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db";
 import { COLUNAS_ALTERACAO, REDE_MULTI, formulasDaLinha } from "@/lib/alteracao-formulas";
 import { canonicalizarTamanho } from "@/lib/identificar-tamanho";
 import { compararTamanhos, parseChaves, tamanhoEDescricaoDoItem } from "@/lib/exportar-cadastro-produtos";
+import { realcarReferenciasDuplicadas } from "@/lib/realce-duplicados";
 import { idApiDoProduto } from "@/lib/produto-id";
 
 /**
@@ -290,6 +291,7 @@ export async function gerarAlteracaoCadastroXlsx(
     }
   }
   ws.columns.forEach((c, i) => (c.width = i === 0 ? 11 : 14));
+  realcarReferenciasDuplicadas(ws, "J");
   return { buffer: Buffer.from(await wb.xlsx.writeBuffer()), resumo };
 }
 
