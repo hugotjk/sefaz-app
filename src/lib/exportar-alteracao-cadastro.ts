@@ -194,6 +194,12 @@ export async function gerarAlteracaoCadastroXlsx(
         if (tams.size === 1 && semTam === 1) tam = [...tams.keys()][0];
         else { motivo("tamanho não identificado na nota"); continue; }
       }
+      // Produto de tamanho ÚNICO (UN) no PDV: nunca cria tamanho novo. O "tamanho" achado na nota costuma ser
+      // lixo da descrição (ex.: "LUVA COM 1" -> "1"); o EAN vai para o tamanho UN se for o único da nota.
+      if (!tams.has(tam) && tams.size === 1 && [...tams.keys()][0] === "UN") {
+        if (g.faltando.length === 1) tam = "UN";
+        else { motivo("produto de tamanho único (UN) com mais de um EAN na nota"); continue; }
+      }
       const plano = colocar.get(a.chave) ?? { existentes: new Map<string, { ean: string; pdv: string }>(), novos: new Map<string, string>() };
       if (tams.has(tam)) {
         const jaTemEan = a.vars.some((v) => v.tamanho && solto(v.tamanho) === tam && v.ean);
