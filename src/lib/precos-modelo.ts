@@ -17,6 +17,13 @@ export function fim999(v: number) {
   return arred2(k * 10 + 9.99);
 }
 
+/** Menor valor terminado em 9,99 que seja >= v (markup mínimo garantido). */
+export function teto999(v: number) {
+  if (v <= 9.99) return 9.99;
+  const k = Math.ceil((v - 9.99) / 10 - 1e-9);
+  return arred2(k * 10 + 9.99);
+}
+
 const MULT_FIXO: Record<string, number> = { HURLEY: 2.9, "RIP CURL": 2.4, "NEW BALANCE": 2.3, BRAZILINE: 2.35, "BETEL FLA": 2.4, "STARTER FLA": 2.4, COIMBRA: 2.5, PUMA: 2.41 };
 
 /** Adidas e Adidas Fla: o preço certo é o RRP da base da Adidas (artigo = referência). */
@@ -34,6 +41,7 @@ export function modeloTemRegraDePreco(modelo: string | null | undefined): boolea
     m.includes("KENNER") ||
     m.includes("REDLEY") ||
     m === "OAKLEY" ||
+    m === "HAVAIANAS" ||
     ehAdidas(m) ||
     m in MULT_FIXO
   );
@@ -102,6 +110,10 @@ export function calcularPrecosModelo(a: {
   if (ehAdidas(modeloU)) {
     const rrp = precoAdidas(a.referencia);
     if (rrp != null) preco3 = rrp;
+  }
+  if (modeloU === "HAVAIANAS" && preco2 != null) {
+    // Markup mínimo de 2,2 sobre o Preço 2, sempre terminando em 9,99 (arredonda para cima).
+    return { preco1: arred2(preco1 ?? 0), preco2: arred2(preco2), preco3: arred2(teto999(preco2 * 2.2)), multiplicador: 2.2 };
   }
   const mult = MULT_FIXO[modeloU] ?? 0;
   if (mult && preco2 != null) preco3 = fim999(preco2 * mult);

@@ -13,6 +13,7 @@ import { tipoEGrupoLacoste } from "@/lib/lacoste-grupos";
 import { CORES_OAKLEY } from "@/lib/oakley-base";
 import { arred2, calcularPrecosModelo, calcularPreco4 } from "@/lib/precos-modelo";
 import { dadosPuma } from "@/lib/puma-cadastro";
+import { dadosHavaianas, GRUPO_HAVAIANAS } from "@/lib/havaianas-cadastro";
 import { ultimoNome } from "@/lib/identificar-produto";
 
 /**
@@ -639,6 +640,13 @@ export async function gerarCadastroXlsx(
       const pm = dadosPuma(maisRecente.descricao);
       cor = pm.cor;
       nomeProd = pm.calcado ? pm.nome : "";
+    }
+    if (modeloU === "HAVAIANAS") {
+      // Grupo sempre CHINELO; cor depois do código de 4 dígitos; o nome do modelo entra na descrição.
+      const hv = dadosHavaianas(descricao);
+      grupo = GRUPO_HAVAIANAS;
+      cor = hv.cor;
+      nomeProd = hv.nome;
     }
     if (modeloU === "OAKLEY") {
       if (/\bTEE\b/.test(norm(descricao))) grupo = "TSHIRT";
