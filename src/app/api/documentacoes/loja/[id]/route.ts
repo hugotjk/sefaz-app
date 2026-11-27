@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { raizCnpj, razaoCurta, tipoUnidade } from "@/lib/lojas-docs";
+import { nomeComSituacao, raizCnpj, razaoCurta, tipoUnidade } from "@/lib/lojas-docs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -33,8 +33,11 @@ const limpa = (v: unknown) => String(v ?? "").replace(/\s+/g, " ").trim();
 export async function PUT(req: Request, { params }: { params: { id: string } }) {
   try {
     const b = await req.json();
-    const loja = limpa(b.loja).toUpperCase();
-    if (!loja) return NextResponse.json({ error: "Informe o nome da loja." }, { status: 400 });
+    const ativa = b.ativa !== false;
+    const nome = limpa(b.loja).toUpperCase();
+    if (!nome) return NextResponse.json({ error: "Informe o nome da loja." }, { status: 400 });
+    // inativa -> o nome ganha " INATIVA" no fim; reativada -> o sufixo sai
+    const loja = nomeComSituacao(nome, ativa);
     const atual = await prisma.lojaDocumentacao.findUnique({ where: { id: params.id } });
     if (!atual) return NextResponse.json({ error: "Loja não encontrada." }, { status: 404 });
     await prisma.lojaDocumentacao.update({
@@ -44,7 +47,7 @@ export async function PUT(req: Request, { params }: { params: { id: string } }) 
         razaoSocial: limpa(b.razaoSocial) || null,
         gestor: limpa(b.gestor) || null,
         rede: limpa(b.rede) || null,
-        ativa: b.ativa !== false,
+        ativa,
       },
     });
     return NextResponse.json({ ok: true });

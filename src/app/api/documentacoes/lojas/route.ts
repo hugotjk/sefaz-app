@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { normalizarCnpj, raizCnpj, razaoCurta, tipoUnidade } from "@/lib/lojas-docs";
+import { nomeComSituacao, normalizarCnpj, raizCnpj, razaoCurta, tipoUnidade } from "@/lib/lojas-docs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -47,8 +47,10 @@ const limpa = (v: unknown) => String(v ?? "").replace(/\s+/g, " ").trim();
 export async function POST(req: Request) {
   try {
     const b = await req.json();
-    const loja = limpa(b.loja).toUpperCase();
-    if (!loja) return NextResponse.json({ error: "Informe o nome da loja." }, { status: 400 });
+    const ativa = b.ativa !== false;
+    const nome = limpa(b.loja).toUpperCase();
+    if (!nome) return NextResponse.json({ error: "Informe o nome da loja." }, { status: 400 });
+    const loja = nomeComSituacao(nome, ativa);
     const cnpj = normalizarCnpj(b.cnpj);
     if (!cnpj) return NextResponse.json({ error: "CNPJ inválido: informe os 14 dígitos." }, { status: 400 });
     const criada = await prisma.lojaDocumentacao.create({
@@ -58,7 +60,7 @@ export async function POST(req: Request) {
         razaoSocial: limpa(b.razaoSocial) || null,
         gestor: limpa(b.gestor) || null,
         rede: limpa(b.rede) || null,
-        ativa: b.ativa !== false,
+        ativa,
         origem: "MANUAL",
       },
     });

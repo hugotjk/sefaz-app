@@ -81,7 +81,7 @@ export default function DocumentacoesPage() {
   const [busca, setBusca] = useState("");
   const [gestor, setGestor] = useState("");
   const [rede, setRede] = useState("");
-  const [ocultarInativas, setOcultarInativas] = useState(true);
+  const [ocultarInativas, setOcultarInativas] = useState(false);
   const [soFaltando, setSoFaltando] = useState(false);
   const [importando, setImportando] = useState(false);
   const [resultado, setResultado] = useState<ResultadoImport | null>(null);
@@ -187,6 +187,22 @@ export default function DocumentacoesPage() {
     } finally {
       setSalvando(false);
     }
+  }
+
+  async function alternarSituacao(l: Loja) {
+    const inativando = l.ativa;
+    const pergunta = inativando
+      ? `Inativar "${l.loja}"? O nome passa a terminar com INATIVA e a loja continua na lista.`
+      : `Reativar "${l.loja}"? O INATIVA sai do nome.`;
+    if (!confirm(pergunta)) return;
+    const r = await fetch(`/api/documentacoes/loja/${l.id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ loja: l.loja, razaoSocial: l.razaoSocial ?? "", gestor: l.gestor ?? "", rede: l.rede ?? "", ativa: !inativando }),
+    });
+    const j = await r.json();
+    setMsg(r.ok ? { ok: true, texto: inativando ? "Loja inativada." : "Loja reativada." } : { ok: false, texto: j.error || "Não foi possível alterar a loja." });
+    if (r.ok) await carregar();
   }
 
   async function importar(arquivo: File) {
@@ -420,7 +436,6 @@ export default function DocumentacoesPage() {
                   <tr key={l.id} style={l.ativa ? undefined : { opacity: 0.6 }}>
                     <td style={CORTA(300)} title={l.loja}>
                       <Link href={`/documentacoes/${l.id}`}><strong>{l.loja}</strong></Link>
-                      {!l.ativa && <span style={{ marginLeft: 6, fontSize: 11, color: "var(--text-dim)" }}>(inativa)</span>}
                       <a
                         href="#"
                         onClick={(ev) => {
@@ -432,6 +447,13 @@ export default function DocumentacoesPage() {
                         style={{ marginLeft: 8, fontSize: 11.5 }}
                       >
                         editar
+                      </a>
+                      <a
+                        href="#"
+                        onClick={(ev) => { ev.preventDefault(); alternarSituacao(l); }}
+                        style={{ marginLeft: 8, fontSize: 11.5, color: l.ativa ? "var(--red)" : "var(--green)" }}
+                      >
+                        {l.ativa ? "inativar" : "reativar"}
                       </a>
                     </td>
                     <td style={CORTA(300)} title={l.razaoSocial ?? ""}>{l.razaoSocial ?? "—"}</td>
