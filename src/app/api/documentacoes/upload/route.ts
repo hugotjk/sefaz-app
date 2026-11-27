@@ -1,62 +1,50 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/db";
-import { guardarDocumento, guardarNaFila } from "@/lib/docs-storage";
-import { identificar } from "@/lib/identificar-doc";
-import { textoDoPdf } from "@/lib/pdf-texto";
-import { TIPOS_DOC } from "@/lib/lojas-docs";
+import { guardarDocumento } from "@/lib/docs-storage";
+import { TIPOS_DOC, soDigitos } from "@/lib/lojas-docs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-
 /**
- * Recebe arquivos. Sem tipo/CNPJ informados, identifica pelo nome do arquivo;
- * o que não for identificado vai para a fila (_nao-identificados/) para escolha manual.
+ * Recebe arquivos de UM tipo para UMA loja/CNPJ, sempre escolhidos na mão (clique no chip do documento).
+ * Não há identificação automática: tipo e loja/CNPJ vêm do formulário.
  */
 export async function POST(req: Request) {
   try {
     const fd = await req.formData();
     const arquivos = fd.getAll("arquivos").filter((x): x is File => typeof x !== "string");
     if (!arquivos.length) return NextResponse.json({ error: "Nenhum arquivo enviado." }, { status: 400 });
-    const tipoManual = String(fd.get("tipo") ?? "") || null;
-    const cnpjManual = String(fd.get("cnpj") ?? "").replace(/\D/g, "") || null;
-    const lojaIdManual = String(fd.get("lojaId") ?? "") || undefined;
+    const tipo = String(fd.get("tipo") ?? "");
+    const tdef = TIPOS_DOC.find((t) => t.id === tipo);
+    if (!tdef) return NextResponse.json({ error: "Escolha o tipo do documento." }, { status: 400 });
+    const cnpj = soDigitos(fd.get("cnpj"));
+    const lojaId = String(fd.get("lojaId") ?? "") || undefined;
+    if (tdef.escopo === "LOJA" ? !lojaId : cnpj.length !== 14) {
+      return NextResponse.json({ error: "Informe a loja (CNPJ) que vai receber o documento." }, { status: 400 });
+    }
     const todos = fd.get("todosCnpjs") === "1";
     const validadeTxt = String(fd.get("validade") ?? "");
     const validade = /^\d{4}-\d{2}-\d{2}$/.test(validadeTxt) ? new Date(validadeTxt + "T12:00:00Z") : null;
-    if (tipoManual && !TIPOS_DOC.some((t) => t.id === tipoManual)) {
-      return NextResponse.json({ error: "Tipo inválido." }, { status: 400 });
-    }
 
-    const lojas = await prisma.lojaCadastro.findMany({
-      select: { id: true, loja: true, razaoSocial: true, cnpj: true, ativa: true },
-    });
-
-    const resultados: { arquivo: string; status: "guardado" | "repetido" | "pendente" | "erro"; detalhe: string }[] = [];
+    const resultados: { arquivo: string; status: "guardado" | "repetido" | "erro"; detalhe: string }[] = [];
     for (const f of arquivos) {
-      const buffer = Buffer.from(await f.arrayBuffer());
       try {
-        const texto = /\.pdf$/i.test(f.name) ? await textoDoPdf(buffer) : "";
-        const auto = identificar(f.name, lojas, texto);
-        if (auto.aviso && !cnpjManual) {
-          const q = await guardarNaFila(buffer, f.name, f.type || "application/octet-stream");
-          resultados.push({ arquivo: f.name, status: "pendente", detalhe: `Atenção: ${auto.aviso}. ${q.jaEstava ? "Já estava na fila." : "Foi para a fila."}` });
-          continue;
-        }
-        const tipo = tipoManual ?? auto.tipo;
-        const cnpj = cnpjManual ?? auto.cnpj;
-        const tdef = TIPOS_DOC.find((t) => t.id === tipo);
-        const pronto = tdef && (tdef.escopo === "LOJA" ? !!lojaIdManual : !!cnpj);
-        if (!pronto) {
-          const q = await guardarNaFila(buffer, f.name, f.type || "application/octet-stream");
-          resultados.push({ arquivo: f.name, status: "pendente", detalhe: `Não consegui identificar a loja/tipo. ${q.jaEstava ? "Já estava na fila." : "Foi para a fila."}` });
-          continue;
-        }
         const r = await guardarDocumento({
-          buffer, nomeOriginal: f.name, tipo: tipo!, cnpj: cnpj ?? undefined, lojaId: lojaIdManual, validade, todosCnpjsDaEmpresa: todos || (!cnpjManual && auto.todosCnpjs),
+          buffer: Buffer.from(await f.arrayBuffer()),
+          nomeOriginal: f.name,
+          tipo,
+          cnpj: cnpj || undefined,
+          lojaId,
+          validade,
+          todosCnpjsDaEmpresa: todos,
         });
-        resultados.push({ arquivo: f.name, status: r.every((x) => x.jaExistia) ? "repetido" : "guardado", detalhe: (r.every((x) => x.jaExistia) ? "já estava guardado como " : "") + r.map((x) => x.nomeArquivo).join(" | ") + (cnpjManual || !auto.origem ? "" : ` (identificado por: ${auto.origem})`) });
+        const repetido = r.every((x) => x.jaExistia);
+        resultados.push({
+          arquivo: f.name,
+          status: repetido ? "repetido" : "guardado",
+          detalhe: (repetido ? "já estava guardado como " : "") + r.map((x) => x.nomeArquivo).join(" | "),
+        });
       } catch (e: any) {
         resultados.push({ arquivo: f.name, status: "erro", detalhe: e?.message ?? "Erro ao guardar." });
       }

@@ -98,7 +98,7 @@ export default function LojaDocsPage({ params }: { params: { id: string } }) {
         </div>
       )}
       {!loja.cnpj ? (
-        <p>Esta loja não tem CNPJ cadastrado; corrija na planilha e importe de novo.</p>
+        <p>Esta loja não tem CNPJ cadastrado: volte para a lista de Documentações, clique em "editar" e informe o CNPJ.</p>
       ) : (
         <>
           <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 12, flexWrap: "wrap" }}>

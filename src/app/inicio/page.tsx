@@ -22,7 +22,7 @@ export default async function InicioPage() {
     contar(() =>
       prisma.certificate.count({ where: { validUntil: { lte: new Date(Date.now() + 30 * 86400000) } } })
     ),
-    contar(() => prisma.lojaCadastro.count({ where: { ativa: true } })),
+    contar(() => prisma.lojaDocumentacao.count({ where: { ativa: true } })),
   ]);
 
   const cartoes: { href: string; titulo: string; numero: number | null; texto: string; tom?: "warn" | "ok" }[] = [
