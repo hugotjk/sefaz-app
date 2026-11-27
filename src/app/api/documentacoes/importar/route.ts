@@ -96,15 +96,15 @@ export async function POST(req: NextRequest) {
     for (let i = 0; i < lista.length; i += 200) {
       const f = lista.slice(i, i + 200);
       const res = await prisma.$queryRaw<{ inserida: boolean }[]>(Prisma.sql`
-        INSERT INTO "LojaCadastro" (id, cnpj, loja, "razaoSocial", gestor, rede, ativa, origem, "updatedAt")
+        INSERT INTO "LojaDocumentacao" (id, cnpj, loja, "razaoSocial", gestor, rede, ativa, origem, "updatedAt")
         SELECT t.id, t.cnpj, t.loja, NULLIF(t.razao, ''), NULLIF(t.gestor, ''), NULLIF(t.rede, ''), t.ativa, ${origem}::text, NOW()
         FROM unnest(${f.map(() => randomUUID())}::text[], ${f.map((x) => x.cnpj)}::text[], ${f.map((x) => x.loja)}::text[],
           ${f.map((x) => x.razao)}::text[], ${f.map((x) => x.gestor)}::text[], ${f.map((x) => x.rede)}::text[],
           ${f.map((x) => x.ativa)}::boolean[]) AS t(id, cnpj, loja, razao, gestor, rede, ativa)
         ON CONFLICT (cnpj, loja) DO UPDATE SET
-          "razaoSocial" = COALESCE(EXCLUDED."razaoSocial", "LojaCadastro"."razaoSocial"),
-          gestor = COALESCE(EXCLUDED.gestor, "LojaCadastro".gestor),
-          rede = COALESCE(EXCLUDED.rede, "LojaCadastro".rede),
+          "razaoSocial" = COALESCE(EXCLUDED."razaoSocial", "LojaDocumentacao"."razaoSocial"),
+          gestor = COALESCE(EXCLUDED.gestor, "LojaDocumentacao".gestor),
+          rede = COALESCE(EXCLUDED.rede, "LojaDocumentacao".rede),
           ativa = EXCLUDED.ativa, origem = EXCLUDED.origem, "updatedAt" = NOW()
         RETURNING (xmax = 0) AS inserida
       `);

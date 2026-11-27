@@ -96,3 +96,9 @@ export function nomeArquivoDoc(args: {
 
 /** Loja com NRN no NOME da loja fica de fora (NRN só na razão social entra). */
 export const lojaEhNrn = (loja: string) => /NRN/i.test(loja);
+
+/** Nome da loja conforme a situação: inativa leva " INATIVA" no fim; ativa não leva. */
+export function nomeComSituacao(loja: string, ativa: boolean): string {
+  const base = loja.replace(/\s+INATIV[AO]$/i, "").trim();
+  return ativa ? base : `${base} INATIVA`;
+}

@@ -12,7 +12,7 @@ export const maxDuration = 60;
 export async function GET(req: Request) {
   const cnpj = (new URL(req.url).searchParams.get("cnpj") ?? "").replace(/\D/g, "");
   if (cnpj.length !== 14) return NextResponse.json({ error: "CNPJ inválido." }, { status: 400 });
-  const lojas = await prisma.lojaCadastro.findMany({ where: { cnpj } });
+  const lojas = await prisma.lojaDocumentacao.findMany({ where: { cnpj } });
   const razao = lojas.find((l) => l.razaoSocial)?.razaoSocial ?? null;
   const docs = await prisma.documentoLoja.findMany({
     where: { OR: [{ escopo: "CNPJ", chave: cnpj }, { escopo: "LOJA", chave: { in: lojas.map((l) => l.id) } }] },

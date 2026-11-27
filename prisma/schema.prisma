@@ -386,8 +386,25 @@ model LojaCadastro {
   @@index([cnpj])
 }
 
+// Lojas da tela de Documentações (cadastro próprio, manual ou por planilha-modelo). É SEPARADA da
+// LojaCadastro, que alimenta a busca de notas do Qive: mexer numa não muda a outra.
+model LojaDocumentacao {
+  id          String   @id @default(cuid())
+  cnpj        String   @default("") // só dígitos
+  loja        String
+  razaoSocial String?
+  gestor      String?
+  rede        String?
+  ativa       Boolean  @default(true)
+  origem      String // MANUAL | LOJAS (planilha-modelo)
+  updatedAt   DateTime @updatedAt
+
+  @@unique([cnpj, loja])
+  @@index([cnpj])
+}
+
 // Documentos guardados (o arquivo fica no OneDrive; aqui só o registro).
-// escopo EMPRESA -> chave = raiz do CNPJ (8 dígitos); CNPJ -> 14 dígitos; LOJA -> id da LojaCadastro.
+// escopo EMPRESA -> chave = raiz do CNPJ (8 dígitos); CNPJ -> 14 dígitos; LOJA -> id da LojaDocumentacao.
 model DocumentoLoja {
   id          String   @id @default(cuid())
   escopo      String
